@@ -8,7 +8,7 @@ import (
 type WorkflowStatus string
 
 const (
-	WorkflowStatusPending            WorkflowStatus = " PENDING"
+	WorkflowStatusPending            WorkflowStatus = "PENDING"
 	WorkflowStatusRunning            WorkflowStatus = "RUNNING"
 	WorkflowStatusCompensating       WorkflowStatus = "COMPENSATING"
 	WorkflowStatusSuccess            WorkflowStatus = "SUCCESS"

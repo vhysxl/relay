@@ -8,7 +8,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-type Config struct {
+type DBConfig struct {
 	Host     string
 	Port     string
 	User     string
@@ -16,7 +16,7 @@ type Config struct {
 	Database string
 }
 
-func NewMySql(cfg Config) (*sql.DB, error) {
+func NewMySql(cfg DBConfig) (*sql.DB, error) {
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?parseTime=true",
 		cfg.User,
