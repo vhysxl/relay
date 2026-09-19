@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"task/queue/bootstrap/database"
 )
 
@@ -29,10 +30,13 @@ func Init() (*Config, error) {
 	fmt.Println("Database connected successfully")
 
 	// Port
-	port := getEnv("PORT", ":8000")
+	port := getEnv("PORT", "8000")
+	if !strings.HasPrefix(port, ":") {
+		port = ":" + port
+	}
 
 	return &Config{
-		Port: fmt.Sprintf(":%s", port),
+		Port: port,
 		DB:   DB,
 	}, nil
 }

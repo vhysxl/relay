@@ -1,16 +1,16 @@
 package server
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
+	"task/queue/internal/api"
 )
 
-func Listen(port string) error {
+func Listen(port string, db *sql.DB) error {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("Task Queue Server Online")
-	})
+	api.RegisterRoutes(mux, db)
 
 	fmt.Printf("Server is running and listening on port %s\n", port)
 

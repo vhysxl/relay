@@ -18,6 +18,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	defer conf.DB.Close()
 
-	server.Listen(conf.Port)
+	if err := server.Listen(conf.Port, conf.DB); err != nil {
+		log.Fatal(err)
+	}
 }
