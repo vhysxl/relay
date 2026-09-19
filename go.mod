@@ -1,4 +1,4 @@
-module task/queue
+module github.com/vhysxl/relay
 
 go 1.26.1
 

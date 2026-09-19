@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"task/queue/pkg/util"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 type WorkflowHandler struct {

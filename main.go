@@ -2,8 +2,8 @@ package main
 
 import (
 	"log"
-	"task/queue/bootstrap/config"
-	"task/queue/bootstrap/server"
+	"github.com/vhysxl/relay/bootstrap/config"
+	"github.com/vhysxl/relay/bootstrap/server"
 
 	"github.com/joho/godotenv"
 )

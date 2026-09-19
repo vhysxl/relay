@@ -3,8 +3,8 @@ package api
 import (
 	"database/sql"
 	"net/http"
-	"task/queue/internal/workflow"
-	"task/queue/pkg/util"
+	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {

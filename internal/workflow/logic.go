@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"task/queue/pkg/util"
+	"github.com/vhysxl/relay/pkg/util"
 	"time"
 )
 

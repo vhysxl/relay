@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"task/queue/bootstrap/database"
+	"github.com/vhysxl/relay/bootstrap/database"
 )
 
 type Config struct {

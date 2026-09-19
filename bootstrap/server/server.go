@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
-	"task/queue/internal/api"
+	"github.com/vhysxl/relay/internal/api"
 )
 
 func Listen(port string, db *sql.DB) error {
