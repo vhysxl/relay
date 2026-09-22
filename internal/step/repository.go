@@ -486,3 +486,52 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 
 	return &s, &se, nil
 }
+
+// Heartbeat extends the lock lease (locked_until) for a step execution currently running and owned by workerID
+func (r *stepRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
+	if lockDuration <= 0 {
+		lockDuration = DefaultLockDuration
+	}
+
+	query := `
+		UPDATE step_executions
+		SET locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND),
+		    updated_at = NOW()
+		WHERE id = ?
+		  AND locked_by = ?
+		  AND status = 'RUNNING'
+	`
+	lockSeconds := int(lockDuration.Seconds())
+	res, err := r.db.ExecContext(ctx, query, lockSeconds, stepExecutionID, workerID)
+	if err != nil {
+		return fmt.Errorf("failed to update heartbeat: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check affected rows for heartbeat: %w", err)
+	}
+
+	if rows == 0 {
+		// In MySQL, if an UPDATE is executed within the same second, columns may not change value,
+		// causing RowsAffected() to return 0 unless clientFoundRows=true is set in the DSN.
+		// Verify if the row exists and is currently owned by this worker in RUNNING state.
+		var exists bool
+		checkQuery := `
+			SELECT EXISTS(
+				SELECT 1 FROM step_executions
+				WHERE id = ? AND locked_by = ? AND status = 'RUNNING'
+			)
+		`
+		if err := r.db.QueryRowContext(ctx, checkQuery, stepExecutionID, workerID).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to verify lock ownership: %w", err)
+		}
+		if !exists {
+			return ErrLockLost
+		}
+		return nil
+	}
+
+	return nil
+}
+

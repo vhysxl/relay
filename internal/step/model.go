@@ -4,7 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
+)
+
+var (
+	ErrLockLost = errors.New("heartbeat failed: step execution lock lost or not running")
 )
 
 type StepType string
@@ -125,4 +130,5 @@ type StepRepository interface {
 	GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]Step, error)
 	GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error)
 	ClaimNext(ctx context.Context, workerID string, lockDuration time.Duration) (*Step, *StepExecution, error)
+	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
 }

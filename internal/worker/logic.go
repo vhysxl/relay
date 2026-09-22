@@ -5,11 +5,15 @@ import (
 	"errors"
 	"strings"
 
+	"sync"
+	"time"
+
 	"github.com/vhysxl/relay/internal/step"
 )
 
 var (
-	ErrEmptyWorkerID = errors.New("worker id is required to claim step")
+	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")
+	ErrEmptyStepExecutionID = errors.New("step execution id is required for heartbeat")
 )
 
 type workerLogic struct {
@@ -34,4 +38,72 @@ func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Ste
 		return nil, nil, errors.New("step repository is not configured")
 	}
 	return l.stepRepo.ClaimNext(ctx, trimmedWorkerID, step.DefaultLockDuration)
+}
+
+// Heartbeat validates parameters and delegates lease extension to step repository
+func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error {
+	trimmedExecID := strings.TrimSpace(stepExecutionID)
+	if trimmedExecID == "" {
+		return ErrEmptyStepExecutionID
+	}
+	trimmedWorkerID := strings.TrimSpace(workerID)
+	if trimmedWorkerID == "" {
+		return ErrEmptyWorkerID
+	}
+
+	if l.stepRepo == nil {
+		return errors.New("step repository is not configured")
+	}
+
+	return l.stepRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, step.DefaultLockDuration)
+}
+
+// StartHeartbeat begins a background ticker to periodically extend the step execution lease
+// until stop() is called, context is cancelled, or a heartbeat error occurs.
+func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string, workerID string, interval time.Duration) (func(), <-chan error) {
+	if interval <= 0 {
+		interval = DefaultHeartbeatInterval
+	}
+
+	stopChan := make(chan struct{})
+	errChan := make(chan error, 1)
+	var once sync.Once
+
+	stop := func() {
+		once.Do(func() {
+			close(stopChan)
+		})
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				select {
+				case <-stopChan:
+					return
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				if err := l.Heartbeat(ctx, stepExecutionID, workerID); err != nil {
+					select {
+					case errChan <- err:
+					default:
+					}
+					return
+				}
+			}
+		}
+	}()
+
+	return stop, errChan
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 func getTestDB(t *testing.T) *sql.DB {
 	dsn := os.Getenv("TEST_DB_DSN")
 	if dsn == "" {
-		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true"
+		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true&clientFoundRows=true"
 	}
 
 	db, err := sql.Open("mysql", dsn)
@@ -212,3 +213,165 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	}
 	t.Logf("✓ Emergency priority verified: COMPENSATING task (%s) was claimed before normal RUNNING task!", compStep.ID)
 }
+
+func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// 1. Create test workflow and step definition
+	uniqueWorkflowName := "heartbeat-wf-" + uuid.NewString()[:8]
+	stepID := "step-hb-" + uuid.NewString()[:8]
+
+	wfReq := &workflow.WorkflowRequest{
+		Name:    uniqueWorkflowName,
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     stepID,
+				Name:   "Heartbeat Test Step",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"method":"GET","url":"https://api.test/heartbeat"}`),
+			},
+		},
+	}
+
+	wf, err := workflowLogic.CreateWorkflow(ctx, wfReq)
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_definitions WHERE id = ?", wf.ID)
+	}()
+
+	// 2. Create workflow execution and step execution
+	wfExecID := uuid.NewString()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at)
+		VALUES (?, ?, 'RUNNING', NOW(), NOW())
+	`, wfExecID, wf.ID)
+	if err != nil {
+		t.Fatalf("failed to insert workflow execution: %v", err)
+	}
+
+	stepExecID := uuid.NewString()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, status, attempt, created_at, updated_at
+		) VALUES (?, ?, ?, 'Heartbeat Test Step', 'http', '{"method":"GET"}', 'PENDING', 0, NOW(), NOW())
+	`, stepExecID, wfExecID, stepID)
+	if err != nil {
+		t.Fatalf("failed to insert step execution: %v", err)
+	}
+
+	// 3. Worker-1 claims the task
+	_, se, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("worker-1 failed to claim: %v", err)
+	}
+	if se == nil || se.ID != stepExecID {
+		t.Fatalf("expected claimed execution %s, got %+v", stepExecID, se)
+	}
+
+	// Fetch initial locked_until from DB
+	var initialLockedUntil time.Time
+	err = db.QueryRowContext(ctx, "SELECT locked_until FROM step_executions WHERE id = ?", stepExecID).Scan(&initialLockedUntil)
+	if err != nil {
+		t.Fatalf("failed to read initial locked_until: %v", err)
+	}
+	t.Logf("✓ Claimed task initial locked_until: %s", initialLockedUntil.Format(time.RFC3339))
+
+	// 4. Wait 1 second and send heartbeat from worker-1
+	time.Sleep(1 * time.Second)
+	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-1")
+	if err != nil {
+		t.Fatalf("worker-1 heartbeat failed: %v", err)
+	}
+
+	var extendedLockedUntil time.Time
+	err = db.QueryRowContext(ctx, "SELECT locked_until FROM step_executions WHERE id = ?", stepExecID).Scan(&extendedLockedUntil)
+	if err != nil {
+		t.Fatalf("failed to read extended locked_until: %v", err)
+	}
+	t.Logf("✓ Extended locked_until: %s", extendedLockedUntil.Format(time.RFC3339))
+
+	if !extendedLockedUntil.After(initialLockedUntil) {
+		t.Fatalf("expected extended locked_until (%s) to be after initial (%s)",
+			extendedLockedUntil.Format(time.RFC3339), initialLockedUntil.Format(time.RFC3339))
+	}
+	t.Logf("✓ Verified locked_until successfully extended by Heartbeat")
+
+	// 5. Worker-2 tries to heartbeat the same execution -> should fail with ErrLockLost
+	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-2")
+	if !errors.Is(err, step.ErrLockLost) {
+		t.Fatalf("expected ErrLockLost for unauthorized worker-2, got %v", err)
+	}
+	t.Logf("✓ Verified unauthorized worker cannot heartbeat")
+
+	// 6. Complete the step and verify heartbeat fails with ErrLockLost
+	_, err = db.ExecContext(ctx, "UPDATE step_executions SET status = 'COMPLETED' WHERE id = ?", stepExecID)
+	if err != nil {
+		t.Fatalf("failed to update status: %v", err)
+	}
+	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-1")
+	if !errors.Is(err, step.ErrLockLost) {
+		t.Fatalf("expected ErrLockLost for completed step, got %v", err)
+	}
+	t.Logf("✓ Verified completed step execution rejects heartbeat")
+
+	// 7. Test interval StartHeartbeat with real database
+	stepExecID2 := uuid.NewString()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, status, attempt, created_at, updated_at
+		) VALUES (?, ?, ?, 'Interval Test Step', 'http', '{"method":"GET"}', 'PENDING', 0, NOW(), NOW())
+	`, stepExecID2, wfExecID, stepID)
+	if err != nil {
+		t.Fatalf("failed to insert step execution 2: %v", err)
+	}
+
+	_, se2, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se2 == nil || se2.ID != stepExecID2 {
+		t.Fatalf("failed to claim step 2: %v, se2=%+v", err, se2)
+	}
+
+	var intervalInitialLocked time.Time
+	err = db.QueryRowContext(ctx, "SELECT locked_until FROM step_executions WHERE id = ?", stepExecID2).Scan(&intervalInitialLocked)
+	if err != nil {
+		t.Fatalf("failed to read initial locked_until for step 2: %v", err)
+	}
+
+	// Start periodic heartbeat every 1s
+	stop, errChan := workerLogic.StartHeartbeat(ctx, stepExecID2, "worker-1", 1*time.Second)
+	// Wait 2.2 seconds to allow at least 2 ticks to fire and extend the lease
+	time.Sleep(2200 * time.Millisecond)
+	stop()
+
+	select {
+	case hbErr := <-errChan:
+		t.Fatalf("unexpected error from StartHeartbeat: %v", hbErr)
+	default:
+	}
+
+	var intervalFinalLocked time.Time
+	err = db.QueryRowContext(ctx, "SELECT locked_until FROM step_executions WHERE id = ?", stepExecID2).Scan(&intervalFinalLocked)
+	if err != nil {
+		t.Fatalf("failed to read final locked_until for step 2: %v", err)
+	}
+	t.Logf("✓ Interval heartbeat: initial=%s, final=%s",
+		intervalInitialLocked.Format(time.RFC3339), intervalFinalLocked.Format(time.RFC3339))
+
+	if !intervalFinalLocked.After(intervalInitialLocked) {
+		t.Fatalf("expected final locked_until (%s) to be after initial (%s)",
+			intervalFinalLocked.Format(time.RFC3339), intervalInitialLocked.Format(time.RFC3339))
+	}
+	t.Logf("✓ Verified StartHeartbeat ticker continuously kept lease alive in database!")
+}
+
