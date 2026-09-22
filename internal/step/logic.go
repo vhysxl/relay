@@ -18,17 +18,13 @@ var (
 	ErrInvalidCompensation = errors.New("invalid compensation configuration")
 )
 
-type StepLogic interface {
-	ValidateSteps(steps []Step) error
+type stepValidator struct{}
+
+func NewStepValidator() StepValidator {
+	return &stepValidator{}
 }
 
-type stepLogic struct{}
-
-func NewStepLogic() StepLogic {
-	return &stepLogic{}
-}
-
-func (l *stepLogic) ValidateSteps(steps []Step) error {
+func (v *stepValidator) ValidateSteps(steps []Step) error {
 	if len(steps) == 0 {
 		return nil
 	}

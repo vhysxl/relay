@@ -19,16 +19,13 @@ var (
 
 type workflowLogic struct {
 	repo      WorkflowRepository
-	stepLogic step.StepLogic
+	validator step.StepValidator
 }
 
-func NewWorkflowLogic(repo WorkflowRepository, stepLogic step.StepLogic) WorkflowLogic {
-	if stepLogic == nil {
-		stepLogic = step.NewStepLogic()
-	}
+func NewWorkflowLogic(repo WorkflowRepository, validator step.StepValidator) WorkflowLogic {
 	return &workflowLogic{
 		repo:      repo,
-		stepLogic: stepLogic,
+		validator: validator,
 	}
 }
 
@@ -77,8 +74,8 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		}
 	}
 
-	if len(steps) > 0 && l.stepLogic != nil {
-		if err := l.stepLogic.ValidateSteps(steps); err != nil {
+	if len(steps) > 0 && l.validator != nil {
+		if err := l.validator.ValidateSteps(steps); err != nil {
 			return nil, err
 		}
 	}

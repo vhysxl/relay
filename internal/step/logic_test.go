@@ -6,7 +6,7 @@ import (
 )
 
 func TestValidateSteps_Empty(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	if err := logic.ValidateSteps(nil); err != nil {
 		t.Fatalf("expected nil for empty steps, got %v", err)
 	}
@@ -16,7 +16,7 @@ func TestValidateSteps_Empty(t *testing.T) {
 }
 
 func TestValidateSteps_LinearDAG(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",
@@ -43,7 +43,7 @@ func TestValidateSteps_LinearDAG(t *testing.T) {
 }
 
 func TestValidateSteps_BranchingDAG(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	// Diamond: A -> B, A -> C, B+C -> D
 	steps := []Step{
 		{
@@ -77,7 +77,7 @@ func TestValidateSteps_BranchingDAG(t *testing.T) {
 }
 
 func TestValidateSteps_SelfDependency(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:        "step-1",
@@ -94,7 +94,7 @@ func TestValidateSteps_SelfDependency(t *testing.T) {
 }
 
 func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:        "step-1",
@@ -117,7 +117,7 @@ func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
 }
 
 func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:        "step-1",
@@ -146,7 +146,7 @@ func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
 }
 
 func TestValidateSteps_MissingDependency(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:        "step-1",
@@ -163,7 +163,7 @@ func TestValidateSteps_MissingDependency(t *testing.T) {
 }
 
 func TestValidateSteps_DuplicateID(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",
@@ -184,7 +184,7 @@ func TestValidateSteps_DuplicateID(t *testing.T) {
 }
 
 func TestValidateSteps_InvalidType(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",
@@ -206,7 +206,7 @@ func TestValidateSteps_InvalidType(t *testing.T) {
 }
 
 func TestValidateSteps_InvalidConfig(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",
@@ -228,7 +228,7 @@ func TestValidateSteps_InvalidConfig(t *testing.T) {
 }
 
 func TestValidateSteps_RetryPolicy(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",
@@ -258,7 +258,7 @@ func TestValidateSteps_RetryPolicy(t *testing.T) {
 }
 
 func TestValidateSteps_Compensation(t *testing.T) {
-	logic := NewStepLogic()
+	logic := NewStepValidator()
 	steps := []Step{
 		{
 			ID:     "step-1",

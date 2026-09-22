@@ -11,10 +11,10 @@ import (
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 	stepRepo := step.NewStepRepository(db)
-	stepLogic := step.NewStepLogic()
+	stepValidator := step.NewStepValidator()
 
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepLogic)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
 	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {

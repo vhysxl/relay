@@ -32,7 +32,7 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*Workflow,
 
 func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 
 	// Test empty name
 	_, err := logic.CreateWorkflow(context.Background(), &WorkflowRequest{
@@ -83,7 +83,7 @@ func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 
 func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 
 	// Valid steps
 	wf, err := logic.CreateWorkflow(context.Background(), &WorkflowRequest{
@@ -142,7 +142,7 @@ func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 
 func TestWorkflowLogic_GetWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 
 	_, err := logic.GetWorkflow(context.Background(), "")
 	if err != ErrInvalidWorkflowID {
@@ -156,7 +156,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 			return wf, nil
 		},
 	}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 	handler := NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(WorkflowRequest{
@@ -199,7 +199,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 
 func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 	handler := NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(WorkflowRequest{
@@ -249,7 +249,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 			return nil, ErrWorkflowNotFound
 		},
 	}
-	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
 	handler := NewWorkflowHandler(logic)
 
 	// Test found

@@ -1,6 +1,8 @@
 package step
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -104,6 +106,23 @@ type StepExecution struct {
 	LockedBy    *string    `json:"locked_by,omitempty" db:"locked_by"`
 	LockedUntil *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 
+	IsCompensation bool       `json:"is_compensation" db:"is_compensation"`
+	ExecutedAt     *time.Time `json:"executed_at,omitempty" db:"executed_at"`
+	NextRetryAt    *time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
+
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+}
+
+const DefaultLockDuration = 30 * time.Second
+
+type StepValidator interface {
+	ValidateSteps(steps []Step) error
+}
+
+type StepRepository interface {
+	CreateStepsTx(ctx context.Context, tx *sql.Tx, workflowID string, steps []Step) error
+	GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]Step, error)
+	GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error)
+	ClaimNext(ctx context.Context, workerID string, lockDuration time.Duration) (*Step, *StepExecution, error)
 }
