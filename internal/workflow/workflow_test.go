@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/vhysxl/relay/internal/step"
 )
 
 type mockRepository struct {
@@ -30,7 +32,7 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*Workflow,
 
 func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo)
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
 
 	// Test empty name
 	_, err := logic.CreateWorkflow(context.Background(), &WorkflowRequest{
@@ -79,9 +81,68 @@ func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 	}
 }
 
+func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
+	repo := &mockRepository{}
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+
+	// Valid steps
+	wf, err := logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:    "order-flow",
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     "step-1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+			},
+			{
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
+				DependsOn: []string{"step-1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(wf.Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(wf.Steps))
+	}
+	if wf.Steps[0].WorkflowID != wf.ID || wf.Steps[1].WorkflowID != wf.ID {
+		t.Errorf("expected step WorkflowID to be %s", wf.ID)
+	}
+	if wf.Steps[1].ID == "" {
+		t.Errorf("expected step 2 to have auto-generated ID")
+	}
+
+	// Cyclic steps
+	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:    "cyclic-flow",
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:        "step-a",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"step-b"},
+			},
+			{
+				ID:        "step-b",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"step-a"},
+			},
+		},
+	})
+	if err != step.ErrCyclicDependency {
+		t.Fatalf("expected ErrCyclicDependency, got %v", err)
+	}
+}
+
 func TestWorkflowLogic_GetWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := NewWorkflowLogic(repo)
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
 
 	_, err := logic.GetWorkflow(context.Background(), "")
 	if err != ErrInvalidWorkflowID {
@@ -95,13 +156,20 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 			return wf, nil
 		},
 	}
-	logic := NewWorkflowLogic(repo)
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
 	handler := NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(WorkflowRequest{
 		Name:    "order-saga",
 		Version: 2,
 		Context: json.RawMessage(`{"max_retries":3}`),
+		Steps: []step.Step{
+			{
+				ID:     "step-1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+			},
+		},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
@@ -124,6 +192,37 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 	if created.Status != WorkflowStatusPending {
 		t.Errorf("expected PENDING, got %s", created.Status)
 	}
+	if len(created.Steps) != 1 {
+		t.Errorf("expected 1 step, got %d", len(created.Steps))
+	}
+}
+
+func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
+	repo := &mockRepository{}
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
+	handler := NewWorkflowHandler(logic)
+
+	body, _ := json.Marshal(WorkflowRequest{
+		Name:    "order-saga",
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:        "step-1",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"step-1"}, // Self dependency
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.CreateWorkflow(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", rec.Code)
+	}
 }
 
 func TestWorkflowHandler_GetWorkflow(t *testing.T) {
@@ -132,6 +231,14 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		Name:    "order-saga",
 		Version: 1,
 		Status:  WorkflowStatusPending,
+		Steps: []step.Step{
+			{
+				ID:         "step-1",
+				WorkflowID: "test-uuid-1234",
+				Type:       step.StepTypeHTTP,
+				Config:     json.RawMessage(`{}`),
+			},
+		},
 	}
 
 	repo := &mockRepository{
@@ -142,7 +249,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 			return nil, ErrWorkflowNotFound
 		},
 	}
-	logic := NewWorkflowLogic(repo)
+	logic := NewWorkflowLogic(repo, step.NewStepLogic())
 	handler := NewWorkflowHandler(logic)
 
 	// Test found
@@ -154,6 +261,14 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	var fetched Workflow
+	if err := json.NewDecoder(rec.Body).Decode(&fetched); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(fetched.Steps) != 1 || fetched.Steps[0].ID != "step-1" {
+		t.Errorf("expected 1 step with id step-1, got %+v", fetched.Steps)
 	}
 
 	// Test not found

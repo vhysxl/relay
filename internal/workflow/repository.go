@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/vhysxl/relay/internal/step"
 )
 
 var (
@@ -15,14 +16,24 @@ var (
 )
 
 type workflowRepository struct {
-	db *sql.DB
+	db       *sql.DB
+	stepRepo step.StepRepository
 }
 
-func NewWorkflowRepository(db *sql.DB) WorkflowRepository {
-	return &workflowRepository{db: db}
+func NewWorkflowRepository(db *sql.DB, stepRepo step.StepRepository) WorkflowRepository {
+	return &workflowRepository{
+		db:       db,
+		stepRepo: stepRepo,
+	}
 }
 
 func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (*Workflow, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	query := `
 		INSERT INTO workflow_definitions (id, name, version, status, hash, context, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -35,7 +46,7 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 		contextVal = nil
 	}
 
-	_, err := r.db.ExecContext(
+	_, err = tx.ExecContext(
 		ctx,
 		query,
 		wf.ID,
@@ -52,6 +63,16 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
 			return nil, ErrWorkflowAlreadyExists
 		}
+		return nil, err
+	}
+
+	if len(wf.Steps) > 0 && r.stepRepo != nil {
+		if err := r.stepRepo.CreateStepsTx(ctx, tx, wf.ID, wf.Steps); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 
@@ -91,6 +112,14 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 	wf.Status = WorkflowStatus(statusStr)
 	if contextData.Valid && len(contextData.String) > 0 {
 		wf.Context = json.RawMessage(contextData.String)
+	}
+
+	if r.stepRepo != nil {
+		steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, wf.ID)
+		if err != nil {
+			return nil, err
+		}
+		wf.Steps = steps
 	}
 
 	return &wf, nil

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"github.com/vhysxl/relay/pkg/util"
 	"time"
+
+	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 var (
@@ -16,11 +18,18 @@ var (
 )
 
 type workflowLogic struct {
-	repo WorkflowRepository
+	repo      WorkflowRepository
+	stepLogic step.StepLogic
 }
 
-func NewWorkflowLogic(repo WorkflowRepository) WorkflowLogic {
-	return &workflowLogic{repo: repo}
+func NewWorkflowLogic(repo WorkflowRepository, stepLogic step.StepLogic) WorkflowLogic {
+	if stepLogic == nil {
+		stepLogic = step.NewStepLogic()
+	}
+	return &workflowLogic{
+		repo:      repo,
+		stepLogic: stepLogic,
+	}
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
@@ -50,9 +59,31 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 	}
 
 	id := util.GenerateUUID()
+	now := time.Now().UTC()
+
+	steps := make([]step.Step, len(req.Steps))
+	copy(steps, req.Steps)
+
+	for i := range steps {
+		if strings.TrimSpace(steps[i].ID) == "" {
+			steps[i].ID = util.GenerateUUID()
+		}
+		steps[i].WorkflowID = id
+		if steps[i].CreatedAt.IsZero() {
+			steps[i].CreatedAt = now
+		}
+		if steps[i].UpdatedAt.IsZero() {
+			steps[i].UpdatedAt = now
+		}
+	}
+
+	if len(steps) > 0 && l.stepLogic != nil {
+		if err := l.stepLogic.ValidateSteps(steps); err != nil {
+			return nil, err
+		}
+	}
 
 	hash := util.GenerateWorkflowHash(name, version, ctxBytes)
-	now := time.Now().UTC()
 
 	wf := &Workflow{
 		ID:        id,
@@ -63,6 +94,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		Context:   ctxBytes,
 		CreatedAt: now,
 		UpdatedAt: now,
+		Steps:     steps,
 	}
 
 	return l.repo.CreateWorkflow(ctx, wf)

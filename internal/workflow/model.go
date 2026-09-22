@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/vhysxl/relay/internal/step"
 )
 
 type WorkflowStatus string
@@ -22,7 +24,7 @@ type WorkflowRequest struct {
 	Name    string          `json:"name"`
 	Version int             `json:"version"`
 	Context json.RawMessage `json:"context,omitempty"`
-	// Steps []
+	Steps   []step.Step     `json:"steps"`
 }
 
 type Workflow struct {
@@ -34,7 +36,7 @@ type Workflow struct {
 	Context   json.RawMessage `json:"context,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
-	// Steps[]
+	Steps     []step.Step     `json:"steps"`
 }
 
 type WorkflowLogic interface {
@@ -47,4 +49,3 @@ type WorkflowRepository interface {
 	GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
 	// DeleteWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
 }
-

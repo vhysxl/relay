@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+
+	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
@@ -29,7 +31,17 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 	wf, err := h.logic.CreateWorkflow(r.Context(), &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidWorkflowName), errors.Is(err, ErrInvalidWorkflowContext):
+		case errors.Is(err, ErrInvalidWorkflowName),
+			errors.Is(err, ErrInvalidWorkflowContext),
+			errors.Is(err, step.ErrEmptyStepType),
+			errors.Is(err, step.ErrInvalidStepType),
+			errors.Is(err, step.ErrInvalidStepConfig),
+			errors.Is(err, step.ErrDuplicateStepID),
+			errors.Is(err, step.ErrDependencyNotFound),
+			errors.Is(err, step.ErrSelfDependency),
+			errors.Is(err, step.ErrCyclicDependency),
+			errors.Is(err, step.ErrInvalidRetryPolicy),
+			errors.Is(err, step.ErrInvalidCompensation):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		case errors.Is(err, ErrWorkflowAlreadyExists):
 			util.WriteJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})

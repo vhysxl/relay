@@ -3,13 +3,18 @@ package api
 import (
 	"database/sql"
 	"net/http"
+
+	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
-	workflowRepo := workflow.NewWorkflowRepository(db)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo)
+	stepRepo := step.NewStepRepository(db)
+	stepLogic := step.NewStepLogic()
+
+	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepLogic)
 	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
