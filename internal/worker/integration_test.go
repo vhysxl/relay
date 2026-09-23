@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -718,6 +719,113 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	}
 	t.Logf("✓ Full End-to-End Cycle (Create -> Trigger -> Claim -> Complete) verified!")
 }
+
+type integrationMockExecutor struct{}
+
+func (e *integrationMockExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+	return json.RawMessage(`{"processed":true}`), nil
+}
+
+func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
+	wfName := "parallel-pool-wf-" + uuid.NewString()[:8]
+	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
+		Name:    wfName,
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     "task-1",
+				Name:   "Task 1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/1"}`),
+			},
+			{
+				ID:     "task-2",
+				Name:   "Task 2",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/2"}`),
+			},
+			{
+				ID:     "task-3",
+				Name:   "Task 3",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/3"}`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	// 2. Setup registry with mock HTTP executor
+	reg := executor.NewRegistry()
+	reg.Register(step.StepTypeHTTP, &integrationMockExecutor{})
+
+	// 3. Start WorkerPool with fixed 3 workers
+	pool := worker.NewWorkerPool(
+		workerLogic,
+		reg,
+		worker.WithBaseID("pool-worker"),
+		worker.WithWorkerCount(3),
+		worker.WithPollInterval(20*time.Millisecond),
+	)
+
+	poolDone := make(chan error, 1)
+	go func() {
+		poolDone <- pool.Start(ctx)
+	}()
+
+	// 4. Trigger workflow execution
+	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, &workflow.ExecuteWorkflowRequest{
+		Context: json.RawMessage(`{"batch_id":"batch-123"}`),
+	})
+	if err != nil {
+		t.Fatalf("failed to execute workflow: %v", err)
+	}
+
+	// 5. Poll for workflow completion (up to 5 seconds)
+	deadline := time.Now().Add(5 * time.Second)
+	completed := false
+	for time.Now().Before(deadline) {
+		var status string
+		_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&status)
+		if status == "COMPLETED" {
+			completed = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !completed {
+		t.Fatalf("timed out waiting for 3 parallel workers to complete workflow")
+	}
+
+	// 6. Cancel pool and verify clean shutdown
+	cancel()
+	select {
+	case err := <-poolDone:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("unexpected pool shutdown error: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timed out waiting for pool to shut down")
+	}
+
+	t.Logf("✓ Fixed 3 WorkerPool successfully processed 3 parallel tasks and completed workflow %s!", wfExec.ID)
+}
+
 
 
 

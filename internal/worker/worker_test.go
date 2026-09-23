@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -447,5 +448,260 @@ func TestWorkerLogic_FailStep_LockLost(t *testing.T) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
 	}
 }
+
+type mockExecutor struct {
+	executeFn func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error)
+}
+
+func (m *mockExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+	if m.executeFn != nil {
+		return m.executeFn(ctx, s, exec)
+	}
+	return json.RawMessage(`{"status":"ok"}`), nil
+}
+
+func TestWorkerPool_ProcessOne_Success(t *testing.T) {
+	completed := false
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			return &step.Step{
+					ID:   "step-1",
+					Type: step.StepTypeHTTP,
+				}, &step.StepExecution{
+					ID:     "exec-1",
+					StepID: "step-1",
+					Type:   string(step.StepTypeHTTP),
+				}, nil
+		},
+		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+			completed = true
+			if stepExecutionID != "exec-1" {
+				t.Errorf("expected exec-1, got %s", stepExecutionID)
+			}
+			if workerID != "test-worker-1" {
+				t.Errorf("expected test-worker-1, got %s", workerID)
+			}
+			if string(output) != `{"result":"success"}` {
+				t.Errorf("unexpected output: %s", string(output))
+			}
+			return nil
+		},
+	}
+
+	reg := executor.NewRegistry()
+	reg.Register(step.StepTypeHTTP, &mockExecutor{
+		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+			return json.RawMessage(`{"result":"success"}`), nil
+		},
+	})
+
+	logic := NewWorkerLogic(repo)
+	pool := NewWorkerPool(logic, reg, WithBaseID("test-worker"))
+
+	processed, err := pool.ProcessOne(context.Background(), "test-worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !processed {
+		t.Fatalf("expected task to be processed")
+	}
+	if !completed {
+		t.Fatalf("expected task to be marked completed")
+	}
+}
+
+func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
+	failed := false
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			return &step.Step{
+					ID:   "step-1",
+					Type: step.StepTypeHTTP,
+				}, &step.StepExecution{
+					ID:   "exec-1",
+					Type: string(step.StepTypeHTTP),
+				}, nil
+		},
+		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+			failed = true
+			if errMsg != "network error: connection refused" {
+				t.Errorf("unexpected errMsg: %s", errMsg)
+			}
+			return nil
+		},
+	}
+
+	reg := executor.NewRegistry()
+	reg.Register(step.StepTypeHTTP, &mockExecutor{
+		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+			return nil, errors.New("network error: connection refused")
+		},
+	})
+
+	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+	processed, err := pool.ProcessOne(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !processed || !failed {
+		t.Fatalf("expected task to be processed and failed")
+	}
+}
+
+func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
+	failed := false
+	var capturedErr string
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			return &step.Step{
+					ID:   "step-panic",
+					Type: step.StepTypeHTTP,
+				}, &step.StepExecution{
+					ID:   "exec-panic",
+					Type: string(step.StepTypeHTTP),
+				}, nil
+		},
+		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+			failed = true
+			capturedErr = errMsg
+			return nil
+		},
+	}
+
+	reg := executor.NewRegistry()
+	reg.Register(step.StepTypeHTTP, &mockExecutor{
+		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+			panic("unexpected nil pointer in plugin")
+		},
+	})
+
+	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+	processed, err := pool.ProcessOne(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !processed || !failed {
+		t.Fatalf("expected task to be processed and failed")
+	}
+	if capturedErr != "panic in step execution: unexpected nil pointer in plugin" {
+		t.Errorf("unexpected panic capture message: %s", capturedErr)
+	}
+}
+
+func TestWorkerPool_ProcessOne_UnsupportedType(t *testing.T) {
+	failed := false
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			return &step.Step{
+					ID:   "step-kafka",
+					Type: step.StepType("kafka"),
+				}, &step.StepExecution{
+					ID:   "exec-kafka",
+					Type: "kafka",
+				}, nil
+		},
+		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+			failed = true
+			return nil
+		},
+	}
+
+	// Registry is empty (kafka is not registered)
+	reg := executor.NewRegistry()
+	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+
+	processed, err := pool.ProcessOne(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !processed || !failed {
+		t.Fatalf("expected task to be processed and failed for unsupported type")
+	}
+}
+
+func TestWorkerPool_Start_Fixed3Concurrency(t *testing.T) {
+	var (
+		worker1Called int32
+		worker2Called int32
+		worker3Called int32
+	)
+
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			switch workerID {
+			case "test-fixed-1":
+				atomic.AddInt32(&worker1Called, 1)
+			case "test-fixed-2":
+				atomic.AddInt32(&worker2Called, 1)
+			case "test-fixed-3":
+				atomic.AddInt32(&worker3Called, 1)
+			}
+			return nil, nil, nil // Queue empty
+		},
+	}
+
+	reg := executor.NewRegistry()
+	pool := NewWorkerPool(
+		NewWorkerLogic(repo),
+		reg,
+		WithBaseID("test-fixed"),
+		WithWorkerCount(3),
+		WithPollInterval(10*time.Millisecond),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_ = pool.Start(ctx)
+	}()
+
+	// Allow workers to poll several times
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Verify all 3 fixed workers actively polled
+	w1 := atomic.LoadInt32(&worker1Called)
+	w2 := atomic.LoadInt32(&worker2Called)
+	w3 := atomic.LoadInt32(&worker3Called)
+
+	if w1 == 0 || w2 == 0 || w3 == 0 {
+		t.Errorf("expected all 3 workers to poll, got w1=%d, w2=%d, w3=%d", w1, w2, w3)
+	}
+}
+
+func TestWorkerPool_Start_GracefulShutdown(t *testing.T) {
+	repo := &mockStepRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+			return nil, nil, nil
+		},
+	}
+
+	pool := NewWorkerPool(
+		NewWorkerLogic(repo),
+		executor.NewRegistry(),
+		WithWorkerCount(3),
+		WithPollInterval(10*time.Millisecond),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pool.Start(ctx)
+	}()
+
+	// Cancel context and verify pool exits cleanly
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatalf("worker pool failed to gracefully shut down within timeout")
+	}
+}
+
 
 
