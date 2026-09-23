@@ -131,4 +131,6 @@ type StepRepository interface {
 	GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error)
 	ClaimNext(ctx context.Context, workerID string, lockDuration time.Duration) (*Step, *StepExecution, error)
 	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
+	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
+	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }

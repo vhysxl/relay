@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,8 @@ import (
 type mockStepRepository struct {
 	claimFunc     func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error)
 	heartbeatFunc func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
+	completeFunc  func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
+	failFunc      func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
 
 func (m *mockStepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflowID string, steps []step.Step) error {
@@ -38,6 +41,20 @@ func (m *mockStepRepository) ClaimNext(ctx context.Context, workerID string, loc
 func (m *mockStepRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
 	if m.heartbeatFunc != nil {
 		return m.heartbeatFunc(ctx, stepExecutionID, workerID, lockDuration)
+	}
+	return nil
+}
+
+func (m *mockStepRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+	if m.completeFunc != nil {
+		return m.completeFunc(ctx, stepExecutionID, workerID, output)
+	}
+	return nil
+}
+
+func (m *mockStepRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+	if m.failFunc != nil {
+		return m.failFunc(ctx, stepExecutionID, workerID, errMsg)
 	}
 	return nil
 }
@@ -269,4 +286,166 @@ func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
 	cancel()
 	time.Sleep(30 * time.Millisecond)
 }
+
+func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
+	logic := NewWorkerLogic(&mockStepRepository{})
+
+	// Empty stepExecutionID
+	err := logic.CompleteStep(context.Background(), "", "worker-1", json.RawMessage("{}"))
+	if !errors.Is(err, ErrEmptyStepExecutionID) {
+		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
+	}
+	err = logic.CompleteStep(context.Background(), "   ", "worker-1", json.RawMessage("{}"))
+	if !errors.Is(err, ErrEmptyStepExecutionID) {
+		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
+	}
+
+	// Empty workerID
+	err = logic.CompleteStep(context.Background(), "exec-1", "", json.RawMessage("{}"))
+	if !errors.Is(err, ErrEmptyWorkerID) {
+		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
+	}
+	err = logic.CompleteStep(context.Background(), "exec-1", "   ", json.RawMessage("{}"))
+	if !errors.Is(err, ErrEmptyWorkerID) {
+		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
+	}
+
+	// Invalid JSON output
+	err = logic.CompleteStep(context.Background(), "exec-1", "worker-1", json.RawMessage("{invalid-json"))
+	if !errors.Is(err, ErrInvalidStepOutput) {
+		t.Fatalf("expected ErrInvalidStepOutput, got %v", err)
+	}
+
+	// Nil repository
+	nilLogic := NewWorkerLogic(nil)
+	err = nilLogic.CompleteStep(context.Background(), "exec-1", "worker-1", json.RawMessage("{}"))
+	if err == nil {
+		t.Fatalf("expected error for nil repository, got nil")
+	}
+}
+
+func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
+	called := false
+	repo := &mockStepRepository{
+		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+			called = true
+			if stepExecutionID != "exec-123" {
+				t.Errorf("expected exec-123, got %s", stepExecutionID)
+			}
+			if workerID != "worker-1" {
+				t.Errorf("expected worker-1, got %s", workerID)
+			}
+			if string(output) != `{"status":"ok"}` {
+				t.Errorf("unexpected output: %s", string(output))
+			}
+			return nil
+		},
+	}
+
+	logic := NewWorkerLogic(repo)
+	err := logic.CompleteStep(context.Background(), "  exec-123  ", "  worker-1  ", json.RawMessage(`{"status":"ok"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected completeFunc to be called")
+	}
+}
+
+func TestWorkerLogic_CompleteStep_LockLost(t *testing.T) {
+	repo := &mockStepRepository{
+		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+			return step.ErrLockLost
+		},
+	}
+
+	logic := NewWorkerLogic(repo)
+	err := logic.CompleteStep(context.Background(), "exec-123", "worker-1", json.RawMessage("{}"))
+	if !errors.Is(err, step.ErrLockLost) {
+		t.Fatalf("expected ErrLockLost, got %v", err)
+	}
+}
+
+func TestWorkerLogic_FailStep_Validation(t *testing.T) {
+	logic := NewWorkerLogic(&mockStepRepository{})
+
+	// Empty stepExecutionID
+	err := logic.FailStep(context.Background(), "", "worker-1", "some error")
+	if !errors.Is(err, ErrEmptyStepExecutionID) {
+		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
+	}
+	err = logic.FailStep(context.Background(), "   ", "worker-1", "some error")
+	if !errors.Is(err, ErrEmptyStepExecutionID) {
+		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
+	}
+
+	// Empty workerID
+	err = logic.FailStep(context.Background(), "exec-1", "", "some error")
+	if !errors.Is(err, ErrEmptyWorkerID) {
+		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
+	}
+	err = logic.FailStep(context.Background(), "exec-1", "   ", "some error")
+	if !errors.Is(err, ErrEmptyWorkerID) {
+		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
+	}
+
+	// Nil repository
+	nilLogic := NewWorkerLogic(nil)
+	err = nilLogic.FailStep(context.Background(), "exec-1", "worker-1", "some error")
+	if err == nil {
+		t.Fatalf("expected error for nil repository, got nil")
+	}
+}
+
+func TestWorkerLogic_FailStep_Success(t *testing.T) {
+	called := false
+	repo := &mockStepRepository{
+		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+			called = true
+			if stepExecutionID != "exec-123" {
+				t.Errorf("expected exec-123, got %s", stepExecutionID)
+			}
+			if workerID != "worker-1" {
+				t.Errorf("expected worker-1, got %s", workerID)
+			}
+			if errMsg != "step timed out" {
+				t.Errorf("expected 'step timed out', got %s", errMsg)
+			}
+			return nil
+		},
+	}
+
+	logic := NewWorkerLogic(repo)
+	err := logic.FailStep(context.Background(), "  exec-123  ", "  worker-1  ", "step timed out")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected failFunc to be called")
+	}
+
+	// Empty error message defaults to "unknown error"
+	repo.failFunc = func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+		if errMsg != "unknown error" {
+			t.Errorf("expected 'unknown error', got %s", errMsg)
+		}
+		return nil
+	}
+	_ = logic.FailStep(context.Background(), "exec-123", "worker-1", "   ")
+}
+
+func TestWorkerLogic_FailStep_LockLost(t *testing.T) {
+	repo := &mockStepRepository{
+		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+			return step.ErrLockLost
+		},
+	}
+
+	logic := NewWorkerLogic(repo)
+	err := logic.FailStep(context.Background(), "exec-123", "worker-1", "error")
+	if !errors.Is(err, step.ErrLockLost) {
+		t.Fatalf("expected ErrLockLost, got %v", err)
+	}
+}
+
 

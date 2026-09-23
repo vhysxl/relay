@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -534,4 +535,293 @@ func (r *stepRepository) Heartbeat(ctx context.Context, stepExecutionID string, 
 
 	return nil
 }
+
+// CompleteStep marks a running step execution as COMPLETED (or COMPENSATED), records the output,
+// releases the worker lock lease, and checks if the entire workflow execution has finished.
+func (r *stepRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch and lock step execution to verify ownership and get workflow_execution_id & is_compensation
+	var (
+		workflowExecID string
+		isCompensation bool
+	)
+	query := `
+		SELECT workflow_execution_id, is_compensation
+		FROM step_executions
+		WHERE id = ? AND locked_by = ? AND status = 'RUNNING'
+		FOR UPDATE
+	`
+	err = tx.QueryRowContext(ctx, query, stepExecutionID, workerID).Scan(&workflowExecID, &isCompensation)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrLockLost
+		}
+		return fmt.Errorf("failed to lock step execution for completion: %w", err)
+	}
+
+	// 2. Format output
+	var outBytes []byte
+	if len(output) > 0 && string(output) != "null" {
+		outBytes = output
+	} else {
+		outBytes = []byte("{}")
+	}
+
+	// 3. Update step execution status
+	targetStatus := StatusCompleted
+	if isCompensation {
+		targetStatus = StatusCompensated
+	}
+
+	updateQuery := `
+		UPDATE step_executions
+		SET status = ?,
+		    output = ?,
+		    locked_by = NULL,
+		    locked_until = NULL,
+		    updated_at = NOW()
+		WHERE id = ?
+	`
+	if _, err := tx.ExecContext(ctx, updateQuery, targetStatus, outBytes, stepExecutionID); err != nil {
+		return fmt.Errorf("failed to update step execution to %s: %w", targetStatus, err)
+	}
+
+	// 4. Check if workflow execution is complete
+	if !isCompensation {
+		// Check if there are any remaining non-compensation steps not COMPLETED
+		var remainingNonComp int
+		remQuery := `
+			SELECT COUNT(*)
+			FROM step_executions
+			WHERE workflow_execution_id = ?
+			  AND is_compensation = FALSE
+			  AND status != 'COMPLETED'
+		`
+		if err := tx.QueryRowContext(ctx, remQuery, workflowExecID).Scan(&remainingNonComp); err != nil {
+			return fmt.Errorf("failed to check remaining steps: %w", err)
+		}
+
+		if remainingNonComp == 0 {
+			// All regular steps are completed! Update workflow to COMPLETED
+			updateWfQuery := `
+				UPDATE workflow_executions
+				SET status = 'COMPLETED',
+				    updated_at = NOW()
+				WHERE id = ? AND status = 'RUNNING'
+			`
+			if _, err := tx.ExecContext(ctx, updateWfQuery, workflowExecID); err != nil {
+				return fmt.Errorf("failed to mark workflow completed: %w", err)
+			}
+		}
+	} else {
+		// Compensation step completed. Check if all compensation steps are COMPENSATED
+		var remainingComp int
+		remCompQuery := `
+			SELECT COUNT(*)
+			FROM step_executions
+			WHERE workflow_execution_id = ?
+			  AND is_compensation = TRUE
+			  AND status != 'COMPENSATED'
+		`
+		if err := tx.QueryRowContext(ctx, remCompQuery, workflowExecID).Scan(&remainingComp); err != nil {
+			return fmt.Errorf("failed to check remaining compensation steps: %w", err)
+		}
+
+		if remainingComp == 0 {
+			// All compensation steps are done! Mark workflow as COMPENSATED
+			updateWfQuery := `
+				UPDATE workflow_executions
+				SET status = 'COMPENSATED',
+				    updated_at = NOW()
+				WHERE id = ? AND status = 'COMPENSATING'
+			`
+			if _, err := tx.ExecContext(ctx, updateWfQuery, workflowExecID); err != nil {
+				return fmt.Errorf("failed to mark workflow compensated: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+// FailStep handles a step execution failure. If attempts remain under max_attempts,
+// it schedules a retry with exponential backoff and returns status to PENDING.
+// If retries are exhausted, it marks the step as FAILED (or COMPENSATION_FAILED),
+// cancels remaining pending steps, and transitions the workflow to COMPENSATING (if compensations exist) or FAILED.
+func (r *stepRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Fetch and lock step execution to verify ownership and get retry & workflow configs
+	var (
+		workflowExecID    string
+		attempt           int
+		maxAttempts       int
+		backoffSeconds    int
+		multiplier        float64
+		maxBackoffSeconds int
+		isCompensation    bool
+	)
+	query := `
+		SELECT workflow_execution_id, attempt, max_attempts, backoff_seconds, multiplier, max_backoff_seconds, is_compensation
+		FROM step_executions
+		WHERE id = ? AND locked_by = ? AND status = 'RUNNING'
+		FOR UPDATE
+	`
+	err = tx.QueryRowContext(ctx, query, stepExecutionID, workerID).Scan(
+		&workflowExecID,
+		&attempt,
+		&maxAttempts,
+		&backoffSeconds,
+		&multiplier,
+		&maxBackoffSeconds,
+		&isCompensation,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrLockLost
+		}
+		return fmt.Errorf("failed to lock step execution for failure: %w", err)
+	}
+
+	// 2. Determine if we should retry
+	if attempt < maxAttempts {
+		// Calculate backoff
+		// attempt was already incremented to 1 on first claim.
+		power := float64(attempt - 1)
+		if power < 0 {
+			power = 0
+		}
+		if multiplier <= 0 {
+			multiplier = 1.0
+		}
+		delay := float64(backoffSeconds) * math.Pow(multiplier, power)
+		if maxBackoffSeconds > 0 && delay > float64(maxBackoffSeconds) {
+			delay = float64(maxBackoffSeconds)
+		}
+		if delay < 0 {
+			delay = 0
+		}
+		delaySeconds := int(math.Round(delay))
+
+		retryQuery := `
+			UPDATE step_executions
+			SET status = 'PENDING',
+			    error_message = ?,
+			    next_retry_at = DATE_ADD(NOW(), INTERVAL ? SECOND),
+			    locked_by = NULL,
+			    locked_until = NULL,
+			    updated_at = NOW()
+			WHERE id = ?
+		`
+		if _, err := tx.ExecContext(ctx, retryQuery, errMsg, delaySeconds, stepExecutionID); err != nil {
+			return fmt.Errorf("failed to schedule step retry: %w", err)
+		}
+
+		return tx.Commit()
+	}
+
+	// 3. Retries exhausted -> Permanently failed
+	if isCompensation {
+		failCompQuery := `
+			UPDATE step_executions
+			SET status = 'COMPENSATION_FAILED',
+			    error_message = ?,
+			    locked_by = NULL,
+			    locked_until = NULL,
+			    updated_at = NOW()
+			WHERE id = ?
+		`
+		if _, err := tx.ExecContext(ctx, failCompQuery, errMsg, stepExecutionID); err != nil {
+			return fmt.Errorf("failed to mark compensation step as COMPENSATION_FAILED: %w", err)
+		}
+
+		failWfQuery := `
+			UPDATE workflow_executions
+			SET status = 'COMPENSATION_FAILED',
+			    error_message = ?,
+			    updated_at = NOW()
+			WHERE id = ?
+		`
+		if _, err := tx.ExecContext(ctx, failWfQuery, fmt.Sprintf("compensation step %s failed: %s", stepExecutionID, errMsg), workflowExecID); err != nil {
+			return fmt.Errorf("failed to mark workflow as COMPENSATION_FAILED: %w", err)
+		}
+
+		return tx.Commit()
+	}
+
+	// Regular step permanently failed
+	failStepQuery := `
+		UPDATE step_executions
+		SET status = 'FAILED',
+		    error_message = ?,
+		    locked_by = NULL,
+		    locked_until = NULL,
+		    updated_at = NOW()
+		WHERE id = ?
+	`
+	if _, err := tx.ExecContext(ctx, failStepQuery, errMsg, stepExecutionID); err != nil {
+		return fmt.Errorf("failed to mark step execution as FAILED: %w", err)
+	}
+
+	// Cancel any remaining PENDING normal steps for this workflow execution
+	cancelPendingQuery := `
+		UPDATE step_executions
+		SET status = 'CANCELLED',
+		    updated_at = NOW()
+		WHERE workflow_execution_id = ?
+		  AND is_compensation = FALSE
+		  AND status = 'PENDING'
+	`
+	if _, err := tx.ExecContext(ctx, cancelPendingQuery, workflowExecID); err != nil {
+		return fmt.Errorf("failed to cancel pending steps: %w", err)
+	}
+
+	// Check if this workflow has any compensation steps defined to execute
+	var hasCompensation bool
+	checkCompQuery := `
+		SELECT EXISTS(
+			SELECT 1 FROM step_executions
+			WHERE workflow_execution_id = ? AND is_compensation = TRUE
+		)
+	`
+	if err := tx.QueryRowContext(ctx, checkCompQuery, workflowExecID).Scan(&hasCompensation); err != nil {
+		return fmt.Errorf("failed to check for compensation steps: %w", err)
+	}
+
+	if hasCompensation {
+		updateWfQuery := `
+			UPDATE workflow_executions
+			SET status = 'COMPENSATING',
+			    error_message = ?,
+			    updated_at = NOW()
+			WHERE id = ? AND status = 'RUNNING'
+		`
+		if _, err := tx.ExecContext(ctx, updateWfQuery, fmt.Sprintf("step %s failed: %s", stepExecutionID, errMsg), workflowExecID); err != nil {
+			return fmt.Errorf("failed to transition workflow to COMPENSATING: %w", err)
+		}
+	} else {
+		updateWfQuery := `
+			UPDATE workflow_executions
+			SET status = 'FAILED',
+			    error_message = ?,
+			    updated_at = NOW()
+			WHERE id = ? AND status = 'RUNNING'
+		`
+		if _, err := tx.ExecContext(ctx, updateWfQuery, fmt.Sprintf("step %s failed: %s", stepExecutionID, errMsg), workflowExecID); err != nil {
+			return fmt.Errorf("failed to mark workflow as FAILED: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 

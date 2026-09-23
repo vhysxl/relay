@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 var (
 	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")
 	ErrEmptyStepExecutionID = errors.New("step execution id is required for heartbeat")
+	ErrInvalidStepOutput    = errors.New("step output must be valid JSON")
 )
 
 type workerLogic struct {
@@ -107,3 +109,52 @@ func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string
 
 	return stop, errChan
 }
+
+// CompleteStep validates parameters and delegates completion to step repository
+func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+	trimmedExecID := strings.TrimSpace(stepExecutionID)
+	if trimmedExecID == "" {
+		return ErrEmptyStepExecutionID
+	}
+	trimmedWorkerID := strings.TrimSpace(workerID)
+	if trimmedWorkerID == "" {
+		return ErrEmptyWorkerID
+	}
+
+	if len(output) > 0 {
+		trimmedOutput := strings.TrimSpace(string(output))
+		if trimmedOutput != "" && trimmedOutput != "null" && !json.Valid(output) {
+			return ErrInvalidStepOutput
+		}
+	}
+
+	if l.stepRepo == nil {
+		return errors.New("step repository is not configured")
+	}
+
+	return l.stepRepo.CompleteStep(ctx, trimmedExecID, trimmedWorkerID, output)
+}
+
+// FailStep validates parameters and delegates step failure handling to step repository
+func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+	trimmedExecID := strings.TrimSpace(stepExecutionID)
+	if trimmedExecID == "" {
+		return ErrEmptyStepExecutionID
+	}
+	trimmedWorkerID := strings.TrimSpace(workerID)
+	if trimmedWorkerID == "" {
+		return ErrEmptyWorkerID
+	}
+
+	trimmedErr := strings.TrimSpace(errMsg)
+	if trimmedErr == "" {
+		trimmedErr = "unknown error"
+	}
+
+	if l.stepRepo == nil {
+		return errors.New("step repository is not configured")
+	}
+
+	return l.stepRepo.FailStep(ctx, trimmedExecID, trimmedWorkerID, trimmedErr)
+}
+

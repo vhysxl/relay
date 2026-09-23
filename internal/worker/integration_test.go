@@ -375,3 +375,270 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	t.Logf("✓ Verified StartHeartbeat ticker continuously kept lease alive in database!")
 }
 
+func TestIntegration_CompleteStep(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// 1. Create test workflow and execution
+	wfID := uuid.NewString()
+	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "complete-wf-"+wfID[:8])
+	if err != nil {
+		t.Fatalf("failed to insert workflow: %v", err)
+	}
+
+	wfExecID := uuid.NewString()
+	_, err = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
+	if err != nil {
+		t.Fatalf("failed to insert workflow_execution: %v", err)
+	}
+
+	// 2. Insert 2 steps where Step B depends on Step A
+	stepExecAID := uuid.NewString()
+	stepExecBID := uuid.NewString()
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, depends_on, status, max_attempts, is_compensation, created_at, updated_at
+		) VALUES 
+		(?, ?, 'step-a', 'Step A', 'http', '{}', '[]', 'PENDING', 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-b', 'Step B', 'http', '{}', '["step-a"]', 'PENDING', 1, FALSE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
+	`, stepExecAID, wfExecID, stepExecBID, wfExecID)
+	if err != nil {
+		t.Fatalf("failed to insert step_executions: %v", err)
+	}
+
+	// 3. Worker-1 claims Step A
+	_, se1, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se1 == nil || se1.ID != stepExecAID {
+		t.Fatalf("failed to claim step A: %v, se1=%+v", err, se1)
+	}
+
+	// 4. Worker-2 tries to Complete Step A -> Should fail with ErrLockLost (unauthorized)
+	err = workerLogic.CompleteStep(ctx, stepExecAID, "worker-2", json.RawMessage(`{"res":"hacked"}`))
+	if !errors.Is(err, step.ErrLockLost) {
+		t.Fatalf("expected ErrLockLost for unauthorized worker-2 completing Step A, got %v", err)
+	}
+
+	// 5. Worker-1 completes Step A
+	outputA := json.RawMessage(`{"order_id":"ORD-999"}`)
+	err = workerLogic.CompleteStep(ctx, stepExecAID, "worker-1", outputA)
+	if err != nil {
+		t.Fatalf("unexpected error completing Step A: %v", err)
+	}
+
+	// Verify Step A in DB
+	var (
+		statusA  string
+		outputDB []byte
+		lockedBy sql.NullString
+	)
+	err = db.QueryRowContext(ctx, "SELECT status, output, locked_by FROM step_executions WHERE id = ?", stepExecAID).Scan(&statusA, &outputDB, &lockedBy)
+	if err != nil {
+		t.Fatalf("failed to query step A after complete: %v", err)
+	}
+	if statusA != "COMPLETED" {
+		t.Errorf("expected Step A status COMPLETED, got %s", statusA)
+	}
+	if string(outputDB) != string(outputA) {
+		t.Errorf("expected output %s, got %s", string(outputA), string(outputDB))
+	}
+	if lockedBy.Valid {
+		t.Errorf("expected locked_by to be NULL, got %s", lockedBy.String)
+	}
+
+	// 6. Workflow execution should still be RUNNING because Step B is pending
+	var wfStatus string
+	err = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if err != nil || wfStatus != "RUNNING" {
+		t.Fatalf("expected workflow RUNNING, got %s, err=%v", wfStatus, err)
+	}
+
+	// 7. Worker-2 claims Step B now that Step A is COMPLETED
+	_, se2, err := workerLogic.ClaimNext(ctx, "worker-2")
+	if err != nil || se2 == nil || se2.ID != stepExecBID {
+		t.Fatalf("failed to claim step B after A completed: %v, se2=%+v", err, se2)
+	}
+
+	// 8. Worker-2 completes Step B
+	err = workerLogic.CompleteStep(ctx, stepExecBID, "worker-2", json.RawMessage(`{"status":"success"}`))
+	if err != nil {
+		t.Fatalf("failed to complete Step B: %v", err)
+	}
+
+	// 9. Workflow execution should now be automatically marked COMPLETED!
+	err = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if err != nil {
+		t.Fatalf("failed to query workflow status: %v", err)
+	}
+	if wfStatus != "COMPLETED" {
+		t.Errorf("expected workflow status COMPLETED, got %s", wfStatus)
+	}
+	t.Logf("✓ Auto-completion verified: workflow %s marked COMPLETED after all steps completed!", wfExecID)
+}
+
+func TestIntegration_FailStep_Retry(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	wfID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-retry-wf-"+wfID[:8])
+
+	wfExecID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
+
+	stepExecID := uuid.NewString()
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, backoff_seconds, multiplier, max_backoff_seconds, is_compensation, created_at, updated_at
+		) VALUES (?, ?, 'step-retry', 'Retry Step', 'http', '{}', 'PENDING', 0, 3, 2, 2.0, 10, FALSE, NOW(), NOW())
+	`, stepExecID, wfExecID)
+	if err != nil {
+		t.Fatalf("failed to insert step_execution: %v", err)
+	}
+
+	// 1. Claim step (attempt increments to 1)
+	_, se, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se == nil || se.ID != stepExecID {
+		t.Fatalf("failed to claim step: %v, se=%+v", err, se)
+	}
+	if se.Attempt != 1 {
+		t.Errorf("expected attempt 1, got %d", se.Attempt)
+	}
+
+	// 2. Fail step with retryable error
+	err = workerLogic.FailStep(ctx, stepExecID, "worker-1", "connection timeout")
+	if err != nil {
+		t.Fatalf("failed to report fail step: %v", err)
+	}
+
+	// 3. Verify step state in DB: status PENDING, next_retry_at in future, locked_by NULL
+	var (
+		status      string
+		errMsg      sql.NullString
+		lockedBy    sql.NullString
+		nextRetryAt sql.NullTime
+	)
+	err = db.QueryRowContext(ctx, "SELECT status, error_message, locked_by, next_retry_at FROM step_executions WHERE id = ?", stepExecID).Scan(&status, &errMsg, &lockedBy, &nextRetryAt)
+	if err != nil {
+		t.Fatalf("failed to query step after failure: %v", err)
+	}
+
+	if status != "PENDING" {
+		t.Errorf("expected status PENDING after retry scheduled, got %s", status)
+	}
+	if !errMsg.Valid || errMsg.String != "connection timeout" {
+		t.Errorf("expected error message 'connection timeout', got %v", errMsg)
+	}
+	if lockedBy.Valid {
+		t.Errorf("expected locked_by NULL, got %s", lockedBy.String)
+	}
+	if !nextRetryAt.Valid || !nextRetryAt.Time.After(time.Now().UTC()) {
+		t.Errorf("expected next_retry_at to be in future, got %v", nextRetryAt)
+	}
+
+	// 4. Immediate ClaimNext should NOT claim this task because next_retry_at > NOW()
+	_, nextExec, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil {
+		t.Fatalf("claim next error: %v", err)
+	}
+	if nextExec != nil {
+		t.Errorf("expected nil claim while backoff active, got %+v", nextExec)
+	}
+	t.Logf("✓ Retry backoff verified: step rescheduled with next_retry_at in future")
+}
+
+func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	wfID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-saga-wf-"+wfID[:8])
+
+	wfExecID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
+
+	stepMainID := uuid.NewString()
+	stepCompID := uuid.NewString()
+
+	// Insert main step with max_attempts=1 (fails immediately on first error)
+	// and compensation step with is_compensation=TRUE
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, is_compensation, created_at, updated_at
+		) VALUES 
+		(?, ?, 'step-charge', 'Charge Card', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-refund', 'Refund Card', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
+	`, stepMainID, wfExecID, stepCompID, wfExecID)
+	if err != nil {
+		t.Fatalf("failed to insert steps: %v", err)
+	}
+
+	// 1. Claim main step
+	_, seMain, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || seMain == nil || seMain.ID != stepMainID {
+		t.Fatalf("failed to claim main step: %v, seMain=%+v", err, seMain)
+	}
+
+	// 2. Fail main step (exhausting retries)
+	err = workerLogic.FailStep(ctx, stepMainID, "worker-1", "card declined permanently")
+	if err != nil {
+		t.Fatalf("failed to report step failure: %v", err)
+	}
+
+	// 3. Verify main step is FAILED
+	var mainStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepMainID).Scan(&mainStatus)
+	if mainStatus != "FAILED" {
+		t.Errorf("expected main step FAILED, got %s", mainStatus)
+	}
+
+	// 4. Verify workflow transitioned to COMPENSATING because compensation step exists
+	var wfStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if wfStatus != "COMPENSATING" {
+		t.Errorf("expected workflow status COMPENSATING, got %s", wfStatus)
+	}
+	t.Logf("✓ Workflow transitioned to COMPENSATING after non-retryable failure")
+
+	// 5. Worker-1 claims next task -> Should pick the compensation step!
+	_, seComp, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || seComp == nil || seComp.ID != stepCompID {
+		t.Fatalf("expected ClaimNext to pick compensation step %s, got %+v, err=%v", stepCompID, seComp, err)
+	}
+
+	// 6. Complete the compensation step
+	err = workerLogic.CompleteStep(ctx, stepCompID, "worker-1", json.RawMessage(`{"refunded":true}`))
+	if err != nil {
+		t.Fatalf("failed to complete compensation step: %v", err)
+	}
+
+	// 7. Verify compensation step is COMPENSATED and workflow is COMPENSATED!
+	var compStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepCompID).Scan(&compStatus)
+	if compStatus != "COMPENSATED" {
+		t.Errorf("expected compensation step COMPENSATED, got %s", compStatus)
+	}
+
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if wfStatus != "COMPENSATED" {
+		t.Errorf("expected workflow status COMPENSATED, got %s", wfStatus)
+	}
+	t.Logf("✓ Saga compensation cycle verified end-to-end: workflow %s marked COMPENSATED!", wfExecID)
+}
+
+
