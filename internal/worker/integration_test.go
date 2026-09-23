@@ -573,66 +573,102 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
 
-	stepMainID := uuid.NewString()
-	stepCompID := uuid.NewString()
+	stepChargeID := uuid.NewString()
+	stepRefundID := uuid.NewString()
+	stepReserveID := uuid.NewString()
+	stepCancelReserveID := uuid.NewString()
+	stepShipID := uuid.NewString()
+	stepCancelShipID := uuid.NewString()
 
-	// Insert main step with max_attempts=1 (fails immediately on first error)
-	// and compensation step with is_compensation=TRUE
+	// Setup:
+	// - Step 1 (step-charge): Already COMPLETED successfully. Its compensation (step-refund) is PENDING.
+	// - Step 2 (step-reserve): PENDING with max_attempts=1. Will fail. Its compensation (step-cancel-reserve) is PENDING.
+	// - Step 3 (step-ship): PENDING. Will never run. Its compensation (step-cancel-ship) is PENDING.
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO step_executions (
 			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, is_compensation, created_at, updated_at
 		) VALUES 
-		(?, ?, 'step-charge', 'Charge Card', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
-		(?, ?, 'step-refund', 'Refund Card', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
-	`, stepMainID, wfExecID, stepCompID, wfExecID)
+		(?, ?, 'step-charge', 'Charge Card', 'http', '{}', 'COMPLETED', 1, 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-charge', 'Refund Card', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
+		(?, ?, 'step-reserve', 'Reserve Inventory', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-reserve', 'Cancel Inventory Reservation', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
+		(?, ?, 'step-ship', 'Ship Package', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-ship', 'Cancel Shipping', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
+	`, stepChargeID, wfExecID, stepRefundID, wfExecID,
+		stepReserveID, wfExecID, stepCancelReserveID, wfExecID,
+		stepShipID, wfExecID, stepCancelShipID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert steps: %v", err)
 	}
 
-	// 1. Claim main step
-	_, seMain, err := workerLogic.ClaimNext(ctx, "worker-1")
-	if err != nil || seMain == nil || seMain.ID != stepMainID {
-		t.Fatalf("failed to claim main step: %v, seMain=%+v", err, seMain)
+	// 1. Worker claims Step 2 (step-reserve)
+	_, seReserve, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || seReserve == nil || seReserve.ID != stepReserveID {
+		t.Fatalf("failed to claim reserve step: %v, seReserve=%+v", err, seReserve)
 	}
 
-	// 2. Fail main step (exhausting retries)
-	err = workerLogic.FailStep(ctx, stepMainID, "worker-1", "card declined permanently")
+	// 2. Fail Step 2 (exhausting retries)
+	err = workerLogic.FailStep(ctx, stepReserveID, "worker-1", "inventory out of stock")
 	if err != nil {
 		t.Fatalf("failed to report step failure: %v", err)
 	}
 
-	// 3. Verify main step is FAILED
-	var mainStatus string
-	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepMainID).Scan(&mainStatus)
-	if mainStatus != "FAILED" {
-		t.Errorf("expected main step FAILED, got %s", mainStatus)
+	// 3. Verify Step 2 is FAILED
+	var reserveStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepReserveID).Scan(&reserveStatus)
+	if reserveStatus != "FAILED" {
+		t.Errorf("expected reserve step FAILED, got %s", reserveStatus)
 	}
 
-	// 4. Verify workflow transitioned to COMPENSATING because compensation step exists
+	// 4. Verify Step 3 (unexecuted normal step) is CANCELLED
+	var shipStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepShipID).Scan(&shipStatus)
+	if shipStatus != "CANCELLED" {
+		t.Errorf("expected ship step CANCELLED, got %s", shipStatus)
+	}
+
+	// 5. Verify unexecuted step's compensation and failed step's compensation are CANCELLED
+	var cancelReserveStatus, cancelShipStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepCancelReserveID).Scan(&cancelReserveStatus)
+	if cancelReserveStatus != "CANCELLED" {
+		t.Errorf("expected cancel-reserve compensation CANCELLED, got %s", cancelReserveStatus)
+	}
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepCancelShipID).Scan(&cancelShipStatus)
+	if cancelShipStatus != "CANCELLED" {
+		t.Errorf("expected cancel-ship compensation CANCELLED, got %s", cancelShipStatus)
+	}
+
+	// 6. Verify Step 1's compensation (step-refund) REMAINS PENDING
+	var refundStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepRefundID).Scan(&refundStatus)
+	if refundStatus != "PENDING" {
+		t.Errorf("expected refund compensation PENDING, got %s", refundStatus)
+	}
+
+	// 7. Verify workflow transitioned to COMPENSATING because a completed step has compensation
 	var wfStatus string
 	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
 	if wfStatus != "COMPENSATING" {
 		t.Errorf("expected workflow status COMPENSATING, got %s", wfStatus)
 	}
-	t.Logf("✓ Workflow transitioned to COMPENSATING after non-retryable failure")
+	t.Logf("✓ Workflow transitioned to COMPENSATING only for successful step")
 
-	// 5. Worker-1 claims next task -> Should pick the compensation step!
+	// 8. Worker-1 claims next task -> Should pick ONLY Step 1's compensation (step-refund)!
 	_, seComp, err := workerLogic.ClaimNext(ctx, "worker-1")
-	if err != nil || seComp == nil || seComp.ID != stepCompID {
-		t.Fatalf("expected ClaimNext to pick compensation step %s, got %+v, err=%v", stepCompID, seComp, err)
+	if err != nil || seComp == nil || seComp.ID != stepRefundID {
+		t.Fatalf("expected ClaimNext to pick refund step %s, got %+v, err=%v", stepRefundID, seComp, err)
 	}
 
-	// 6. Complete the compensation step
-	err = workerLogic.CompleteStep(ctx, stepCompID, "worker-1", json.RawMessage(`{"refunded":true}`))
+	// 9. Complete the refund compensation step
+	err = workerLogic.CompleteStep(ctx, stepRefundID, "worker-1", json.RawMessage(`{"refunded":true}`))
 	if err != nil {
 		t.Fatalf("failed to complete compensation step: %v", err)
 	}
 
-	// 7. Verify compensation step is COMPENSATED and workflow is COMPENSATED!
-	var compStatus string
-	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepCompID).Scan(&compStatus)
-	if compStatus != "COMPENSATED" {
-		t.Errorf("expected compensation step COMPENSATED, got %s", compStatus)
+	// 10. Verify refund compensation step is COMPENSATED and workflow is COMPENSATED!
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepRefundID).Scan(&refundStatus)
+	if refundStatus != "COMPENSATED" {
+		t.Errorf("expected compensation step COMPENSATED, got %s", refundStatus)
 	}
 
 	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
@@ -640,6 +676,62 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 		t.Errorf("expected workflow status COMPENSATED, got %s", wfStatus)
 	}
 	t.Logf("✓ Saga compensation cycle verified end-to-end: workflow %s marked COMPENSATED!", wfExecID)
+}
+
+func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	wfID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-immediate-wf-"+wfID[:8])
+
+	wfExecID := uuid.NewString()
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
+
+	stepMainID := uuid.NewString()
+	stepCompID := uuid.NewString()
+
+	// Step 1 fails on first attempt and has a compensation defined
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, is_compensation, created_at, updated_at
+		) VALUES 
+		(?, ?, 'step-1', 'Step 1', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(?, ?, 'step-1', 'Comp 1', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
+	`, stepMainID, wfExecID, stepCompID, wfExecID)
+	if err != nil {
+		t.Fatalf("failed to insert steps: %v", err)
+	}
+
+	_, se, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se == nil || se.ID != stepMainID {
+		t.Fatalf("failed to claim step 1: %v", err)
+	}
+
+	// Fail step 1
+	err = workerLogic.FailStep(ctx, stepMainID, "worker-1", "immediate failure")
+	if err != nil {
+		t.Fatalf("fail step error: %v", err)
+	}
+
+	// Since Step 1 never succeeded, its compensation must be CANCELLED and workflow must be FAILED (not COMPENSATING)
+	var compStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepCompID).Scan(&compStatus)
+	if compStatus != "CANCELLED" {
+		t.Errorf("expected compStatus CANCELLED, got %s", compStatus)
+	}
+
+	var wfStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if wfStatus != "FAILED" {
+		t.Errorf("expected workflow status FAILED, got %s", wfStatus)
+	}
+	t.Logf("✓ Verified workflow with no successful steps transitions directly to FAILED")
 }
 
 func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {

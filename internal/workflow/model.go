@@ -14,10 +14,12 @@ const (
 	WorkflowStatusPending            WorkflowStatus = "PENDING"
 	WorkflowStatusRunning            WorkflowStatus = "RUNNING"
 	WorkflowStatusCompensating       WorkflowStatus = "COMPENSATING"
-	WorkflowStatusSuccess            WorkflowStatus = "SUCCESS"
+	WorkflowStatusCompleted          WorkflowStatus = "COMPLETED"
+	WorkflowStatusSuccess                           = WorkflowStatusCompleted
 	WorkflowStatusFailed             WorkflowStatus = "FAILED"
 	WorkflowStatusCompensated        WorkflowStatus = "COMPENSATED"
 	WorkflowStatusCompensationFailed WorkflowStatus = "COMPENSATION_FAILED"
+	WorkflowStatusCancelled          WorkflowStatus = "CANCELLED"
 )
 
 type WorkflowRequest struct {

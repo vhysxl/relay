@@ -273,8 +273,14 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		FROM step_executions se
 		JOIN workflow_executions we ON se.workflow_execution_id = we.id
 		LEFT JOIN step_definitions sd ON sd.workflow_id = we.workflow_id AND sd.id = se.step_id
-		WHERE se.status = 'PENDING'
-		  AND (se.locked_until IS NULL OR se.locked_until < NOW())
+		LEFT JOIN step_executions orig 
+		    ON orig.workflow_execution_id = se.workflow_execution_id 
+		   AND orig.step_id = se.step_id 
+		   AND orig.is_compensation = FALSE
+		WHERE (
+		      (se.status = 'PENDING' AND (se.locked_until IS NULL OR se.locked_until < NOW()))
+		      OR (se.status = 'RUNNING' AND se.locked_until < NOW())
+		  )
 		  AND (se.next_retry_at IS NULL OR se.next_retry_at <= NOW())
 		  AND (
 		      (we.status = 'COMPENSATING' AND se.is_compensation = TRUE)
@@ -285,6 +291,7 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		              SELECT 1
 		              FROM step_executions dep
 		              WHERE dep.workflow_execution_id = se.workflow_execution_id
+		                AND dep.is_compensation = FALSE
 		                AND JSON_CONTAINS(se.depends_on, JSON_QUOTE(dep.step_id))
 		                AND dep.status != 'COMPLETED'
 		          )
@@ -293,7 +300,7 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		ORDER BY 
 		    CASE WHEN we.status = 'COMPENSATING' THEN 1 ELSE 2 END ASC,
 		    we.created_at ASC,
-		    CASE WHEN we.status = 'COMPENSATING' THEN se.created_at END DESC,
+		    CASE WHEN we.status = 'COMPENSATING' THEN COALESCE(orig.updated_at, se.created_at) END DESC,
 		    se.created_at ASC
 		LIMIT 1
 		FOR UPDATE OF se SKIP LOCKED
@@ -617,16 +624,29 @@ func (r *stepRepository) CompleteStep(ctx context.Context, stepExecutionID strin
 			if _, err := tx.ExecContext(ctx, updateWfQuery, workflowExecID); err != nil {
 				return fmt.Errorf("failed to mark workflow completed: %w", err)
 			}
+
+			// Clean up / cancel unused compensation steps since workflow completed successfully
+			cancelUnusedCompQuery := `
+				UPDATE step_executions
+				SET status = 'CANCELLED',
+				    updated_at = NOW()
+				WHERE workflow_execution_id = ?
+				  AND is_compensation = TRUE
+				  AND status = 'PENDING'
+			`
+			if _, err := tx.ExecContext(ctx, cancelUnusedCompQuery, workflowExecID); err != nil {
+				return fmt.Errorf("failed to cancel unused compensation steps: %w", err)
+			}
 		}
 	} else {
-		// Compensation step completed. Check if all compensation steps are COMPENSATED
+		// Compensation step completed. Check if all active compensation steps are COMPENSATED
 		var remainingComp int
 		remCompQuery := `
 			SELECT COUNT(*)
 			FROM step_executions
 			WHERE workflow_execution_id = ?
 			  AND is_compensation = TRUE
-			  AND status != 'COMPENSATED'
+			  AND status NOT IN ('COMPENSATED', 'CANCELLED')
 		`
 		if err := tx.QueryRowContext(ctx, remCompQuery, workflowExecID).Scan(&remainingComp); err != nil {
 			return fmt.Errorf("failed to check remaining compensation steps: %w", err)
@@ -785,12 +805,33 @@ func (r *stepRepository) FailStep(ctx context.Context, stepExecutionID string, w
 		return fmt.Errorf("failed to cancel pending steps: %w", err)
 	}
 
-	// Check if this workflow has any compensation steps defined to execute
+	// Cancel any PENDING compensation steps whose original step was NOT completed successfully
+	cancelUnneededCompQuery := `
+		UPDATE step_executions comp
+		LEFT JOIN step_executions normal 
+		    ON normal.workflow_execution_id = comp.workflow_execution_id
+		   AND normal.step_id = comp.step_id
+		   AND normal.is_compensation = FALSE
+		   AND normal.status = 'COMPLETED'
+		SET comp.status = 'CANCELLED',
+		    comp.updated_at = NOW()
+		WHERE comp.workflow_execution_id = ?
+		  AND comp.is_compensation = TRUE
+		  AND comp.status = 'PENDING'
+		  AND normal.id IS NULL
+	`
+	if _, err := tx.ExecContext(ctx, cancelUnneededCompQuery, workflowExecID); err != nil {
+		return fmt.Errorf("failed to cancel unneeded compensation steps: %w", err)
+	}
+
+	// Check if this workflow has any active compensation steps remaining to execute
 	var hasCompensation bool
 	checkCompQuery := `
 		SELECT EXISTS(
 			SELECT 1 FROM step_executions
-			WHERE workflow_execution_id = ? AND is_compensation = TRUE
+			WHERE workflow_execution_id = ? 
+			  AND is_compensation = TRUE
+			  AND status = 'PENDING'
 		)
 	`
 	if err := tx.QueryRowContext(ctx, checkCompQuery, workflowExecID).Scan(&hasCompensation); err != nil {

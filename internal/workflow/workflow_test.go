@@ -425,3 +425,15 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 	}
 }
 
+func TestWorkflowStatus_Constants(t *testing.T) {
+	if WorkflowStatusCompleted != "COMPLETED" {
+		t.Errorf("expected WorkflowStatusCompleted to be 'COMPLETED', got %q", WorkflowStatusCompleted)
+	}
+	if WorkflowStatusSuccess != WorkflowStatusCompleted {
+		t.Errorf("expected WorkflowStatusSuccess to alias WorkflowStatusCompleted")
+	}
+	if WorkflowStatusCancelled != "CANCELLED" {
+		t.Errorf("expected WorkflowStatusCancelled to be 'CANCELLED', got %q", WorkflowStatusCancelled)
+	}
+}
+
