@@ -3,7 +3,9 @@ package workflow
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/util"
@@ -76,3 +78,58 @@ func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 
 	util.WriteJSON(w, http.StatusOK, wf)
 }
+
+func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow id is required"})
+		return
+	}
+
+	var req ExecuteWorkflowRequest
+	if r.Body != nil {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err == nil && len(bodyBytes) > 0 {
+			trimmed := strings.TrimSpace(string(bodyBytes))
+			if trimmed != "" && trimmed != "null" {
+				var wrapper map[string]json.RawMessage
+				if err := json.Unmarshal(bodyBytes, &wrapper); err == nil {
+					if ctxRaw, ok := wrapper["context"]; ok {
+						req.Context = ctxRaw
+					} else {
+						req.Context = json.RawMessage(bodyBytes)
+					}
+				} else {
+					util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json request body"})
+					return
+				}
+			}
+		}
+	}
+
+	exec, err := h.logic.ExecuteWorkflow(r.Context(), id, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrWorkflowNotFound):
+			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		case errors.Is(err, ErrInvalidWorkflowID),
+			errors.Is(err, ErrInvalidWorkflowContext):
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+		}
+		return
+	}
+
+	resp := ExecuteWorkflowResponse{
+		ID:         exec.ID,
+		WorkflowID: exec.WorkflowID,
+		Status:     string(exec.Status),
+		Context:    exec.Context,
+		TotalSteps: len(exec.Steps),
+		CreatedAt:  exec.CreatedAt,
+	}
+
+	util.WriteJSON(w, http.StatusCreated, resp)
+}
+

@@ -12,8 +12,9 @@ import (
 )
 
 type mockRepository struct {
-	createFn func(ctx context.Context, wf *Workflow) (*Workflow, error)
-	getFn    func(ctx context.Context, id string) (*Workflow, error)
+	createFn  func(ctx context.Context, wf *Workflow) (*Workflow, error)
+	getFn     func(ctx context.Context, id string) (*Workflow, error)
+	executeFn func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
 }
 
 func (m *mockRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (*Workflow, error) {
@@ -28,6 +29,18 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*Workflow,
 		return m.getFn(ctx, id)
 	}
 	return nil, ErrWorkflowNotFound
+}
+
+func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
+	if m.executeFn != nil {
+		return m.executeFn(ctx, workflowID, initialContext)
+	}
+	return &step.WorkflowExecution{
+		ID:         "exec-123",
+		WorkflowID: workflowID,
+		Status:     step.StatusRunning,
+		Context:    initialContext,
+	}, nil
 }
 
 func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
@@ -282,3 +295,133 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		t.Fatalf("expected status 404, got %d", recNotFound.Code)
 	}
 }
+
+func TestWorkflowLogic_ExecuteWorkflow_Validation(t *testing.T) {
+	called := false
+	repo := &mockRepository{
+		executeFn: func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
+			called = true
+			if workflowID != "wf-123" {
+				t.Errorf("expected wf-123, got %s", workflowID)
+			}
+			return &step.WorkflowExecution{
+				ID:         "exec-123",
+				WorkflowID: workflowID,
+				Status:     step.StatusRunning,
+				Context:    initialContext,
+			}, nil
+		},
+	}
+
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
+
+	// Test empty workflowID
+	_, err := logic.ExecuteWorkflow(context.Background(), "", nil)
+	if err != ErrInvalidWorkflowID {
+		t.Fatalf("expected ErrInvalidWorkflowID, got %v", err)
+	}
+
+	// Test whitespace workflowID
+	_, err = logic.ExecuteWorkflow(context.Background(), "   ", nil)
+	if err != ErrInvalidWorkflowID {
+		t.Fatalf("expected ErrInvalidWorkflowID for whitespace, got %v", err)
+	}
+
+	// Test invalid JSON context
+	_, err = logic.ExecuteWorkflow(context.Background(), "wf-123", &ExecuteWorkflowRequest{
+		Context: json.RawMessage(`{not-json`),
+	})
+	if err != ErrInvalidWorkflowContext {
+		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	}
+
+	// Test success with valid context
+	exec, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &ExecuteWorkflowRequest{
+		Context: json.RawMessage(`{"order_id":"ORD-1"}`),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected executeFn to be called")
+	}
+	if string(exec.Context) != `{"order_id":"ORD-1"}` {
+		t.Errorf("expected context ORD-1, got %s", string(exec.Context))
+	}
+}
+
+func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
+	repo := &mockRepository{
+		executeFn: func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
+			if workflowID == "wf-not-found" {
+				return nil, ErrWorkflowNotFound
+			}
+			return &step.WorkflowExecution{
+				ID:         "exec-999",
+				WorkflowID: workflowID,
+				Status:     step.StatusRunning,
+				Context:    initialContext,
+				Steps: []step.StepExecution{
+					{ID: "step-exec-1", Status: step.StatusPending},
+				},
+			}, nil
+		},
+	}
+
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
+	handler := NewWorkflowHandler(logic)
+
+	// 1. Trigger with {"context": {"amount": 50000}}
+	body := bytes.NewBufferString(`{"context":{"amount":50000}}`)
+	req := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", body)
+	req.SetPathValue("id", "wf-1")
+	rec := httptest.NewRecorder()
+
+	handler.ExecuteWorkflow(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var resp ExecuteWorkflowResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.ID != "exec-999" || resp.WorkflowID != "wf-1" || resp.TotalSteps != 1 {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+	if string(resp.Context) != `{"amount":50000}` {
+		t.Errorf("expected context amount 50000, got %s", string(resp.Context))
+	}
+
+	// 2. Trigger with raw json body {"amount": 99000}
+	rawBody := bytes.NewBufferString(`{"amount":99000}`)
+	reqRaw := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", rawBody)
+	reqRaw.SetPathValue("id", "wf-1")
+	recRaw := httptest.NewRecorder()
+
+	handler.ExecuteWorkflow(recRaw, reqRaw)
+	if recRaw.Code != http.StatusCreated {
+		t.Fatalf("expected status 201 for raw body, got %d", recRaw.Code)
+	}
+
+	// 3. Trigger with empty body
+	reqEmpty := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", nil)
+	reqEmpty.SetPathValue("id", "wf-1")
+	recEmpty := httptest.NewRecorder()
+
+	handler.ExecuteWorkflow(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusCreated {
+		t.Fatalf("expected status 201 for empty body, got %d", recEmpty.Code)
+	}
+
+	// 4. Trigger unknown workflow
+	reqUnknown := httptest.NewRequest(http.MethodPost, "/workflows/wf-not-found/execute", nil)
+	reqUnknown.SetPathValue("id", "wf-not-found")
+	recUnknown := httptest.NewRecorder()
+
+	handler.ExecuteWorkflow(recUnknown, reqUnknown)
+	if recUnknown.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", recUnknown.Code)
+	}
+}
+

@@ -105,3 +105,28 @@ func (l *workflowLogic) GetWorkflow(ctx context.Context, workflowID string) (*Wo
 
 	return l.repo.GetWorkflow(ctx, id)
 }
+
+func (l *workflowLogic) ExecuteWorkflow(ctx context.Context, workflowID string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error) {
+	id := strings.TrimSpace(workflowID)
+	if id == "" {
+		return nil, ErrInvalidWorkflowID
+	}
+
+	var ctxBytes []byte
+	if req != nil && len(req.Context) > 0 {
+		trimmed := strings.TrimSpace(string(req.Context))
+		if trimmed != "" && trimmed != "null" {
+			if !json.Valid(req.Context) {
+				return nil, ErrInvalidWorkflowContext
+			}
+			ctxBytes = req.Context
+		}
+	}
+
+	if l.repo == nil {
+		return nil, errors.New("workflow repository is not configured")
+	}
+
+	return l.repo.ExecuteWorkflowTx(ctx, id, ctxBytes)
+}
+

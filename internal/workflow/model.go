@@ -39,13 +39,29 @@ type Workflow struct {
 	Steps     []step.Step     `json:"steps"`
 }
 
+type ExecuteWorkflowRequest struct {
+	Context json.RawMessage `json:"context,omitempty"`
+}
+
+type ExecuteWorkflowResponse struct {
+	ID         string          `json:"id"`
+	WorkflowID string          `json:"workflow_id"`
+	Status     string          `json:"status"`
+	Context    json.RawMessage `json:"context,omitempty"`
+	TotalSteps int             `json:"total_steps"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
 type WorkflowLogic interface {
 	CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error)
 	GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
+	ExecuteWorkflow(ctx context.Context, workflowID string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error)
 }
 
 type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *Workflow) (*Workflow, error)
 	GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
+	ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
 	// DeleteWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
 }
+

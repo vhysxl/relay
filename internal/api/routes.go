@@ -23,4 +23,6 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 
 	mux.HandleFunc("POST /workflows", workflowHandler.CreateWorkflow)
 	mux.HandleFunc("GET /workflows/{id}", workflowHandler.GetWorkflow)
+	mux.HandleFunc("POST /workflows/{id}/execute", workflowHandler.ExecuteWorkflow)
 }
+

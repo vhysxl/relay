@@ -641,4 +641,83 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	t.Logf("✓ Saga compensation cycle verified end-to-end: workflow %s marked COMPENSATED!", wfExecID)
 }
 
+func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// 1. Create a workflow definition with 1 step
+	wfName := "e2e-wf-" + uuid.NewString()[:8]
+	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
+		Name:    wfName,
+		Version: 1,
+		Context: json.RawMessage(`{"default_key":"default_val"}`),
+		Steps: []step.Step{
+			{
+				ID:      "step-first",
+				Name:    "First Step",
+				Type:    step.StepTypeHTTP,
+				Config:  json.RawMessage(`{"url":"https://api.example.com/data","method":"GET"}`),
+				Timeout: 15,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	// 2. Trigger workflow with custom initial context
+	customContext := json.RawMessage(`{"order_id":"ORD-456","amount":75000}`)
+	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, &workflow.ExecuteWorkflowRequest{
+		Context: customContext,
+	})
+	if err != nil {
+		t.Fatalf("failed to trigger workflow: %v", err)
+	}
+
+	if wfExec.Status != step.StatusRunning {
+		t.Errorf("expected workflow status RUNNING, got %s", wfExec.Status)
+	}
+	if string(wfExec.Context) != string(customContext) {
+		t.Errorf("expected context %s, got %s", string(customContext), string(wfExec.Context))
+	}
+	if len(wfExec.Steps) != 1 {
+		t.Fatalf("expected 1 step execution, got %d", len(wfExec.Steps))
+	}
+
+	// 3. Worker claims the step
+	claimedStep, claimedExec, err := workerLogic.ClaimNext(ctx, "worker-e2e")
+	if err != nil || claimedExec == nil {
+		t.Fatalf("failed to claim step from triggered workflow: %v, claimedExec=%+v", err, claimedExec)
+	}
+	if claimedStep.ID != "step-first" {
+		t.Errorf("expected claimed step-first, got %s", claimedStep.ID)
+	}
+
+	// 4. Worker completes the step
+	err = workerLogic.CompleteStep(ctx, claimedExec.ID, "worker-e2e", json.RawMessage(`{"status":"200 OK"}`))
+	if err != nil {
+		t.Fatalf("failed to complete step: %v", err)
+	}
+
+	// 5. Verify workflow execution is now COMPLETED in DB
+	var dbWfStatus string
+	err = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&dbWfStatus)
+	if err != nil {
+		t.Fatalf("failed to query workflow execution: %v", err)
+	}
+	if dbWfStatus != "COMPLETED" {
+		t.Errorf("expected workflow execution COMPLETED, got %s", dbWfStatus)
+	}
+	t.Logf("✓ Full End-to-End Cycle (Create -> Trigger -> Claim -> Complete) verified!")
+}
+
+
 
