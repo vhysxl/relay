@@ -104,14 +104,14 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
   return (
     <>
       <div
-        className={`bg-white rounded-2xl ${cardAccentColor} p-5 space-y-3.5 relative overflow-hidden`}
+        className={`bg-white rounded-lg ${cardAccentColor} p-5 space-y-3.5 relative overflow-hidden`}
       >
         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${leftBarColor}`} />
 
         {/* Node Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b border-slate-100 pb-3 pl-2">
           <div className="flex items-center space-x-3">
-            <span className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 font-mono font-bold text-xs flex items-center justify-center border border-slate-200 shadow-xs">
+            <span className="w-8 h-8 rounded-md bg-slate-100 text-slate-700 font-mono font-bold text-xs flex items-center justify-center border border-slate-200 shadow-xs">
               {stepIdx}
             </span>
             <div>
@@ -119,7 +119,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
                 <h4 className="text-sm font-bold text-slate-900">
                   {step.name || step.step_id}
                 </h4>
-                <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200/80">
+                <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80">
                   ID: {step.step_id}
                 </span>
               </div>
@@ -162,12 +162,12 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
 
         {/* Step Failure Alert */}
         {step.error_message && (
-          <div className="ml-2 bg-rose-50 border border-rose-200 rounded-xl p-3.5 space-y-1.5 shadow-xs">
+          <div className="ml-2 bg-rose-50 border border-rose-200 rounded-md p-3.5 space-y-1.5 shadow-xs">
             <div className="flex items-center space-x-1.5 text-xs font-bold text-rose-800 uppercase tracking-wide">
               <AlertCircle className="w-4 h-4 text-rose-600 stroke-[2]" />
               <span>Step Failure Error Message</span>
             </div>
-            <pre className="bg-white border border-rose-200 text-rose-700 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">
+            <pre className="bg-white border border-rose-200 text-rose-700 p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">
               {step.error_message}
             </pre>
           </div>
@@ -181,7 +181,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
         >
           {formattedConfig && (
             <details
-              className="group bg-slate-50/70 border border-slate-200/90 rounded-xl p-3 text-xs"
+              className="group bg-slate-50/70 border border-slate-200/90 rounded-md p-3 text-xs"
               open={isFailed}
             >
               <summary className="cursor-pointer font-semibold text-slate-700 flex items-center justify-between select-none hover:text-slate-900 transition">
@@ -189,7 +189,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
                   <span className="font-bold text-slate-800">Node Configuration</span>
                   {parsedConfig?.url && (
                     <>
-                      <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                      <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                         {parsedConfig.method || 'GET'}
                       </span>
                       <span
@@ -212,7 +212,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-open:rotate-180 transition ml-2 flex-shrink-0" />
               </summary>
               <div className="mt-2.5">
-                <pre className="bg-slate-900 text-slate-200 p-3 rounded-lg text-xs font-mono overflow-x-auto leading-relaxed max-h-56">
+                <pre className="bg-slate-900 text-slate-200 p-3 rounded-md text-xs font-mono overflow-x-auto leading-relaxed max-h-56">
                   {formattedConfig}
                 </pre>
               </div>
@@ -221,7 +221,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
 
           {formattedOutput && (
             <details
-              className="group bg-emerald-50/20 border border-emerald-200/90 rounded-xl p-3 text-xs"
+              className="group bg-emerald-50/20 border border-emerald-200/90 rounded-md p-3 text-xs"
               open
             >
               <summary className="cursor-pointer font-semibold text-emerald-800 flex items-center justify-between select-none hover:text-emerald-900 transition">
@@ -229,7 +229,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
                 <ChevronDown className="w-3.5 h-3.5 text-emerald-600 group-open:rotate-180 transition ml-2 flex-shrink-0" />
               </summary>
               <div className="mt-2.5">
-                <pre className="bg-slate-900 text-emerald-400 p-3 rounded-lg text-xs font-mono overflow-x-auto leading-relaxed max-h-56">
+                <pre className="bg-slate-900 text-emerald-400 p-3 rounded-md text-xs font-mono overflow-x-auto leading-relaxed max-h-56">
                   {formattedOutput}
                 </pre>
               </div>

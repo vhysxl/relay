@@ -12,7 +12,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow }) => {
   const steps = workflow.steps || []
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs p-4 space-y-3 transition-all hover:border-slate-300">
+    <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-4 space-y-3 transition-all hover:border-slate-300">
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b border-slate-100 pb-2.5">
         <div className="flex items-center space-x-3">

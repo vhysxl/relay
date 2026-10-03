@@ -46,10 +46,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Workflows */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
+        <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Registered Workflows</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-md bg-slate-100 text-slate-800 flex items-center justify-center">
               <Layers className="w-4 h-4" />
             </div>
           </div>
@@ -60,10 +60,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Card 2: Total Runs */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
+        <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Total Executions</span>
-            <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-md bg-slate-100 text-slate-800 flex items-center justify-center">
               <History className="w-4 h-4" />
             </div>
           </div>
@@ -74,10 +74,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Card 3: Success Rate */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
+        <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Success Rate</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
@@ -88,10 +88,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Card 4: Engine Status */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
+        <div className="bg-white rounded-lg border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Engine Health</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <Activity className="w-4 h-4" />
             </div>
           </div>
@@ -108,7 +108,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Two Column Layout: Recent Executions & Quick Workflows */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Recent Executions */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-4">
+        <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900">Recent Executions</h3>
             <button
@@ -125,7 +125,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div
                 key={exec.id}
                 onClick={() => onNavigate('execution-detail', exec.id)}
-                className="p-3 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-200/60 transition cursor-pointer flex items-center justify-between"
+                className="p-3 bg-slate-50/80 hover:bg-slate-100/80 rounded-md border border-slate-200/60 transition cursor-pointer flex items-center justify-between"
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
@@ -149,7 +149,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Right: Registered Workflows Quick List */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-4">
+        <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <h3 className="text-sm font-bold text-slate-900">Registered Workflows</h3>
             <button
@@ -166,7 +166,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <div
                 key={wf.id}
                 onClick={() => onNavigate('workflows')}
-                className="p-3 bg-slate-50/80 hover:bg-slate-100/80 rounded-xl border border-slate-200/60 transition cursor-pointer flex items-center justify-between"
+                className="p-3 bg-slate-50/80 hover:bg-slate-100/80 rounded-md border border-slate-200/60 transition cursor-pointer flex items-center justify-between"
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
@@ -177,7 +177,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </div>
                   <p className="font-mono text-[11px] text-slate-500">ID: {wf.id}</p>
                 </div>
-                <span className="text-xs font-mono font-semibold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shadow-2xs">
+                <span className="text-xs font-mono font-semibold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md shadow-2xs">
                   {wf.steps?.length || 0} steps
                 </span>
               </div>

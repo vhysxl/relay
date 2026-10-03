@@ -61,14 +61,14 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5">
+        <div className="flex items-center space-x-2">
           <div className="relative">
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Filter by ID or Name..."
-              className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400 w-52 text-slate-700 placeholder-slate-400 shadow-xs"
+              className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400 w-52 text-slate-700 placeholder-slate-400 shadow-xs"
             />
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
           </div>
@@ -76,7 +76,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           <button
             onClick={onRefresh}
             disabled={isLoading}
-            className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
             <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -86,10 +86,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
       {/* Filter Tabs for History */}
       <div className="flex items-center justify-between pt-1">
-        <div className="inline-flex p-0.5 bg-slate-200/60 rounded-xl text-xs font-medium text-slate-600">
+        <div className="inline-flex p-0.5 bg-slate-200/60 rounded-lg text-xs font-medium text-slate-600">
           <button
             onClick={() => setCurrentFilter('all')}
-            className={`px-3.5 py-1 rounded-lg transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
+            className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'all'
                 ? 'bg-white text-slate-900 shadow-xs font-semibold'
                 : 'hover:text-slate-900'
@@ -99,7 +99,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </button>
           <button
             onClick={() => setCurrentFilter('COMPLETED')}
-            className={`px-3.5 py-1 rounded-lg transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
+            className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'COMPLETED'
                 ? 'bg-white text-slate-900 shadow-xs font-semibold'
                 : 'hover:text-slate-900'
@@ -109,7 +109,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </button>
           <button
             onClick={() => setCurrentFilter('RUNNING')}
-            className={`px-3.5 py-1 rounded-lg transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
+            className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'RUNNING'
                 ? 'bg-white text-slate-900 shadow-xs font-semibold'
                 : 'hover:text-slate-900'
@@ -119,7 +119,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </button>
           <button
             onClick={() => setCurrentFilter('FAILED')}
-            className={`px-3.5 py-1 rounded-lg transition cursor-pointer text-rose-600 hover:text-rose-700 outline-none focus:outline-none focus:ring-0 ${
+            className={`px-3 py-1 rounded-md transition cursor-pointer text-rose-600 hover:text-rose-700 outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'FAILED'
                 ? 'bg-white text-rose-700 shadow-xs font-semibold'
                 : ''
@@ -129,7 +129,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </button>
           <button
             onClick={() => setCurrentFilter('COMPENSATED')}
-            className={`px-3.5 py-1 rounded-lg transition cursor-pointer text-amber-600 hover:text-amber-700 outline-none focus:outline-none focus:ring-0 ${
+            className={`px-3 py-1 rounded-md transition cursor-pointer text-amber-600 hover:text-amber-700 outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'COMPENSATED'
                 ? 'bg-white text-amber-800 shadow-xs font-semibold'
                 : ''
@@ -142,7 +142,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
       {/* History Table */}
       {isLoading && executions.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-12 text-center text-slate-400 text-xs">
+        <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-12 text-center text-slate-400 text-xs">
           Loading history records...
         </div>
       ) : (

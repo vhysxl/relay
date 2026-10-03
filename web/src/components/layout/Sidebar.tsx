@@ -69,7 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         title={label}
         className={`w-full flex items-center ${
           isCollapsed ? 'justify-center px-2 py-2.5' : 'space-x-3 px-3.5 py-2.5'
-        } rounded-xl text-xs transition-all duration-150 cursor-pointer select-none outline-none focus:outline-none focus:ring-0 ${
+        } rounded-lg text-xs transition-all duration-150 cursor-pointer select-none outline-none focus:outline-none focus:ring-0 ${
           isActive
             ? 'bg-white text-slate-900 font-semibold shadow-xs border border-slate-200/90'
             : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-medium border border-transparent'
@@ -85,7 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="flex-1 text-left truncate">{label}</span>
             {count !== null && (
               <span
-                className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${
+                className={`text-[11px] px-2 py-0.5 rounded-md font-semibold transition-colors ${
                   isActive
                     ? 'bg-slate-100 text-slate-900'
                     : 'bg-slate-200/70 text-slate-600'
@@ -112,7 +112,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-end'} px-1 pt-1`}>
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-300/50 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-300/50 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {isCollapsed ? (
@@ -134,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Bottom Part: Dev Mode Controller with subtle styling */}
       <div className="p-3 border-t border-slate-300/60">
         {!isCollapsed ? (
-          <div className="p-2.5 bg-white/85 border border-slate-200/90 rounded-xl space-y-1.5 shadow-2xs">
+          <div className="p-2.5 bg-white/85 border border-slate-200/90 rounded-lg space-y-1.5 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-slate-800 flex items-center gap-1.5">
                 {isMockMode ? (

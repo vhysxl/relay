@@ -15,7 +15,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
 }) => {
   if (executions.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="px-6 py-12 text-center text-slate-400 text-xs">
           No execution history matches the selected filter.
         </div>
@@ -24,7 +24,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+    <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs overflow-hidden">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-left">
           <thead className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">

@@ -13,7 +13,7 @@ export const StepNodeBadge: React.FC<StepNodeBadgeProps> = ({ step, index, isLas
 
   return (
     <div className="flex items-center">
-      <div className="flex-1 min-w-[200px] max-w-[260px] bg-slate-50/90 border border-slate-200/90 rounded-xl p-3 space-y-1.5 hover:border-slate-300 hover:bg-slate-50 transition shadow-xs">
+      <div className="flex-1 min-w-[200px] max-w-[260px] bg-slate-50/90 border border-slate-200/90 rounded-lg p-3 space-y-1.5 hover:border-slate-300 hover:bg-slate-50 transition shadow-xs">
         <div className="flex items-center justify-between">
           <span className="text-sm font-mono font-bold text-slate-500">{stepIdx}</span>
           <span className="text-xs font-mono font-bold uppercase text-slate-800 bg-white border border-slate-300 px-2 py-0.5 rounded shadow-xs">
