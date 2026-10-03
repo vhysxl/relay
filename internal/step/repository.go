@@ -100,6 +100,9 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 }
 
 func (r *stepRepository) GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]Step, error) {
+	if r.db == nil {
+		return []Step{}, nil
+	}
 	query := `
 		SELECT id, workflow_id, name, type, config, depends_on,
 		       timeout, retry, compensation, irreversible, created_at, updated_at

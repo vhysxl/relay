@@ -12,6 +12,8 @@ import { StatusBadge } from '../common/StatusBadge'
 import { ExecutionStepNode } from './ExecutionStepNode'
 import { formatTimestamp, formatDuration, formatJSON } from '../../utils/format'
 
+import { mockExecutions } from '../../data/mockData'
+
 interface ExecutionDetailViewProps {
   executionId: string
   onBack: () => void
@@ -28,15 +30,25 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
   const fetchDetail = async () => {
     setIsLoading(true)
     setError(null)
+    const mockMatch = mockExecutions.find((m) => m.id === executionId)
+
     try {
       const res = await fetch(`/executions/${encodeURIComponent(executionId)}`)
       if (!res.ok) {
+        if (mockMatch) {
+          setExecution(mockMatch)
+          return
+        }
         throw new Error(`Execution not found (HTTP ${res.status})`)
       }
       const data: Execution = await res.json()
       setExecution(data)
     } catch (err: any) {
-      setError(err.message || 'Failed to load execution')
+      if (mockMatch) {
+        setExecution(mockMatch)
+      } else {
+        setError(err.message || 'Failed to load execution')
+      }
     } finally {
       setIsLoading(false)
     }

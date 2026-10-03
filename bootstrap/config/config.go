@@ -24,10 +24,11 @@ func Init() (*Config, error) {
 	}
 	DB, err := database.NewMySql(*dbconf)
 	if err != nil {
-		return nil, err
+		fmt.Printf("Note: Database connection unavailable (%v). Continuing in dev mode without DB.\n", err)
+		DB = nil
+	} else {
+		fmt.Println("Database connected successfully")
 	}
-
-	fmt.Println("Database connected successfully")
 
 	// Port
 	port := getEnv("PORT", "8000")

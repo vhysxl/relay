@@ -28,7 +28,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer conf.DB.Close()
+	if conf.DB != nil {
+		defer conf.DB.Close()
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -54,30 +56,34 @@ func main() {
 		}
 	}
 
-	// 2. Setup Worker Pool
-	stepRepo := step.NewStepRepository(conf.DB)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	// 2. Setup Worker Pool (only if database is connected)
+	if conf.DB != nil {
+		stepRepo := step.NewStepRepository(conf.DB)
+		workerLogic := worker.NewWorkerLogic(stepRepo)
 
-	workerCount := worker.DefaultWorkerCount
-	if countStr := os.Getenv("WORKER_COUNT"); countStr != "" {
-		if c, err := strconv.Atoi(countStr); err == nil && c > 0 {
-			workerCount = c
+		workerCount := worker.DefaultWorkerCount
+		if countStr := os.Getenv("WORKER_COUNT"); countStr != "" {
+			if c, err := strconv.Atoi(countStr); err == nil && c > 0 {
+				workerCount = c
+			}
 		}
+
+		pool := worker.NewWorkerPool(
+			workerLogic,
+			reg,
+			worker.WithWorkerCount(workerCount),
+		)
+
+		// 3. Start Worker Pool in background goroutine
+		go func() {
+			log.Printf("Worker pool started with %d workers\n", workerCount)
+			if err := pool.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("Worker pool exited with error: %v\n", err)
+			}
+		}()
+	} else {
+		log.Println("Note: Database not connected. Worker pool paused (frontend dev mode active)")
 	}
-
-	pool := worker.NewWorkerPool(
-		workerLogic,
-		reg,
-		worker.WithWorkerCount(workerCount),
-	)
-
-	// 3. Start Worker Pool in background goroutine
-	go func() {
-		log.Printf("Worker pool started with %d workers\n", workerCount)
-		if err := pool.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("Worker pool exited with error: %v\n", err)
-		}
-	}()
 
 	// 4. Start HTTP Server (blocks until shutdown or error)
 	if err := server.Listen(ctx, conf.Port, conf.DB); err != nil {

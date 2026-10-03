@@ -367,6 +367,9 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 }
 
 func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, error) {
+	if r.db == nil {
+		return []Workflow{}, nil
+	}
 	query := `
 		SELECT id, name, version, status, hash, context, created_at, updated_at
 		FROM workflow_definitions
@@ -413,6 +416,9 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 }
 
 func (r *workflowRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
+	if r.db == nil {
+		return []step.WorkflowExecution{}, nil
+	}
 	query := `
 		SELECT we.id, we.workflow_id, COALESCE(wd.name, ''), we.status, we.context, we.error_message, we.created_at, we.updated_at
 		FROM workflow_executions we
@@ -466,6 +472,9 @@ func (r *workflowRepository) ListExecutions(ctx context.Context) ([]step.Workflo
 }
 
 func (r *workflowRepository) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+	if r.db == nil {
+		return nil, errors.New("execution not found")
+	}
 	query := `
 		SELECT we.id, we.workflow_id, COALESCE(wd.name, ''), we.status, we.context, we.error_message, we.created_at, we.updated_at
 		FROM workflow_executions we
