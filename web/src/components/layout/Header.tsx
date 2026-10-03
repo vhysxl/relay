@@ -21,7 +21,7 @@ export const Header: React.FC<HeaderProps> = ({
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search queries, personnel, workflows..."
-          className="w-full pl-9 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-xs text-slate-800 placeholder-slate-400 rounded-xl border border-transparent focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100 transition shadow-2xs"
+          className="w-full pl-9 pr-4 py-2 bg-slate-100/80 hover:bg-slate-100 focus:bg-white text-xs text-slate-800 placeholder-slate-400 rounded-xl border border-transparent focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100 transition shadow-2xs"
         />
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
       </div>
@@ -38,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Notification Bell with Badge */}
         <button
-          className="relative p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+          className="relative p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
           title="Notifications"
         >
           <Bell className="w-4 h-4" />

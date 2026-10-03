@@ -105,7 +105,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         <div className="flex items-center space-x-3">
           <button
             onClick={onBack}
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
             <ArrowLeft className="w-4 h-4 text-slate-500" />
             <span>Back to History</span>
@@ -123,7 +123,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
           <button
             onClick={fetchDetail}
             disabled={isLoading}
-            className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer"
+            className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
             <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh Details</span>

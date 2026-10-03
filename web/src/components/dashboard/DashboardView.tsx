@@ -49,7 +49,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Registered Workflows</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center">
               <Layers className="w-4 h-4" />
             </div>
           </div>
@@ -63,7 +63,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-2">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold text-slate-500">Total Executions</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-800 flex items-center justify-center">
               <History className="w-4 h-4" />
             </div>
           </div>
@@ -113,7 +113,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h3 className="text-sm font-bold text-slate-900">Recent Executions</h3>
             <button
               onClick={() => onNavigate('history')}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition cursor-pointer"
+              className="text-xs font-semibold text-slate-800 hover:text-black flex items-center gap-1 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
             >
               <span>View All</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -154,7 +154,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h3 className="text-sm font-bold text-slate-900">Registered Workflows</h3>
             <button
               onClick={() => onNavigate('workflows')}
-              className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 transition cursor-pointer"
+              className="text-xs font-semibold text-slate-800 hover:text-black flex items-center gap-1 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
             >
               <span>View All</span>
               <ArrowRight className="w-3.5 h-3.5" />

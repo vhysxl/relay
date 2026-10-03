@@ -11,6 +11,27 @@ body {
   background-color: #f8fafc;
 }
 
+/* Remove sharp cartoonish focus outlines on buttons and interactive elements */
+button,
+button:focus,
+button:focus-visible,
+button:active {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input:focus,
+input:focus-visible,
+select:focus,
+textarea:focus {
+  outline: none !important;
+}
+
+a:focus,
+a:focus-visible {
+  outline: none !important;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
