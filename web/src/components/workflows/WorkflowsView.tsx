@@ -60,7 +60,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
       </div>
 
       {/* Clean Table Card with defined outer border and thin inner borders */}
-      <div className="bg-white rounded-lg border-2 border-slate-300/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-100 text-left">
             <thead className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
