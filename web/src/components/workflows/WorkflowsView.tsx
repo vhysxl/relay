@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { Search, RotateCw, Layers } from 'lucide-react'
+import { Search, RotateCw } from 'lucide-react'
 import type { Workflow } from '../../types/relay'
 
 interface WorkflowsViewProps {
@@ -103,16 +103,11 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                       key={wf.id}
                       className="hover:bg-slate-50/70 transition-colors group cursor-pointer"
                     >
-                      {/* Name - slimmer font (font-medium), hover shows underline */}
+                      {/* Name - hover shows underline */}
                       <td className="px-5 py-3 whitespace-nowrap">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center text-slate-600 flex-shrink-0 group-hover:bg-slate-200/80 transition-colors">
-                            <Layers className="w-4 h-4" />
-                          </div>
-                          <span className="font-medium text-sm text-slate-900 group-hover:underline cursor-pointer">
-                            {wf.name}
-                          </span>
-                        </div>
+                        <span className="font-medium text-sm text-slate-900 group-hover:underline cursor-pointer">
+                          {wf.name}
+                        </span>
                       </td>
 
                       {/* ID - larger font */}
