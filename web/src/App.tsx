@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import type { Workflow, Execution, ViewMode } from './types/relay'
 import { Sidebar } from './components/layout/Sidebar'
+import { Header } from './components/layout/Header'
+import { DashboardView } from './components/dashboard/DashboardView'
 import { WorkflowsView } from './components/workflows/WorkflowsView'
 import { HistoryView } from './components/history/HistoryView'
 import { ExecutionDetailView } from './components/execution-detail/ExecutionDetailView'
+import { SettingsView } from './components/settings/SettingsView'
 import { mockWorkflows, mockExecutions } from './data/mockData'
-import { Sparkles } from 'lucide-react'
 
 export const App: React.FC = () => {
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [executions, setExecutions] = useState<Execution[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(false)
-  const [currentView, setCurrentView] = useState<ViewMode>('workflows')
+  const [currentView, setCurrentView] = useState<ViewMode>('dashboard')
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
+  const [globalSearch, setGlobalSearch] = useState<string>('')
 
   // Default to mock data mode during dev so UI is always previewable
   const [isMockMode, setIsMockMode] = useState<boolean>(() => {
@@ -30,7 +33,7 @@ export const App: React.FC = () => {
         setWorkflows(mockWorkflows)
         setExecutions(mockExecutions)
         setIsLoading(false)
-      }, 150)
+      }, 100)
       return
     }
 
@@ -46,12 +49,10 @@ export const App: React.FC = () => {
       const hasLiveWorkflows = Array.isArray(wfData) && wfData.length > 0
       const hasLiveExecutions = Array.isArray(execData) && execData.length > 0
 
-      // If backend returns data, use it; otherwise fallback to mock data
       if (hasLiveWorkflows || hasLiveExecutions) {
         setExecutions(Array.isArray(execData) ? execData : [])
         setWorkflows(Array.isArray(wfData) ? wfData : [])
       } else {
-        // Fallback to mock data if DB is empty / offline
         setWorkflows(mockWorkflows)
         setExecutions(mockExecutions)
         setIsMockMode(true)
@@ -85,9 +86,15 @@ export const App: React.FC = () => {
     } else if (hash === 'history' || window.location.pathname.includes('/history')) {
       setSelectedExecutionId(null)
       setCurrentView('history')
-    } else {
+    } else if (hash === 'workflows') {
       setSelectedExecutionId(null)
       setCurrentView('workflows')
+    } else if (hash === 'settings') {
+      setSelectedExecutionId(null)
+      setCurrentView('settings')
+    } else {
+      setSelectedExecutionId(null)
+      setCurrentView('dashboard')
     }
   }, [])
 
@@ -106,14 +113,18 @@ export const App: React.FC = () => {
       window.location.hash = `execution/${executionId}`
     } else if (view === 'history') {
       window.location.hash = 'history'
-    } else {
+    } else if (view === 'workflows') {
       window.location.hash = 'workflows'
+    } else if (view === 'settings') {
+      window.location.hash = 'settings'
+    } else {
+      window.location.hash = 'dashboard'
     }
   }
 
   return (
-    <div className="text-slate-800 bg-[#f8fafc] flex h-screen overflow-hidden antialiased">
-      {/* Left Sidebar */}
+    <div className="text-slate-800 bg-[#F4F6F9] flex h-screen overflow-hidden antialiased">
+      {/* Refactored Clean Left Sidebar */}
       <Sidebar
         currentView={currentView}
         onSelectView={(v) => navigateToView(v)}
@@ -125,27 +136,25 @@ export const App: React.FC = () => {
         onToggleMockMode={handleToggleMockMode}
       />
 
-      {/* Main Content Workspace */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50/70">
-        {/* Top Info Banner when in Mock Data Mode */}
-        {isMockMode && (
-          <div className="bg-amber-50/90 border-b border-amber-200/80 px-6 py-1.5 flex items-center justify-between text-xs text-amber-800 select-none">
-            <div className="flex items-center space-x-2">
-              <Sparkles className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-              <span>
-                <strong>Frontend Dev Mode Active:</strong> Using idempotent dummy workflows & executions. Database connection is optional.
-              </span>
-            </div>
-            <button
-              onClick={handleToggleMockMode}
-              className="text-[11px] underline font-medium hover:text-amber-900 cursor-pointer"
-            >
-              Try Live Server API
-            </button>
-          </div>
-        )}
+      {/* Main Content Workspace with Top Header */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-[#F4F6F9]">
+        {/* Top Header Bar */}
+        <Header
+          searchQuery={globalSearch}
+          onSearchChange={setGlobalSearch}
+          isMockMode={isMockMode}
+        />
 
+        {/* Workspace Body */}
         <main className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
+          {currentView === 'dashboard' && (
+            <DashboardView
+              workflows={workflows}
+              executions={executions}
+              onNavigate={navigateToView}
+            />
+          )}
+
           {currentView === 'workflows' && (
             <WorkflowsView
               workflows={workflows}
@@ -167,6 +176,13 @@ export const App: React.FC = () => {
             <ExecutionDetailView
               executionId={selectedExecutionId}
               onBack={() => navigateToView('history')}
+            />
+          )}
+
+          {currentView === 'settings' && (
+            <SettingsView
+              isMockMode={isMockMode}
+              onToggleMockMode={handleToggleMockMode}
             />
           )}
         </main>
