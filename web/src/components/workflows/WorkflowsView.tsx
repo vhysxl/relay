@@ -32,7 +32,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         <div className="space-y-0.5">
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Workflows</h1>
           <p className="text-xs text-slate-500 font-normal">
-            List of registered workflow definitions in the engine.
+            List of registered workflows
           </p>
         </div>
 
@@ -150,7 +150,6 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
               Showing <strong>{filteredWorkflows.length}</strong> of{' '}
               <strong>{workflows.length}</strong> workflows
             </span>
-            <span className="text-[11px] text-slate-400">Relay Orchestration Engine</span>
           </div>
         )}
       </div>
