@@ -43,6 +43,19 @@ func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, workflowID strin
 	}, nil
 }
 
+func (m *mockRepository) ListWorkflows(ctx context.Context) ([]Workflow, error) {
+	return []Workflow{}, nil
+}
+
+func (m *mockRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
+	return []step.WorkflowExecution{}, nil
+}
+
+func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+	return &step.WorkflowExecution{ID: executionID, Status: step.StatusRunning}, nil
+}
+
+
 func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
 	logic := NewWorkflowLogic(repo, step.NewStepValidator())

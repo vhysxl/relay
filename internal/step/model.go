@@ -79,6 +79,7 @@ const (
 type WorkflowExecution struct {
 	ID           string          `json:"id" db:"id"`
 	WorkflowID   string          `json:"workflow_id" db:"workflow_id"`
+	WorkflowName string          `json:"workflow_name,omitempty" db:"-"`
 	Status       ExecutionStatus `json:"status" db:"status"`
 	Context      json.RawMessage `json:"context,omitempty" db:"context"`
 	ErrorMessage *string         `json:"error_message,omitempty" db:"error_message"`

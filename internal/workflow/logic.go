@@ -130,3 +130,29 @@ func (l *workflowLogic) ExecuteWorkflow(ctx context.Context, workflowID string, 
 	return l.repo.ExecuteWorkflowTx(ctx, id, ctxBytes)
 }
 
+func (l *workflowLogic) ListWorkflows(ctx context.Context) ([]Workflow, error) {
+	if l.repo == nil {
+		return nil, errors.New("workflow repository is not configured")
+	}
+	return l.repo.ListWorkflows(ctx)
+}
+
+func (l *workflowLogic) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
+	if l.repo == nil {
+		return nil, errors.New("workflow repository is not configured")
+	}
+	return l.repo.ListExecutions(ctx)
+}
+
+func (l *workflowLogic) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+	id := strings.TrimSpace(executionID)
+	if id == "" {
+		return nil, errors.New("execution id is required")
+	}
+	if l.repo == nil {
+		return nil, errors.New("workflow repository is not configured")
+	}
+	return l.repo.GetExecution(ctx, id)
+}
+
+

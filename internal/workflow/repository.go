@@ -87,7 +87,8 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 	query := `
 		SELECT id, name, version, status, hash, context, created_at, updated_at
 		FROM workflow_definitions
-		WHERE id = ?
+		WHERE id = ? OR name = ?
+		ORDER BY version DESC LIMIT 1
 	`
 
 	var (
@@ -96,7 +97,7 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 		contextData sql.NullString
 	)
 
-	err := r.db.QueryRowContext(ctx, query, workflowID).Scan(
+	err := r.db.QueryRowContext(ctx, query, workflowID, workflowID).Scan(
 		&wf.ID,
 		&wf.Name,
 		&wf.Version,
@@ -130,17 +131,19 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 }
 
 func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
-	// 1. Verify workflow definition exists and get default context
+	// 1. Verify workflow definition exists (by ID or Name) and get default context
 	var (
+		realWfID       string
 		defaultContext sql.NullString
 		wfStatus       string
 	)
 	checkQuery := `
-		SELECT status, context
+		SELECT id, status, context
 		FROM workflow_definitions
-		WHERE id = ?
+		WHERE id = ? OR name = ?
+		ORDER BY version DESC LIMIT 1
 	`
-	err := r.db.QueryRowContext(ctx, checkQuery, workflowID).Scan(&wfStatus, &defaultContext)
+	err := r.db.QueryRowContext(ctx, checkQuery, workflowID, workflowID).Scan(&realWfID, &wfStatus, &defaultContext)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrWorkflowNotFound
@@ -173,7 +176,7 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 		INSERT INTO workflow_executions (id, workflow_id, status, context, created_at, updated_at)
 		VALUES (?, ?, 'RUNNING', ?, ?, ?)
 	`
-	_, err = tx.ExecContext(ctx, insertWfExecQuery, wfExecID, workflowID, string(effectiveContext), now, now)
+	_, err = tx.ExecContext(ctx, insertWfExecQuery, wfExecID, realWfID, string(effectiveContext), now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert workflow execution: %w", err)
 	}
@@ -182,7 +185,7 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 	if r.stepRepo == nil {
 		return nil, errors.New("step repository is not configured")
 	}
-	steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, workflowID)
+	steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, realWfID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch step definitions: %w", err)
 	}
@@ -228,6 +231,8 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 		configJSON := s.Config
 		if len(configJSON) == 0 {
 			configJSON = []byte("{}")
+		} else if len(effectiveContext) > 0 {
+			configJSON = util.InterpolateContext(configJSON, effectiveContext)
 		}
 
 		_, err = tx.ExecContext(
@@ -296,6 +301,8 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 			compConfigJSON := s.Compensation.Config
 			if len(compConfigJSON) == 0 {
 				compConfigJSON = []byte("{}")
+			} else if len(effectiveContext) > 0 {
+				compConfigJSON = util.InterpolateContext(compConfigJSON, effectiveContext)
 			}
 
 			compName := "Compensation for " + s.Name
@@ -359,3 +366,238 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 	}, nil
 }
 
+func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, error) {
+	query := `
+		SELECT id, name, version, status, hash, context, created_at, updated_at
+		FROM workflow_definitions
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wfs []Workflow
+	for rows.Next() {
+		var (
+			wf        Workflow
+			statusStr string
+			ctxData   sql.NullString
+		)
+		if err := rows.Scan(
+			&wf.ID,
+			&wf.Name,
+			&wf.Version,
+			&statusStr,
+			&wf.Hash,
+			&ctxData,
+			&wf.CreatedAt,
+			&wf.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		wf.Status = WorkflowStatus(statusStr)
+		if ctxData.Valid && len(ctxData.String) > 0 {
+			wf.Context = json.RawMessage(ctxData.String)
+		}
+		if r.stepRepo != nil {
+			steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, wf.ID)
+			if err == nil {
+				wf.Steps = steps
+			}
+		}
+		wfs = append(wfs, wf)
+	}
+	return wfs, rows.Err()
+}
+
+func (r *workflowRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
+	query := `
+		SELECT we.id, we.workflow_id, COALESCE(wd.name, ''), we.status, we.context, we.error_message, we.created_at, we.updated_at
+		FROM workflow_executions we
+		LEFT JOIN workflow_definitions wd ON we.workflow_id = wd.id
+		ORDER BY we.created_at DESC
+		LIMIT 100
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var execs []step.WorkflowExecution
+	for rows.Next() {
+		var (
+			exec      step.WorkflowExecution
+			statusStr string
+			ctxData   sql.NullString
+		)
+		if err := rows.Scan(
+			&exec.ID,
+			&exec.WorkflowID,
+			&exec.WorkflowName,
+			&statusStr,
+			&ctxData,
+			&exec.ErrorMessage,
+			&exec.CreatedAt,
+			&exec.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		exec.Status = step.ExecutionStatus(statusStr)
+		if ctxData.Valid && len(ctxData.String) > 0 {
+			exec.Context = json.RawMessage(ctxData.String)
+		}
+		execs = append(execs, exec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range execs {
+		steps, err := r.getStepExecutions(ctx, execs[i].ID)
+		if err == nil {
+			execs[i].Steps = steps
+		}
+	}
+
+	return execs, nil
+}
+
+func (r *workflowRepository) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+	query := `
+		SELECT we.id, we.workflow_id, COALESCE(wd.name, ''), we.status, we.context, we.error_message, we.created_at, we.updated_at
+		FROM workflow_executions we
+		LEFT JOIN workflow_definitions wd ON we.workflow_id = wd.id
+		WHERE we.id = ? OR wd.name = ? OR we.workflow_id = ?
+		ORDER BY we.created_at DESC LIMIT 1
+	`
+	var (
+		exec      step.WorkflowExecution
+		statusStr string
+		ctxData   sql.NullString
+	)
+	err := r.db.QueryRowContext(ctx, query, executionID, executionID, executionID).Scan(
+		&exec.ID,
+		&exec.WorkflowID,
+		&exec.WorkflowName,
+		&statusStr,
+		&ctxData,
+		&exec.ErrorMessage,
+		&exec.CreatedAt,
+		&exec.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("execution not found")
+		}
+		return nil, err
+	}
+	exec.Status = step.ExecutionStatus(statusStr)
+	if ctxData.Valid && len(ctxData.String) > 0 {
+		exec.Context = json.RawMessage(ctxData.String)
+	}
+
+	steps, err := r.getStepExecutions(ctx, exec.ID)
+	if err == nil {
+		exec.Steps = steps
+	}
+	return &exec, nil
+}
+
+func (r *workflowRepository) getStepExecutions(ctx context.Context, workflowExecID string) ([]step.StepExecution, error) {
+	query := `
+		SELECT 
+			id, workflow_execution_id, step_id, name, type, config, depends_on,
+			status, output, error_message, attempt, max_attempts, timeout_seconds,
+			backoff_seconds, multiplier, max_backoff_seconds, locked_by, locked_until,
+			is_compensation, executed_at, next_retry_at, created_at, updated_at
+		FROM step_executions
+		WHERE workflow_execution_id = ?
+		ORDER BY is_compensation ASC, created_at ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, workflowExecID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []step.StepExecution
+	for rows.Next() {
+		var (
+			se            step.StepExecution
+			statusStr     string
+			seName        sql.NullString
+			seConfig      string
+			seDependsOn   sql.NullString
+			seOutput      sql.NullString
+			seErrorMsg    sql.NullString
+			seLockedBy    sql.NullString
+			seLockedUntil sql.NullTime
+			seExecutedAt  sql.NullTime
+			seNextRetryAt sql.NullTime
+		)
+		err := rows.Scan(
+			&se.ID,
+			&se.WorkflowExecutionID,
+			&se.StepID,
+			&seName,
+			&se.Type,
+			&seConfig,
+			&seDependsOn,
+			&statusStr,
+			&seOutput,
+			&seErrorMsg,
+			&se.Attempt,
+			&se.MaxAttempts,
+			&se.TimeoutSeconds,
+			&se.BackoffSeconds,
+			&se.Multiplier,
+			&se.MaxBackoffSeconds,
+			&seLockedBy,
+			&seLockedUntil,
+			&se.IsCompensation,
+			&seExecutedAt,
+			&seNextRetryAt,
+			&se.CreatedAt,
+			&se.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		se.Status = step.ExecutionStatus(statusStr)
+		if seName.Valid {
+			se.Name = seName.String
+		}
+		if len(seConfig) > 0 {
+			se.Config = json.RawMessage(seConfig)
+		}
+		if seDependsOn.Valid && len(seDependsOn.String) > 0 {
+			var deps []string
+			if err := json.Unmarshal([]byte(seDependsOn.String), &deps); err == nil {
+				se.DependsOn = deps
+			}
+		}
+		if seOutput.Valid && len(seOutput.String) > 0 {
+			se.Output = json.RawMessage(seOutput.String)
+		}
+		if seErrorMsg.Valid {
+			se.ErrorMessage = &seErrorMsg.String
+		}
+		if seLockedBy.Valid {
+			se.LockedBy = &seLockedBy.String
+		}
+		if seLockedUntil.Valid {
+			se.LockedUntil = &seLockedUntil.Time
+		}
+		if seExecutedAt.Valid {
+			se.ExecutedAt = &seExecutedAt.Time
+		}
+		if seNextRetryAt.Valid {
+			se.NextRetryAt = &seNextRetryAt.Time
+		}
+		steps = append(steps, se)
+	}
+	return steps, rows.Err()
+}

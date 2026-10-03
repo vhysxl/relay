@@ -133,3 +133,43 @@ func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request
 	util.WriteJSON(w, http.StatusCreated, resp)
 }
 
+func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	wfs, err := h.logic.ListWorkflows(r.Context())
+	if err != nil {
+		util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if wfs == nil {
+		wfs = []Workflow{}
+	}
+	util.WriteJSON(w, http.StatusOK, wfs)
+}
+
+func (h *WorkflowHandler) ListExecutions(w http.ResponseWriter, r *http.Request) {
+	execs, err := h.logic.ListExecutions(r.Context())
+	if err != nil {
+		util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	if execs == nil {
+		execs = []step.WorkflowExecution{}
+	}
+	util.WriteJSON(w, http.StatusOK, execs)
+}
+
+func (h *WorkflowHandler) GetExecution(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "execution id is required"})
+		return
+	}
+
+	exec, err := h.logic.GetExecution(r.Context(), id)
+	if err != nil {
+		util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		return
+	}
+	util.WriteJSON(w, http.StatusOK, exec)
+}
+
+

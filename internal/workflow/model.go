@@ -57,13 +57,19 @@ type ExecuteWorkflowResponse struct {
 type WorkflowLogic interface {
 	CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error)
 	GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
+	ListWorkflows(ctx context.Context) ([]Workflow, error)
 	ExecuteWorkflow(ctx context.Context, workflowID string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error)
+	ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error)
+	GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error)
 }
 
 type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *Workflow) (*Workflow, error)
 	GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
+	ListWorkflows(ctx context.Context) ([]Workflow, error)
 	ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
+	ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error)
+	GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error)
 	// DeleteWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
 }
 
