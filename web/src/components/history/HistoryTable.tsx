@@ -31,7 +31,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                 Status
               </th>
               <th scope="col" className="px-5 py-3">
-                Workflow ID
+                Workflow
               </th>
               <th scope="col" className="px-5 py-3">
                 Type
@@ -73,7 +73,6 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                 }
 
                 const startedAt = formatTimestamp(item.created_at)
-                const isRunning = item.status === 'RUNNING' || item.status === 'COMPENSATING'
                 const isFinished = [
                   'COMPLETED',
                   'FAILED',
@@ -81,6 +80,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                   'COMPENSATION_FAILED',
                   'CANCELLED',
                 ].includes(item.status)
+                const isFailed = item.status === 'FAILED' || item.status === 'COMPENSATION_FAILED'
 
                 const displayName = item.workflow_name || item.name || ''
 
@@ -88,7 +88,11 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                   <tr
                     key={item.id}
                     onClick={() => onSelectExecution(item.id)}
-                    className="hover:bg-slate-50/70 cursor-pointer transition-colors group"
+                    className={`cursor-pointer transition-colors group ${
+                      isFailed
+                        ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                        : 'hover:bg-slate-50/70'
+                    }`}
                   >
                     <td className="px-5 py-3 whitespace-nowrap">
                       <StatusBadge status={item.status} size="sm" />
@@ -106,20 +110,11 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                         {execType}
                       </span>
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap font-mono text-xs text-slate-500">
+                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-slate-600">
                       {startedAt}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap font-mono text-xs text-slate-500">
-                      {isFinished ? (
-                        formatTimestamp(item.updated_at || item.created_at)
-                      ) : isRunning ? (
-                        <span className="inline-flex items-center text-xs text-slate-700 font-medium">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-700 animate-pulse mr-1.5" />
-                          In Progress
-                        </span>
-                      ) : (
-                        '—'
-                      )}
+                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-slate-600">
+                      {isFinished ? formatTimestamp(item.updated_at || item.created_at) : '—'}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-right">
                       <span className="inline-flex items-center space-x-1 text-xs font-medium text-slate-400 group-hover:text-slate-800 transition">
