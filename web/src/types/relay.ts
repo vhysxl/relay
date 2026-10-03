@@ -67,4 +67,4 @@ export interface Execution {
   steps?: StepExecution[]
 }
 
-export type ViewMode = 'dashboard' | 'workflows' | 'history' | 'execution-detail' | 'settings'
+export type ViewMode = 'dashboard' | 'workflows' | 'history' | 'execution-detail'

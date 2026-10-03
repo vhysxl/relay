@@ -6,7 +6,6 @@ import { DashboardView } from './components/dashboard/DashboardView'
 import { WorkflowsView } from './components/workflows/WorkflowsView'
 import { HistoryView } from './components/history/HistoryView'
 import { ExecutionDetailView } from './components/execution-detail/ExecutionDetailView'
-import { SettingsView } from './components/settings/SettingsView'
 import { mockWorkflows, mockExecutions } from './data/mockData'
 
 export const App: React.FC = () => {
@@ -89,9 +88,6 @@ export const App: React.FC = () => {
     } else if (hash === 'workflows') {
       setSelectedExecutionId(null)
       setCurrentView('workflows')
-    } else if (hash === 'settings') {
-      setSelectedExecutionId(null)
-      setCurrentView('settings')
     } else {
       setSelectedExecutionId(null)
       setCurrentView('dashboard')
@@ -115,8 +111,6 @@ export const App: React.FC = () => {
       window.location.hash = 'history'
     } else if (view === 'workflows') {
       window.location.hash = 'workflows'
-    } else if (view === 'settings') {
-      window.location.hash = 'settings'
     } else {
       window.location.hash = 'dashboard'
     }
@@ -176,13 +170,6 @@ export const App: React.FC = () => {
             <ExecutionDetailView
               executionId={selectedExecutionId}
               onBack={() => navigateToView('history')}
-            />
-          )}
-
-          {currentView === 'settings' && (
-            <SettingsView
-              isMockMode={isMockMode}
-              onToggleMockMode={handleToggleMockMode}
             />
           )}
         </main>
