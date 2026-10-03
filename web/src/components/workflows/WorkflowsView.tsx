@@ -59,11 +59,11 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         </div>
       </div>
 
-      {/* Clean Table Card matching reference design */}
-      <div className="bg-white rounded-lg border-2 border-slate-200 shadow-xs overflow-hidden">
+      {/* Clean Table Card with defined outer border and thin inner borders */}
+      <div className="bg-white rounded-lg border-2 border-slate-300/80 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-left">
-            <thead className="bg-slate-50/75 border-b-2 border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          <table className="min-w-full divide-y divide-slate-100 text-left">
+            <thead className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
               <tr>
                 <th scope="col" className="px-5 py-3">
                   Name
@@ -79,7 +79,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 bg-white">
+            <tbody className="divide-y divide-slate-100 bg-white">
               {isLoading && workflows.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-5 py-12 text-center text-slate-400 text-xs">
@@ -104,7 +104,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                       className="hover:bg-slate-50/70 transition-colors group cursor-pointer"
                     >
                       {/* Name - larger font, hover shows underline */}
-                      <td className="px-5 py-4 whitespace-nowrap">
+                      <td className="px-5 py-3 whitespace-nowrap">
                         <div className="flex items-center space-x-3">
                           <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center text-slate-600 flex-shrink-0 group-hover:bg-slate-200/80 transition-colors">
                             <Layers className="w-4 h-4" />
@@ -116,21 +116,21 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                       </td>
 
                       {/* ID - larger font */}
-                      <td className="px-5 py-4 whitespace-nowrap">
+                      <td className="px-5 py-3 whitespace-nowrap">
                         <span className="font-mono text-sm text-slate-600">
                           {wf.id}
                         </span>
                       </td>
 
                       {/* Version */}
-                      <td className="px-5 py-4 whitespace-nowrap">
+                      <td className="px-5 py-3 whitespace-nowrap">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
                           v{wf.version ?? 1}
                         </span>
                       </td>
 
                       {/* Steps */}
-                      <td className="px-5 py-4 whitespace-nowrap">
+                      <td className="px-5 py-3 whitespace-nowrap">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-800 border border-slate-200/80">
                           {stepCount} {stepCount === 1 ? 'step' : 'steps'}
                         </span>
@@ -145,7 +145,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
 
         {/* Footer info */}
         {filteredWorkflows.length > 0 && (
-          <div className="px-5 py-3 bg-slate-50/40 border-t-2 border-slate-200 flex items-center justify-between text-xs text-slate-500">
+          <div className="px-5 py-2.5 bg-slate-50/40 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>
               Showing <strong>{filteredWorkflows.length}</strong> of{' '}
               <strong>{workflows.length}</strong> workflows
