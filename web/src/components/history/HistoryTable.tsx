@@ -15,7 +15,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
 }) => {
   if (executions.length === 0) {
     return (
-      <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-lg border-2 border-slate-200 shadow-xs overflow-hidden">
         <div className="px-6 py-12 text-center text-slate-400 text-xs">
           No execution history matches the selected filter.
         </div>
@@ -24,10 +24,10 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs overflow-hidden">
+    <div className="bg-white rounded-lg border-2 border-slate-200 shadow-xs overflow-hidden">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-left">
-          <thead className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+          <thead className="bg-slate-50/80 border-b-2 border-slate-200 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
             <tr>
               <th scope="col" className="px-6 py-3.5">
                 Status
@@ -49,7 +49,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white text-xs">
+          <tbody className="divide-y divide-slate-200 bg-white text-xs">
             {executions.map((item) => {
               let execType = 'http'
               if (item.steps && item.steps.length > 0) {
@@ -81,7 +81,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                     <StatusBadge status={item.status} size="sm" />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="font-mono text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition">
+                    <div className="font-mono text-sm font-bold text-slate-900 group-hover:text-emerald-700 transition">
                       {item.workflow_id}
                     </div>
                     {displayName && (
