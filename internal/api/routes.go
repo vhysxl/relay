@@ -18,10 +18,8 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
 	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
 
-	// Web Dashboard UI
-	mux.HandleFunc("GET /{$}", web.Handler())
-	mux.HandleFunc("GET /dashboard", web.Handler())
-	mux.HandleFunc("GET /history", web.Handler())
+	// Web Dashboard UI & Static Assets (SPA Fallback)
+	mux.HandleFunc("GET /", web.Handler())
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSON(w, http.StatusOK, "Task Queue Server Online")

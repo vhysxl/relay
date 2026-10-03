@@ -704,7 +704,21 @@ Dengan mekanisme ini, step-step yang tidak saling bergantung (paralel) akan lang
 #### 4. Prioritas Darurat Kompensasi (`Emergency Priority`)
 Klausa `ORDER BY se.is_compensation DESC, se.created_at ASC` memastikan bahwa ketika sebuah alur kerja gagal dan beralih ke status `COMPENSATING`, worker akan memprioritaskan step-step rollback terlebih dahulu sebelum memproses task normal baru, guna meminimalisir inkonsistensi data bisnis.
 
-#### 5. Observability Web Dashboard & Execution History
-Relay menyertakan dashboard internal yang di-embed langsung ke binary server:
-- **`http://localhost:8000/`** atau **`http://localhost:8000/dashboard`**: Menampilkan katalog definisi workflow dan resep step DAG yang terdaftar (nama alur, versi, urutan step, dependensi, rollback action, dan retry policy) dalam bentuk visual pipeline bersih tanpa runtime status.
+#### 5. Observability Web Dashboard & Execution History (React + Vite + Go Embed)
+Relay menyertakan dashboard internal berbasis **React, TypeScript, Vite, dan Tailwind CSS** yang dikompilasi dan di-embed langsung ke dalam single binary Go (`internal/web/dist`):
+- **`http://localhost:8000/`** atau **`http://localhost:8000/dashboard`**: Menampilkan katalog definisi workflow dan resep step DAG yang terdaftar (nama alur, versi, urutan step, dependensi, rollback action, dan retry policy) dalam bentuk visual pipeline bersih.
 - **`http://localhost:8000/history`**: Menampilkan tabel audit log riwayat eksekusi (`status`, `workflow_id`, `type`, `startedAt`, `endAt`) dilengkapi filter status, pencarian, dan tombol *Refresh*.
+- **Deep-linking & SPA Routing**: Mendukung navigasi langsung ke detail eksekusi (contoh: `#execution/{id}`) dengan visual trace DAG, status badge, error failure prompt, dan viewer payload JSON context.
+
+##### Frontend Development (Monorepo):
+```bash
+# Masuk ke direktori frontend
+cd web
+
+# Menjalankan dev server Vite dengan HMR (Hot Module Replacement)
+npm run dev
+
+# Kompilasi frontend ke folder Go embed (internal/web/dist)
+npm run build
+```
+Hasil build secara otomatis di-embed ke dalam binary Go saat `go build`, menjaga proses deployment tetap **1 binary executable / 1 container**.
