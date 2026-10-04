@@ -67,4 +67,16 @@ export interface Execution {
   steps?: StepExecution[]
 }
 
-export type ViewMode = 'dashboard' | 'workflows' | 'history' | 'execution-detail'
+export type ViewMode = 'dashboard' | 'workflows' | 'workflow-detail' | 'history' | 'execution-detail'
+
+export interface SystemMetrics {
+  cpu_percent: number
+  memory_used_mb: number
+  memory_total_mb: number
+  memory_percent: number
+  go_alloc_mb: number
+  go_sys_mb: number
+  goroutines: number
+  num_cpu: number
+  uptime_seconds: number
+}

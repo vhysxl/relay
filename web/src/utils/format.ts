@@ -35,3 +35,17 @@ export function formatJSON(data: any): string {
     return String(data)
   }
 }
+
+export function formatUptime(seconds?: number): string {
+  if (seconds === undefined || seconds === null || seconds < 0) return '—'
+  if (seconds < 60) return `${seconds}s`
+  const min = Math.floor(seconds / 60)
+  const remSec = seconds % 60
+  if (min < 60) return `${min}m ${remSec}s`
+  const hrs = Math.floor(min / 60)
+  const remMin = min % 60
+  if (hrs < 24) return `${hrs}h ${remMin}m`
+  const days = Math.floor(hrs / 24)
+  const remHrs = hrs % 24
+  return `${days}d ${remHrs}h`
+}

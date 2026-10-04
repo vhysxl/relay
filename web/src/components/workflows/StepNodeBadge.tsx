@@ -43,7 +43,7 @@ export const StepNodeBadge: React.FC<StepNodeBadgeProps> = ({ step, index, isLas
           {step.compensation && (
             <span
               className="inline-flex items-center text-xs font-semibold text-amber-800 bg-amber-100/80 border border-amber-300/80 px-2 py-0.5 rounded"
-              title="Has Saga rollback action"
+              title="Has rollback action"
             >
               Rollback
             </span>

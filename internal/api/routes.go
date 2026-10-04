@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/system"
 	"github.com/vhysxl/relay/internal/web"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/util"
@@ -23,6 +24,10 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		util.WriteJSON(w, http.StatusOK, "Task Queue Server Online")
+	})
+
+	mux.HandleFunc("GET /system/metrics", func(w http.ResponseWriter, r *http.Request) {
+		util.WriteJSON(w, http.StatusOK, system.GetMetrics())
 	})
 
 	mux.HandleFunc("GET /workflows", workflowHandler.ListWorkflows)

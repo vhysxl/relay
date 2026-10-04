@@ -367,3 +367,15 @@ export const mockExecutions: Execution[] = [
     ],
   },
 ]
+
+export const mockSystemMetrics = {
+  cpu_percent: 18.4,
+  memory_used_mb: 8420.5,
+  memory_total_mb: 16384.0,
+  memory_percent: 51.4,
+  go_alloc_mb: 28.6,
+  go_sys_mb: 42.1,
+  goroutines: 16,
+  num_cpu: 8,
+  uptime_seconds: 3720,
+}

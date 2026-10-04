@@ -1,0 +1,403 @@
+import React, { useState, useEffect } from 'react'
+import {
+  ArrowLeft,
+  RotateCw,
+  Play,
+  ShieldAlert,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+} from 'lucide-react'
+import type { Workflow, Execution } from '../../types/relay'
+import { StatusBadge } from '../common/StatusBadge'
+import { formatTimestamp, formatJSON } from '../../utils/format'
+import { mockWorkflows, mockExecutions } from '../../data/mockData'
+
+interface WorkflowDetailViewProps {
+  workflowId: string
+  onBack: () => void
+  onNavigateToExecution?: (executionId: string) => void
+}
+
+export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
+  workflowId,
+  onBack,
+  onNavigateToExecution,
+}) => {
+  const [workflow, setWorkflow] = useState<Workflow | null>(null)
+  const [recentExecutions, setRecentExecutions] = useState<Execution[]>([])
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isExecuting, setIsExecuting] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'dag' | 'raw'>('dag')
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
+
+  const toggleStepExpand = (stepId: string) => {
+    setExpandedSteps((prev) => ({ ...prev, [stepId]: !prev[stepId] }))
+  }
+
+  const fetchWorkflow = async () => {
+    setIsLoading(true)
+    setError(null)
+
+    const mockMatch = mockWorkflows.find((w) => w.id === workflowId)
+
+    try {
+      const [wfRes, execRes] = await Promise.all([
+        fetch(`/workflows/${encodeURIComponent(workflowId)}`).catch(() => null),
+        fetch('/executions').catch(() => null),
+      ])
+
+      if (wfRes && wfRes.ok) {
+        const data = await wfRes.json()
+        setWorkflow(data)
+      } else if (mockMatch) {
+        setWorkflow(mockMatch)
+      } else {
+        throw new Error(`Workflow "${workflowId}" not found`)
+      }
+
+      if (execRes && execRes.ok) {
+        const execs: Execution[] = await execRes.json().catch(() => [])
+        setRecentExecutions(execs.filter((e) => e.workflow_id === workflowId))
+      } else {
+        setRecentExecutions(mockExecutions.filter((e) => e.workflow_id === workflowId))
+      }
+    } catch (err: any) {
+      if (mockMatch) {
+        setWorkflow(mockMatch)
+        setRecentExecutions(mockExecutions.filter((e) => e.workflow_id === workflowId))
+      } else {
+        setError(err.message || 'Failed to load workflow')
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchWorkflow()
+  }, [workflowId])
+
+  const handleExecute = async () => {
+    setIsExecuting(true)
+    try {
+      const res = await fetch(`/workflows/${encodeURIComponent(workflowId)}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+
+      if (res.ok) {
+        const result = await res.json().catch(() => null)
+        if (result && result.id && onNavigateToExecution) {
+          onNavigateToExecution(result.id)
+          return
+        }
+      }
+      fetchWorkflow()
+    } catch (err) {
+      console.warn('Execute failed, falling back to refresh:', err)
+    } finally {
+      setIsExecuting(false)
+    }
+  }
+
+  if (isLoading && !workflow) {
+    return (
+      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-12 text-center space-y-3 shadow-xs">
+        <Loader2 className="animate-spin h-7 w-7 text-slate-600 mx-auto" />
+        <p className="text-sm font-semibold text-slate-800">Loading Workflow Definition...</p>
+        <p className="text-xs font-mono text-slate-400">{workflowId}</p>
+      </div>
+    )
+  }
+
+  if (error || !workflow) {
+    return (
+      <div className="bg-white rounded-lg border-[1.5px] border-rose-300/80 p-8 text-center space-y-3 shadow-xs">
+        <h3 className="text-base font-bold text-slate-900">Workflow Not Found</h3>
+        <p className="text-xs text-rose-600">{error || 'Could not find workflow'}</p>
+        <div className="pt-2">
+          <button
+            onClick={onBack}
+            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition cursor-pointer"
+          >
+            Back to Workflows
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const steps = workflow.steps || []
+  const hasCompensation = steps.some((s) => s.compensation)
+
+  return (
+    <div className="space-y-4">
+      {/* Top Header Block matching standard pages */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-slate-200/70">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={onBack}
+            className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 shadow-2xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            title="Back to workflows"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold tracking-tight text-slate-900">{workflow.name}</h1>
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
+                v{workflow.version}
+              </span>
+            </div>
+            <p className="text-xs font-mono text-slate-500">ID: {workflow.id}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={fetchWorkflow}
+            disabled={isLoading}
+            className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+          >
+            <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            onClick={handleExecute}
+            disabled={isExecuting}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+          >
+            <Play className={`w-3.5 h-3.5 ${isExecuting ? 'animate-spin' : ''}`} />
+            <span>{isExecuting ? 'Triggering...' : 'Run Workflow'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Summary KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+            Steps
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-2xl font-bold tracking-tight text-slate-900">{steps.length}</span>
+            <span className="text-xs text-slate-500 font-medium">DAG Nodes</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+            Rollbacks
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-2xl font-bold tracking-tight text-slate-900">
+              {hasCompensation ? 'Enabled' : 'None'}
+            </span>
+            <span className="text-xs text-slate-500 font-medium">
+              {steps.filter((s) => s.compensation).length} steps
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+            Executions
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-2xl font-bold tracking-tight text-slate-900">
+              {recentExecutions.length}
+            </span>
+            <span className="text-xs text-slate-500 font-medium">Runs</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+            Created
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-xs font-mono font-bold text-slate-800">
+              {formatTimestamp(workflow.created_at)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs: Step Pipeline vs Raw JSON */}
+      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
+        <div className="px-5 py-3 bg-slate-50/75 border-b border-slate-200/80 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setActiveTab('dag')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                activeTab === 'dag'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Step Pipeline ({steps.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('raw')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+                activeTab === 'raw'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Raw Definition
+            </button>
+          </div>
+        </div>
+
+        {activeTab === 'dag' ? (
+          <div className="divide-y divide-slate-100">
+            {steps.length === 0 ? (
+              <div className="px-5 py-10 text-center text-slate-400 text-xs">
+                No steps defined in this workflow.
+              </div>
+            ) : (
+              steps.map((step, idx) => {
+                const isExpanded = expandedSteps[step.id]
+                return (
+                  <div key={step.id || idx} className="p-4 space-y-3">
+                    <div
+                      onClick={() => toggleStepExpand(step.id)}
+                      className="flex items-center justify-between cursor-pointer group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <span className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 font-mono font-bold text-xs flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-slate-900 group-hover:underline">
+                              {step.name}
+                            </span>
+                            <span className="font-mono text-xs text-slate-400">({step.id})</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <span className="px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-slate-100 text-slate-700 border border-slate-200/80">
+                          {step.type}
+                        </span>
+                        {step.compensation && (
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                            Rollback
+                          </span>
+                        )}
+                        {step.retry?.max_attempts && (
+                          <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200/80">
+                            {step.retry.max_attempts}x
+                          </span>
+                        )}
+                        <span className="text-slate-400 pl-1">
+                          {isExpanded ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Expanded Step Details */}
+                    {isExpanded && (
+                      <div className="mt-2 pl-9 space-y-3 pt-2 border-t border-slate-100 text-xs">
+                        {step.depends_on && step.depends_on.length > 0 && (
+                          <div>
+                            <span className="text-slate-500 font-medium">Depends on: </span>
+                            <span className="font-mono text-slate-800">
+                              {step.depends_on.join(', ')}
+                            </span>
+                          </div>
+                        )}
+
+                        {step.config && (
+                          <div className="space-y-1">
+                            <span className="text-slate-500 font-medium">Configuration:</span>
+                            <pre className="p-3 bg-slate-50 border border-slate-200 rounded-md font-mono text-slate-800 text-[11px] overflow-x-auto">
+                              {formatJSON(step.config)}
+                            </pre>
+                          </div>
+                        )}
+
+                        {step.compensation && (
+                          <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-md space-y-1.5">
+                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
+                              <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
+                              <span>Rollback: {step.compensation.name}</span>
+                            </div>
+                            {step.compensation.config && (
+                              <pre className="p-2 bg-white border border-purple-200 rounded font-mono text-slate-800 text-[11px] overflow-x-auto">
+                                {formatJSON(step.compensation.config)}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </div>
+        ) : (
+          <div className="p-4">
+            <pre className="p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto">
+              {formatJSON(workflow)}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      {/* Recent Executions Table for this Workflow */}
+      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
+        <div className="px-5 py-3 bg-slate-50/75 border-b border-slate-200/80 flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+            Recent Executions
+          </h2>
+        </div>
+
+        <div className="divide-y divide-slate-100">
+          {recentExecutions.length === 0 ? (
+            <div className="px-5 py-8 text-center text-slate-400 text-xs">
+              No executions recorded for this workflow yet.
+            </div>
+          ) : (
+            recentExecutions.map((exec) => (
+              <div
+                key={exec.id}
+                onClick={() => onNavigateToExecution && onNavigateToExecution(exec.id)}
+                className="px-5 py-3 hover:bg-slate-50/70 transition-colors group cursor-pointer flex items-center justify-between text-xs"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-slate-900 group-hover:underline">
+                      #{exec.id.slice(0, 10)}
+                    </span>
+                    <span className="font-mono text-slate-400">
+                      {formatTimestamp(exec.created_at)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <StatusBadge status={exec.status} size="sm" />
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700 transition" />
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

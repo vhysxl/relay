@@ -60,7 +60,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     count: number | null
   ) => {
     const isActive =
-      currentView === id || (id === 'history' && currentView === 'execution-detail')
+      currentView === id ||
+      (id === 'history' && currentView === 'execution-detail') ||
+      (id === 'workflows' && currentView === 'workflow-detail')
 
     return (
       <button

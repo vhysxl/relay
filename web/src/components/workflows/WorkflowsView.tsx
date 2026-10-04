@@ -6,12 +6,14 @@ interface WorkflowsViewProps {
   workflows: Workflow[]
   isLoading: boolean
   onRefresh: () => void
+  onSelectWorkflow: (id: string) => void
 }
 
 export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
   workflows,
   isLoading,
   onRefresh,
+  onSelectWorkflow,
 }) => {
   const [searchTerm, setSearchTerm] = useState('')
 
@@ -101,6 +103,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                   return (
                     <tr
                       key={wf.id}
+                      onClick={() => onSelectWorkflow(wf.id)}
                       className="hover:bg-slate-50/70 transition-colors group cursor-pointer"
                     >
                       {/* Name - hover shows underline */}
