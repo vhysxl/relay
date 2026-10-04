@@ -126,13 +126,13 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
             className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
             <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh Details</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
 
       {/* Summary Header Card */}
-      <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-5 space-y-4">
+      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs p-5 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-3">
@@ -142,20 +142,20 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
               <StatusBadge status={execution.status} size="md" />
             </div>
             <p className="text-xs font-mono text-slate-500">
-              Workflow Definition ID:{' '}
+              Workflow:{' '}
               <span className="font-semibold text-slate-700">{execution.workflow_id}</span>
             </p>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t md:border-t-0 md:border-l border-slate-100 pt-3 md:pt-0 md:pl-6 text-xs">
             <div>
-              <p className="text-slate-400 font-medium">Started At</p>
+              <p className="text-slate-400 font-medium">Started</p>
               <p className="font-mono font-semibold text-slate-700 mt-0.5">
                 {formatTimestamp(execution.created_at)}
               </p>
             </div>
             <div>
-              <p className="text-slate-400 font-medium">Completed At</p>
+              <p className="text-slate-400 font-medium">Completed</p>
               <p className="font-mono font-semibold text-slate-700 mt-0.5">
                 {execution.updated_at ? formatTimestamp(execution.updated_at) : '—'}
               </p>
@@ -180,7 +180,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
               <AlertTriangle className="w-5 h-5 text-rose-600" />
             </div>
             <div className="flex-1 space-y-0.5">
-              <h3 className="text-sm font-bold text-rose-900">Workflow Execution Failed</h3>
+              <h3 className="text-sm font-bold text-rose-900">Execution Failed</h3>
               <p className="text-xs text-rose-700">
                 {failedSteps.length > 0 ? (
                   <>
@@ -226,7 +226,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
             <div className="flex items-center space-x-2">
               <FileCode className="w-4 h-4 text-slate-500" />
               <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                Workflow Context Payload
+                Context Payload
               </span>
             </div>
             <ChevronDown className="w-4 h-4 text-slate-400 group-open:rotate-180 transition" />
@@ -239,23 +239,17 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         </details>
       )}
 
-      {/* Execution Nodes Trace */}
-      <div className="space-y-4 pt-2">
+      {/* Steps */}
+      <div className="space-y-4 pt-1">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
+          <div className="flex items-center space-x-2">
             <h3 className="text-base font-bold text-slate-900 tracking-tight">
-              Execution Nodes Trace
+              Steps
             </h3>
             <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200/80">
-              {steps.length} Nodes
+              {completedStepsCount}/{steps.length}
             </span>
-            {completedStepsCount > 0 && (
-              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                {completedStepsCount}/{steps.length} completed
-              </span>
-            )}
           </div>
-          <div className="text-xs text-slate-500 font-medium">Detailed step-by-step trace</div>
         </div>
 
         <div>

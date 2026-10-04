@@ -142,11 +142,11 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
         <div className="flex flex-wrap items-center gap-2.5 text-xs pl-2 font-mono text-slate-600">
           {step.depends_on && step.depends_on.length > 0 && (
             <span className="text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-md font-medium">
-              depends on: {step.depends_on.join(', ')}
+              depends: {step.depends_on.join(', ')}
             </span>
           )}
           <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200/80 font-medium">
-            Attempt: {step.attempt || 1} / {step.max_attempts || 1}
+            Attempt: {step.attempt || 1}/{step.max_attempts || 1}
           </span>
           {step.timeout_seconds && (
             <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200/80 font-medium">
@@ -165,7 +165,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
           <div className="ml-2 bg-rose-50 border border-rose-200 rounded-md p-3.5 space-y-1.5 shadow-xs">
             <div className="flex items-center space-x-1.5 text-xs font-bold text-rose-800 uppercase tracking-wide">
               <AlertCircle className="w-4 h-4 text-rose-600 stroke-[2]" />
-              <span>Step Failure Error Message</span>
+              <span>Error</span>
             </div>
             <pre className="bg-white border border-rose-200 text-rose-700 p-3 rounded-md text-xs font-mono whitespace-pre-wrap break-words leading-relaxed">
               {step.error_message}
@@ -186,7 +186,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
             >
               <summary className="cursor-pointer font-semibold text-slate-700 flex items-center justify-between select-none hover:text-slate-900 transition">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-bold text-slate-800">Node Configuration</span>
+                  <span className="font-bold text-slate-800">Configuration</span>
                   {parsedConfig?.url && (
                     <>
                       <span className="font-mono text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
@@ -225,7 +225,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
               open
             >
               <summary className="cursor-pointer font-semibold text-emerald-800 flex items-center justify-between select-none hover:text-emerald-900 transition">
-                <span className="font-bold">Step Output / Execution Result</span>
+                <span className="font-bold">Output</span>
                 <ChevronDown className="w-3.5 h-3.5 text-emerald-600 group-open:rotate-180 transition ml-2 flex-shrink-0" />
               </summary>
               <div className="mt-2.5">

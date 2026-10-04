@@ -2,17 +2,20 @@ import React, { useState, useEffect } from 'react'
 import {
   ArrowLeft,
   RotateCw,
-  Play,
   ShieldAlert,
   ChevronDown,
   ChevronRight,
   ExternalLink,
   Loader2,
+  Workflow as WorkflowIcon,
+  ListOrdered,
+  FileCode,
 } from 'lucide-react'
 import type { Workflow, Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
 import { formatTimestamp, formatJSON } from '../../utils/format'
 import { mockWorkflows, mockExecutions } from '../../data/mockData'
+import { WorkflowDagCanvas } from './WorkflowDagCanvas'
 
 interface WorkflowDetailViewProps {
   workflowId: string
@@ -28,9 +31,8 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
   const [recentExecutions, setRecentExecutions] = useState<Execution[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
-  const [isExecuting, setIsExecuting] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'dag' | 'raw'>('dag')
+  const [activeTab, setActiveTab] = useState<'canvas' | 'list' | 'raw'>('canvas')
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
 
   const toggleStepExpand = (stepId: string) => {
@@ -80,29 +82,6 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
     fetchWorkflow()
   }, [workflowId])
 
-  const handleExecute = async () => {
-    setIsExecuting(true)
-    try {
-      const res = await fetch(`/workflows/${encodeURIComponent(workflowId)}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      })
-
-      if (res.ok) {
-        const result = await res.json().catch(() => null)
-        if (result && result.id && onNavigateToExecution) {
-          onNavigateToExecution(result.id)
-          return
-        }
-      }
-      fetchWorkflow()
-    } catch (err) {
-      console.warn('Execute failed, falling back to refresh:', err)
-    } finally {
-      setIsExecuting(false)
-    }
-  }
 
   if (isLoading && !workflow) {
     return (
@@ -167,15 +146,6 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
             <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
-
-          <button
-            onClick={handleExecute}
-            disabled={isExecuting}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
-          >
-            <Play className={`w-3.5 h-3.5 ${isExecuting ? 'animate-spin' : ''}`} />
-            <span>{isExecuting ? 'Triggering...' : 'Run Workflow'}</span>
-          </button>
         </div>
       </div>
 
@@ -229,34 +199,53 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         </div>
       </div>
 
-      {/* Tabs: Step Pipeline vs Raw JSON */}
+      {/* Tabs: DAG Canvas vs Step List vs Raw JSON */}
       <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
         <div className="px-5 py-3 bg-slate-50/75 border-b border-slate-200/80 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setActiveTab('dag')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
-                activeTab === 'dag'
+              onClick={() => setActiveTab('canvas')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'canvas'
                   ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
                   : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              Step Pipeline ({steps.length})
+              <WorkflowIcon className="w-3.5 h-3.5" />
+              <span>DAG Canvas</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('list')}
+              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'list'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              <span>Step List ({steps.length})</span>
             </button>
             <button
               onClick={() => setActiveTab('raw')}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'raw'
                   ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
                   : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              Raw Definition
+              <FileCode className="w-3.5 h-3.5" />
+              <span>Raw Definition</span>
             </button>
           </div>
         </div>
 
-        {activeTab === 'dag' ? (
+        {activeTab === 'canvas' && (
+          <div className="p-3">
+            <WorkflowDagCanvas steps={steps} workflowName={workflow.name} />
+          </div>
+        )}
+
+        {activeTab === 'list' && (
           <div className="divide-y divide-slate-100">
             {steps.length === 0 ? (
               <div className="px-5 py-10 text-center text-slate-400 text-xs">
@@ -350,7 +339,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               })
             )}
           </div>
-        ) : (
+        )}
+
+        {activeTab === 'raw' && (
           <div className="p-4">
             <pre className="p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto">
               {formatJSON(workflow)}
