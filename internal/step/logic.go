@@ -14,8 +14,9 @@ var (
 	ErrDependencyNotFound  = errors.New("dependency step not found in workflow")
 	ErrSelfDependency      = errors.New("step cannot depend on itself")
 	ErrCyclicDependency    = errors.New("cyclic dependency detected in workflow steps")
-	ErrInvalidRetryPolicy  = errors.New("invalid retry policy")
-	ErrInvalidCompensation = errors.New("invalid compensation configuration")
+	ErrInvalidRetryPolicy       = errors.New("invalid retry policy")
+	ErrInvalidCompensation      = errors.New("invalid compensation configuration")
+	ErrIrreversibleCompensation = errors.New("irreversible step cannot define compensation")
 )
 
 type stepValidator struct{}
@@ -57,6 +58,10 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 			return ErrInvalidStepConfig
 		}
 
+		if s.Timeout < 0 {
+			return errors.New("step timeout cannot be negative")
+		}
+
 		if s.Retry != nil {
 			if s.Retry.MaxAttempts < 1 || s.Retry.Backoff < 0 || s.Retry.Multiplier < 0 || s.Retry.MaxBackoff < 0 {
 				return ErrInvalidRetryPolicy
@@ -67,6 +72,12 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 		}
 
 		if s.Compensation != nil {
+			if s.Irreversible {
+				return ErrIrreversibleCompensation
+			}
+			if s.Compensation.Timeout < 0 {
+				return errors.New("compensation timeout cannot be negative")
+			}
 			if s.Compensation.Type != StepTypeHTTP && s.Compensation.Type != StepTypeMessage {
 				return ErrInvalidCompensation
 			}

@@ -12,9 +12,11 @@ import (
 )
 
 type mockRepository struct {
-	createFn  func(ctx context.Context, wf *Workflow) (*Workflow, error)
-	getFn     func(ctx context.Context, id string) (*Workflow, error)
-	executeFn func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
+	createFn         func(ctx context.Context, wf *Workflow) (*Workflow, error)
+	getFn            func(ctx context.Context, id string) (*Workflow, error)
+	executeFn        func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
+	listWorkflowsFn  func(ctx context.Context) ([]Workflow, error)
+	listExecutionsFn func(ctx context.Context) ([]step.WorkflowExecution, error)
 }
 
 func (m *mockRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (*Workflow, error) {
@@ -44,10 +46,16 @@ func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, workflowID strin
 }
 
 func (m *mockRepository) ListWorkflows(ctx context.Context) ([]Workflow, error) {
+	if m.listWorkflowsFn != nil {
+		return m.listWorkflowsFn(ctx)
+	}
 	return []Workflow{}, nil
 }
 
 func (m *mockRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
+	if m.listExecutionsFn != nil {
+		return m.listExecutionsFn(ctx)
+	}
 	return []step.WorkflowExecution{}, nil
 }
 
@@ -251,6 +259,37 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 	}
 }
 
+func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.T) {
+	logic := NewWorkflowLogic(&mockRepository{}, step.NewStepValidator())
+	handler := NewWorkflowHandler(logic)
+
+	body, _ := json.Marshal(WorkflowRequest{
+		Name:    "irreversible-flow",
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:           "step-1",
+				Type:         step.StepTypeHTTP,
+				Config:       json.RawMessage(`{}`),
+				Irreversible: true,
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{}`),
+				},
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.CreateWorkflow(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for irreversible step with compensation, got %d", rec.Code)
+	}
+}
+
 func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	testWf := &Workflow{
 		ID:      "test-uuid-1234",
@@ -447,6 +486,58 @@ func TestWorkflowStatus_Constants(t *testing.T) {
 	}
 	if WorkflowStatusCancelled != "CANCELLED" {
 		t.Errorf("expected WorkflowStatusCancelled to be 'CANCELLED', got %q", WorkflowStatusCancelled)
+	}
+}
+
+func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
+	expectedSteps := []step.Step{
+		{ID: "s-1", Name: "Step 1", Type: step.StepTypeHTTP},
+		{ID: "s-2", Name: "Step 2", Type: step.StepTypeMessage},
+	}
+	repo := &mockRepository{
+		listWorkflowsFn: func(ctx context.Context) ([]Workflow, error) {
+			return []Workflow{
+				{ID: "wf-1", Name: "Order Flow", Steps: expectedSteps},
+				{ID: "wf-2", Name: "Invoice Flow", Steps: []step.Step{}},
+			}, nil
+		},
+	}
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
+	wfs, err := logic.ListWorkflows(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(wfs) != 2 {
+		t.Fatalf("expected 2 workflows, got %d", len(wfs))
+	}
+	if len(wfs[0].Steps) != 2 {
+		t.Errorf("expected 2 steps in wf-1, got %d", len(wfs[0].Steps))
+	}
+}
+
+func TestWorkflowLogic_ListExecutions_Batch(t *testing.T) {
+	expectedSteps := []step.StepExecution{
+		{ID: "se-1", StepID: "s-1", Status: step.StatusCompleted},
+		{ID: "se-2", StepID: "s-2", Status: step.StatusRunning},
+	}
+	repo := &mockRepository{
+		listExecutionsFn: func(ctx context.Context) ([]step.WorkflowExecution, error) {
+			return []step.WorkflowExecution{
+				{ID: "exec-1", WorkflowID: "wf-1", Status: step.StatusRunning, Steps: expectedSteps},
+				{ID: "exec-2", WorkflowID: "wf-2", Status: step.StatusCompleted, Steps: []step.StepExecution{}},
+			}, nil
+		},
+	}
+	logic := NewWorkflowLogic(repo, step.NewStepValidator())
+	execs, err := logic.ListExecutions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(execs) != 2 {
+		t.Fatalf("expected 2 executions, got %d", len(execs))
+	}
+	if len(execs[0].Steps) != 2 {
+		t.Errorf("expected 2 steps in exec-1, got %d", len(execs[0].Steps))
 	}
 }
 

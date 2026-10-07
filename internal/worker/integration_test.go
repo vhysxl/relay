@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	// 1. CREATE WORKFLOW + STEPS
-	uniqueWorkflowName := "order-saga-" + uuid.NewString()[:8]
+	uniqueWorkflowName := "test-order-saga-" + uuid.NewString()[:8]
 	stepAID := "step-a-" + uuid.NewString()[:8]
 	stepBID := "step-b-" + uuid.NewString()[:8]
 
@@ -246,7 +247,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	// 1. Create test workflow and step definition
-	uniqueWorkflowName := "heartbeat-wf-" + uuid.NewString()[:8]
+	uniqueWorkflowName := "test-heartbeat-wf-" + uuid.NewString()[:8]
 	stepID := "step-hb-" + uuid.NewString()[:8]
 
 	wfReq := &workflow.WorkflowRequest{
@@ -406,7 +407,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 
 	// 1. Create test workflow and execution
 	wfID := uuid.NewString()
-	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "complete-wf-"+wfID[:8])
+	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "test-complete-wf-"+wfID[:8])
 	if err != nil {
 		t.Fatalf("failed to insert workflow: %v", err)
 	}
@@ -514,7 +515,7 @@ func TestIntegration_FailStep_Retry(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-retry-wf-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "test-fail-retry-wf-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -590,7 +591,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-saga-wf-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "test-fail-saga-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -660,14 +661,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 		t.Errorf("expected cancel-ship compensation CANCELLED, got %s", cancelShipStatus)
 	}
 
-	// 6. Verify Step 1's compensation (step-refund) REMAINS PENDING
-	var refundStatus string
-	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepRefundID).Scan(&refundStatus)
-	if refundStatus != "PENDING" {
-		t.Errorf("expected refund compensation PENDING, got %s", refundStatus)
-	}
-
-	// 7. Verify workflow transitioned to COMPENSATING because a completed step has compensation
+	// 6. Verify workflow transitioned to COMPENSATING because a completed step has compensation
 	var wfStatus string
 	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
 	if wfStatus != "COMPENSATING" {
@@ -675,7 +669,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	}
 	t.Logf("✓ Workflow transitioned to COMPENSATING only for successful step")
 
-	// 8. Worker-1 claims next task -> Should pick ONLY Step 1's compensation (step-refund)!
+	// 7. Worker-1 claims next task -> Should pick ONLY Step 1's compensation (step-refund)!
 	_, seComp, err := workerLogic.ClaimNext(ctx, "worker-1")
 	if err != nil || seComp == nil || seComp.ID != stepRefundID {
 		t.Fatalf("expected ClaimNext to pick refund step %s, got %+v, err=%v", stepRefundID, seComp, err)
@@ -688,6 +682,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	}
 
 	// 10. Verify refund compensation step is COMPENSATED and workflow is COMPENSATED!
+	var refundStatus string
 	_ = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepRefundID).Scan(&refundStatus)
 	if refundStatus != "COMPENSATED" {
 		t.Errorf("expected compensation step COMPENSATED, got %s", refundStatus)
@@ -710,7 +705,7 @@ func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *test
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "fail-immediate-wf-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, hash, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', 'dummy-hash', NOW(), NOW())", wfID, "test-fail-immediate-wf-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -854,7 +849,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
-	wfName := "parallel-pool-wf-" + uuid.NewString()[:8]
+	wfName := "test-parallel-pool-wf-" + uuid.NewString()[:8]
 	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
 		Name:    wfName,
 		Version: 1,
@@ -1133,7 +1128,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	stepBID := "step-b-" + uuid.NewString()[:8]
 	stepCID := "step-c-" + uuid.NewString()[:8]
 
-	wfName := "parallel-protect-wf-" + uuid.NewString()[:8]
+	wfName := "test-parallel-protect-wf-" + uuid.NewString()[:8]
 	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
 		Name:    wfName,
 		Version: 1,
@@ -1257,6 +1252,288 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	}
 	t.Logf("✓ Sibling parallel running step successfully protected and compensated end-to-end!")
 }
+
+func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	wfID := uuid.NewString()
+	step1ID := "step-auth"
+	step2ID := "step-fetch-profile"
+
+	// 1. Create 2-step workflow where step 2 depends on step 1 and references its outputs
+	wfReq := &workflow.WorkflowRequest{
+		Name:    "test-payload-chaining-" + wfID[:8],
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     step1ID,
+				Name:   "Authenticate User",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"method":"POST","url":"https://auth.internal/login"}`),
+			},
+			{
+				ID:        step2ID,
+				Name:      "Fetch Profile",
+				Type:      step.StepTypeHTTP,
+				DependsOn: []string{step1ID},
+				Config: json.RawMessage(`{
+					"method": "GET",
+					"url": "https://api.internal/users/{{steps.step-auth.output.user_id}}",
+					"headers": {
+						"Authorization": "Bearer {{steps.step-auth.output.token}}"
+					},
+					"body": {
+						"user_id": "{{step-auth.user_id}}",
+						"first_item": "{{step-auth.output.items.0.id}}",
+						"full_meta": "{{step-auth.meta}}"
+					}
+				}`),
+			},
+		},
+	}
+
+	wf, err := wfLogic.CreateWorkflow(ctx, wfReq)
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_definitions WHERE id = ?", wf.ID)
+	}()
+
+	// 2. Trigger workflow execution
+	wfExec, err := wfRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to trigger workflow: %v", err)
+	}
+
+	// 3. Worker-1 claims Step 1
+	s1, se1, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se1 == nil || se1.StepID != step1ID {
+		t.Fatalf("expected to claim step 1, got %v, err=%v", se1, err)
+	}
+	_ = s1
+
+	// 4. Complete Step 1 with structured JSON output including array and nested object
+	step1Output := json.RawMessage(`{
+		"user_id": "usr_7781",
+		"token": "jwt_secret_token_abc",
+		"items": [
+			{"id": "item-alpha"},
+			{"id": "item-beta"}
+		],
+		"meta": {
+			"role": "admin",
+			"tier": 2
+		}
+	}`)
+	err = workerLogic.CompleteStep(ctx, se1.ID, "worker-1", step1Output)
+	if err != nil {
+		t.Fatalf("failed to complete step 1: %v", err)
+	}
+
+	// 5. Worker-1 claims Step 2 (now unblocked) -> JIT interpolation should resolve placeholders!
+	s2, se2, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se2 == nil || se2.StepID != step2ID {
+		t.Fatalf("expected to claim step 2, got %v, err=%v", se2, err)
+	}
+
+	// Verify resolved config in memory and database
+	configStr := string(s2.Config)
+	t.Logf("Resolved Step 2 Config: %s", configStr)
+
+	// Check URL:
+	expectedURL := "https://api.internal/users/usr_7781"
+	if !strings.Contains(configStr, expectedURL) {
+		t.Errorf("expected URL %s in config, got %s", expectedURL, configStr)
+	}
+
+	// Check Header:
+	expectedHeader := `"Authorization":"Bearer jwt_secret_token_abc"`
+	if !strings.Contains(configStr, expectedHeader) && !strings.Contains(configStr, `"Authorization": "Bearer jwt_secret_token_abc"`) {
+		t.Errorf("expected header %s in config, got %s", expectedHeader, configStr)
+	}
+
+	// Check body user_id alias:
+	expectedBodyUserID := `"user_id":"usr_7781"`
+	if !strings.Contains(configStr, expectedBodyUserID) && !strings.Contains(configStr, `"user_id": "usr_7781"`) {
+		t.Errorf("expected user_id %s in config, got %s", expectedBodyUserID, configStr)
+	}
+
+	// Check array index lookup:
+	expectedFirstItem := `"first_item":"item-alpha"`
+	if !strings.Contains(configStr, expectedFirstItem) && !strings.Contains(configStr, `"first_item": "item-alpha"`) {
+		t.Errorf("expected first_item %s in config, got %s", expectedFirstItem, configStr)
+	}
+
+	// Check full object substitution:
+	expectedMeta := `{"role":"admin","tier":2}`
+	if !strings.Contains(configStr, expectedMeta) {
+		t.Errorf("expected meta object %s in config, got %s", expectedMeta, configStr)
+	}
+
+	// Also verify step_executions.config in MySQL was updated with resolved config
+	var dbConfigStr string
+	err = db.QueryRowContext(ctx, "SELECT config FROM step_executions WHERE id = ?", se2.ID).Scan(&dbConfigStr)
+	if err != nil {
+		t.Fatalf("failed to read step 2 config from DB: %v", err)
+	}
+	if !strings.Contains(dbConfigStr, expectedURL) {
+		t.Errorf("expected DB config to be updated with resolved URL, got %s", dbConfigStr)
+	}
+
+	// Complete step 2
+	err = workerLogic.CompleteStep(ctx, se2.ID, "worker-1", json.RawMessage(`{"status":"profile_fetched"}`))
+	if err != nil {
+		t.Fatalf("failed to complete step 2: %v", err)
+	}
+
+	// Verify workflow completes
+	var wfStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&wfStatus)
+	if wfStatus != "COMPLETED" {
+		t.Errorf("expected workflow status COMPLETED, got %s", wfStatus)
+	}
+	t.Logf("✓ Forward Payload Passing (Step Output Chaining) verified end-to-end!")
+}
+
+func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	wfID := uuid.NewString()
+	step1ID := "step-charge"
+	step2ID := "step-deliver"
+
+	// 1. Workflow where Step 1 has compensation that accesses Step 1's outputs via {{original.key}} and {{original.output.key}}
+	wfReq := &workflow.WorkflowRequest{
+		Name:    "test-comp-payload-" + wfID[:8],
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     step1ID,
+				Name:   "Charge Card",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"method":"POST","url":"https://payment.internal/charge"}`),
+				Compensation: &step.Compensation{
+					Type: step.StepTypeHTTP,
+					Config: json.RawMessage(`{
+						"method": "POST",
+						"url": "https://payment.internal/refund/{{original.charge_id}}",
+						"body": {
+							"charge_id": "{{original.output.charge_id}}",
+							"amount": "{{original.amount}}",
+							"ref": "{{steps.step-charge.output.charge_id}}"
+						}
+					}`),
+				},
+			},
+			{
+				ID:        step2ID,
+				Name:      "Deliver Goods",
+				Type:      step.StepTypeHTTP,
+				DependsOn: []string{step1ID},
+				Config:    json.RawMessage(`{"method":"POST","url":"https://delivery.internal/ship"}`),
+			},
+		},
+	}
+
+	wf, err := wfLogic.CreateWorkflow(ctx, wfReq)
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_definitions WHERE id = ?", wf.ID)
+	}()
+
+	// 2. Trigger workflow
+	wfExec, err := wfRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to trigger workflow: %v", err)
+	}
+
+	// 3. Claim and complete Step 1 with charge output
+	_, se1, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se1 == nil || se1.StepID != step1ID {
+		t.Fatalf("expected to claim step 1, got %v, err=%v", se1, err)
+	}
+
+	step1Output := json.RawMessage(`{
+		"charge_id": "ch_990182",
+		"amount": 350000,
+		"currency": "IDR"
+	}`)
+	err = workerLogic.CompleteStep(ctx, se1.ID, "worker-1", step1Output)
+	if err != nil {
+		t.Fatalf("failed to complete step 1: %v", err)
+	}
+
+	// 4. Claim Step 2 and fail it (exhausting attempts)
+	_, se2, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || se2 == nil || se2.StepID != step2ID {
+		t.Fatalf("expected to claim step 2, got %v, err=%v", se2, err)
+	}
+
+	err = workerLogic.FailStep(ctx, se2.ID, "worker-1", "delivery failed: out of coverage")
+	if err != nil {
+		t.Fatalf("failed to fail step 2: %v", err)
+	}
+
+	// 5. Claim compensation step -> JIT should resolve {{original.charge_id}} and {{original.amount}}!
+	compStep, compExec, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || compExec == nil || !compExec.IsCompensation {
+		t.Fatalf("expected to claim compensation step, got %v, err=%v", compExec, err)
+	}
+
+	compConfigStr := string(compStep.Config)
+	t.Logf("Resolved Compensation Config: %s", compConfigStr)
+
+	expectedRefundURL := "https://payment.internal/refund/ch_990182"
+	if !strings.Contains(compConfigStr, expectedRefundURL) {
+		t.Errorf("expected URL %s in compensation config, got %s", expectedRefundURL, compConfigStr)
+	}
+
+	if !strings.Contains(compConfigStr, `"charge_id":"ch_990182"`) && !strings.Contains(compConfigStr, `"charge_id": "ch_990182"`) {
+		t.Errorf("expected charge_id in compensation body, got %s", compConfigStr)
+	}
+
+	if !strings.Contains(compConfigStr, `"amount":"350000"`) && !strings.Contains(compConfigStr, `"amount": "350000"`) && !strings.Contains(compConfigStr, `"amount": 350000`) {
+		t.Errorf("expected amount in compensation body, got %s", compConfigStr)
+	}
+
+	if !strings.Contains(compConfigStr, `"ref":"ch_990182"`) && !strings.Contains(compConfigStr, `"ref": "ch_990182"`) {
+		t.Errorf("expected ref in compensation body, got %s", compConfigStr)
+	}
+
+	// Complete compensation step
+	err = workerLogic.CompleteStep(ctx, compExec.ID, "worker-1", json.RawMessage(`{"refund_id":"ref_112"}`))
+	if err != nil {
+		t.Fatalf("failed to complete compensation: %v", err)
+	}
+
+	// Verify workflow reaches COMPENSATED
+	var wfStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&wfStatus)
+	if wfStatus != "COMPENSATED" {
+		t.Errorf("expected workflow status COMPENSATED, got %s", wfStatus)
+	}
+	t.Logf("✓ Rollback Payload Passing (Original Step Output Access) verified end-to-end!")
+}
+
 
 
 

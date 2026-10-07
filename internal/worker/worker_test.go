@@ -28,6 +28,10 @@ func (m *mockStepRepository) GetStepsByWorkflowID(ctx context.Context, workflowI
 	return nil, nil
 }
 
+func (m *mockStepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs []string) (map[string][]step.Step, error) {
+	return make(map[string][]step.Step), nil
+}
+
 func (m *mockStepRepository) GetStepByID(ctx context.Context, workflowID string, stepID string) (*step.Step, error) {
 	return nil, nil
 }

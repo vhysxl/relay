@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
+
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 var (
@@ -100,24 +103,40 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 }
 
 func (r *stepRepository) GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]Step, error) {
-	if r.db == nil {
-		return []Step{}, nil
+	stepsMap, err := r.GetStepsByWorkflowIDs(ctx, []string{workflowID})
+	if err != nil {
+		return nil, err
 	}
-	query := `
+	return stepsMap[workflowID], nil
+}
+
+func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs []string) (map[string][]Step, error) {
+	result := make(map[string][]Step)
+	if r.db == nil || len(workflowIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(workflowIDs))
+	args := make([]any, len(workflowIDs))
+	for i, id := range workflowIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
 		SELECT id, workflow_id, name, type, config, depends_on,
 		       timeout, retry, compensation, irreversible, created_at, updated_at
 		FROM step_definitions
-		WHERE workflow_id = ?
+		WHERE workflow_id IN (%s)
 		ORDER BY created_at ASC
-	`
+	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.QueryContext(ctx, query, workflowID)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var steps []Step
 	for rows.Next() {
 		var (
 			s            Step
@@ -172,14 +191,14 @@ func (r *stepRepository) GetStepsByWorkflowID(ctx context.Context, workflowID st
 			}
 		}
 
-		steps = append(steps, s)
+		result[s.WorkflowID] = append(result[s.WorkflowID], s)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return steps, nil
+	return result, nil
 }
 
 func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error) {
@@ -264,7 +283,12 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 	defer tx.Rollback()
 
 	// select candidate step with row lock and skip locked
-	selectQuery := `
+	excludeTestClause := ""
+	if strings.HasPrefix(workerID, "server-") {
+		excludeTestClause = "\n\t\t  AND we.workflow_id NOT IN (SELECT id FROM workflow_definitions WHERE name LIKE 'test-%')"
+	}
+
+	selectQuery := fmt.Sprintf(`
 		SELECT 
 			se.id, se.workflow_execution_id, se.step_id, se.name, se.type, se.config, se.depends_on,
 			se.status, se.output, se.error_message, se.attempt, se.max_attempts,
@@ -272,7 +296,8 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 			se.locked_by, se.locked_until, se.is_compensation, se.executed_at, se.next_retry_at,
 			se.created_at, se.updated_at,
 			sd.id, sd.workflow_id, sd.name, sd.type, sd.config, sd.depends_on,
-			sd.timeout, sd.retry, sd.compensation, sd.irreversible, sd.created_at, sd.updated_at
+			sd.timeout, sd.retry, sd.compensation, sd.irreversible, sd.created_at, sd.updated_at,
+			we.context, orig.output
 		FROM step_executions se
 		JOIN workflow_executions we ON se.workflow_execution_id = we.id
 		LEFT JOIN step_definitions sd ON sd.workflow_id = we.workflow_id AND sd.id = se.step_id
@@ -284,7 +309,7 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		      (se.status = 'PENDING' AND (se.locked_until IS NULL OR se.locked_until < NOW()))
 		      OR (se.status = 'RUNNING' AND se.locked_until < NOW() AND se.attempt < se.max_attempts)
 		  )
-		  AND (se.next_retry_at IS NULL OR se.next_retry_at <= NOW())
+		  AND (se.next_retry_at IS NULL OR se.next_retry_at <= NOW())%s
 		  AND (
 		      (
 		          we.status = 'COMPENSATING' 
@@ -318,7 +343,7 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		    se.created_at ASC
 		LIMIT 1
 		FOR UPDATE OF se SKIP LOCKED
-	`
+	`, excludeTestClause)
 
 	var (
 		se             StepExecution
@@ -344,6 +369,9 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		sdIrreversible sql.NullBool
 		sdCreatedAt    sql.NullTime
 		sdUpdatedAt    sql.NullTime
+
+		weContextStr   sql.NullString
+		origOutputStr  sql.NullString
 	)
 
 	// execute candidate query and scan columns
@@ -384,6 +412,8 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		&sdIrreversible,
 		&sdCreatedAt,
 		&sdUpdatedAt,
+		&weContextStr,
+		&origOutputStr,
 	)
 	if err != nil {
 		// return nil if no pending step is ready
@@ -393,6 +423,52 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		return nil, nil, fmt.Errorf("failed to scan candidate step: %w", err)
 	}
 
+	// assemble context map for JIT config interpolation
+	var workflowCtxMap map[string]interface{}
+	if weContextStr.Valid && len(weContextStr.String) > 0 {
+		_ = json.Unmarshal([]byte(weContextStr.String), &workflowCtxMap)
+	}
+	if workflowCtxMap == nil {
+		workflowCtxMap = make(map[string]interface{})
+	}
+
+	// if this is a compensation step, inject the original step's output under "original"
+	if se.IsCompensation && origOutputStr.Valid && len(origOutputStr.String) > 0 {
+		var origOutput interface{}
+		if err := json.Unmarshal([]byte(origOutputStr.String), &origOutput); err == nil {
+			origObj := make(map[string]interface{})
+			origObj["output"] = origOutput
+			if m, ok := origOutput.(map[string]interface{}); ok {
+				for k, v := range m {
+					if k != "output" {
+						origObj[k] = v
+					}
+				}
+			}
+			workflowCtxMap["original"] = origObj
+		}
+	}
+
+	rawConfigBytes := []byte(seConfigStr)
+	if len(rawConfigBytes) == 0 && !se.IsCompensation && sdConfigStr.Valid && len(sdConfigStr.String) > 0 {
+		rawConfigBytes = []byte(sdConfigStr.String)
+	}
+	if len(rawConfigBytes) == 0 {
+		rawConfigBytes = []byte("{}")
+	}
+
+	var resolvedConfigBytes []byte
+	if len(workflowCtxMap) > 0 {
+		ctxBytes, err := json.Marshal(workflowCtxMap)
+		if err == nil {
+			resolvedConfigBytes = util.InterpolateContext(rawConfigBytes, ctxBytes)
+		} else {
+			resolvedConfigBytes = rawConfigBytes
+		}
+	} else {
+		resolvedConfigBytes = rawConfigBytes
+	}
+
 	// update claimed row with worker lease and increment attempt
 	updateQuery := `
 		UPDATE step_executions
@@ -400,12 +476,13 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		    locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND),
 		    status = 'RUNNING',
 		    attempt = attempt + 1,
+		    config = ?,
 		    executed_at = NOW(),
 		    updated_at = NOW()
 		WHERE id = ?
 	`
 	lockSeconds := int(lockDuration.Seconds())
-	_, err = tx.ExecContext(ctx, updateQuery, workerID, lockSeconds, se.ID)
+	_, err = tx.ExecContext(ctx, updateQuery, workerID, lockSeconds, string(resolvedConfigBytes), se.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to update locked step execution: %w", err)
 	}
@@ -424,13 +501,11 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 	now := time.Now().UTC()
 	se.ExecutedAt = &now
 	se.UpdatedAt = now
+	se.Config = json.RawMessage(resolvedConfigBytes)
 
 	// hydrate nullable step execution fields
 	if seName.Valid {
 		se.Name = seName.String
-	}
-	if len(seConfigStr) > 0 {
-		se.Config = json.RawMessage(seConfigStr)
 	}
 	if seDependsOnStr.Valid && len(seDependsOnStr.String) > 0 {
 		var deps []string
@@ -465,14 +540,13 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		if sdWorkflowID.Valid {
 			s.WorkflowID = sdWorkflowID.String
 		}
-		if sdName.Valid {
-			s.Name = sdName.String
-		}
-		if sdType.Valid {
-			s.Type = StepType(sdType.String)
-		}
-		if sdConfigStr.Valid && len(sdConfigStr.String) > 0 {
-			s.Config = json.RawMessage(sdConfigStr.String)
+		if !se.IsCompensation {
+			if sdName.Valid {
+				s.Name = sdName.String
+			}
+			if sdType.Valid {
+				s.Type = StepType(sdType.String)
+			}
 		}
 		if sdDependsOnStr.Valid && len(sdDependsOnStr.String) > 0 {
 			var deps []string
@@ -570,14 +644,15 @@ func (r *stepRepository) CompleteStep(ctx context.Context, stepExecutionID strin
 	var (
 		workflowExecID string
 		isCompensation bool
+		stepID         string
 	)
 	query := `
-		SELECT workflow_execution_id, is_compensation
+		SELECT workflow_execution_id, is_compensation, step_id
 		FROM step_executions
 		WHERE id = ? AND locked_by = ? AND status = 'RUNNING'
 		FOR UPDATE
 	`
-	err = tx.QueryRowContext(ctx, query, stepExecutionID, workerID).Scan(&workflowExecID, &isCompensation)
+	err = tx.QueryRowContext(ctx, query, stepExecutionID, workerID).Scan(&workflowExecID, &isCompensation, &stepID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrLockLost
@@ -610,6 +685,77 @@ func (r *stepRepository) CompleteStep(ctx context.Context, stepExecutionID strin
 	`
 	if _, err := tx.ExecContext(ctx, updateQuery, targetStatus, outBytes, stepExecutionID); err != nil {
 		return fmt.Errorf("failed to update step execution to %s: %w", targetStatus, err)
+	}
+
+	// 3b. Accumulate step output into workflow_executions context for downstream payload passing
+	var wfContextRaw sql.NullString
+	getWfCtxQuery := `SELECT context FROM workflow_executions WHERE id = ? FOR UPDATE`
+	if err := tx.QueryRowContext(ctx, getWfCtxQuery, workflowExecID).Scan(&wfContextRaw); err != nil {
+		return fmt.Errorf("failed to read workflow context: %w", err)
+	}
+
+	var ctxMap map[string]interface{}
+	if wfContextRaw.Valid && len(wfContextRaw.String) > 0 {
+		_ = json.Unmarshal([]byte(wfContextRaw.String), &ctxMap)
+	}
+	if ctxMap == nil {
+		ctxMap = make(map[string]interface{})
+	}
+
+	var parsedOutput interface{}
+	if err := json.Unmarshal(outBytes, &parsedOutput); err == nil {
+		stepsMap, ok := ctxMap["steps"].(map[string]interface{})
+		if !ok {
+			stepsMap = make(map[string]interface{})
+			ctxMap["steps"] = stepsMap
+		}
+
+		if !isCompensation {
+			stepObj, ok := stepsMap[stepID].(map[string]interface{})
+			if !ok {
+				stepObj = make(map[string]interface{})
+				stepsMap[stepID] = stepObj
+			}
+			stepObj["output"] = parsedOutput
+
+			// Add direct key aliases if parsedOutput is an object
+			if outMap, ok := parsedOutput.(map[string]interface{}); ok {
+				for k, v := range outMap {
+					if k != "output" {
+						stepObj[k] = v
+					}
+				}
+			}
+
+			// Alias at root level for shorthand {{<stepID>.key}} or {{<stepID>.output.key}}
+			ctxMap[stepID] = stepObj
+		} else {
+			// For compensation steps
+			stepObj, ok := stepsMap[stepID].(map[string]interface{})
+			if !ok {
+				stepObj = make(map[string]interface{})
+				stepsMap[stepID] = stepObj
+			}
+			compObj, ok := stepObj["compensation"].(map[string]interface{})
+			if !ok {
+				compObj = make(map[string]interface{})
+				stepObj["compensation"] = compObj
+			}
+			compObj["output"] = parsedOutput
+		}
+
+		updatedCtxBytes, err := json.Marshal(ctxMap)
+		if err == nil {
+			updateWfCtxQuery := `
+				UPDATE workflow_executions
+				SET context = ?,
+				    updated_at = NOW()
+				WHERE id = ?
+			`
+			if _, err := tx.ExecContext(ctx, updateWfCtxQuery, string(updatedCtxBytes), workflowExecID); err != nil {
+				return fmt.Errorf("failed to update workflow context: %w", err)
+			}
+		}
 	}
 
 	// 4. Check if workflow execution is complete

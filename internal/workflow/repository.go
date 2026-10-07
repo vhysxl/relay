@@ -431,7 +431,28 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 		}
 		wfs = append(wfs, wf)
 	}
-	return wfs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if r.stepRepo != nil && len(wfs) > 0 {
+		wfIDs := make([]string, len(wfs))
+		for i, wf := range wfs {
+			wfIDs[i] = wf.ID
+		}
+		stepsMap, err := r.stepRepo.GetStepsByWorkflowIDs(ctx, wfIDs)
+		if err == nil {
+			for i := range wfs {
+				if steps, ok := stepsMap[wfs[i].ID]; ok {
+					wfs[i].Steps = steps
+				} else {
+					wfs[i].Steps = []step.Step{}
+				}
+			}
+		}
+	}
+
+	return wfs, nil
 }
 
 func (r *workflowRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
@@ -480,10 +501,20 @@ func (r *workflowRepository) ListExecutions(ctx context.Context) ([]step.Workflo
 		return nil, err
 	}
 
-	for i := range execs {
-		steps, err := r.getStepExecutions(ctx, execs[i].ID)
+	if len(execs) > 0 {
+		execIDs := make([]string, len(execs))
+		for i, exec := range execs {
+			execIDs[i] = exec.ID
+		}
+		stepsMap, err := r.getStepExecutionsByWorkflowExecIDs(ctx, execIDs)
 		if err == nil {
-			execs[i].Steps = steps
+			for i := range execs {
+				if steps, ok := stepsMap[execs[i].ID]; ok {
+					execs[i].Steps = steps
+				} else {
+					execs[i].Steps = []step.StepExecution{}
+				}
+			}
 		}
 	}
 
@@ -535,23 +566,43 @@ func (r *workflowRepository) GetExecution(ctx context.Context, executionID strin
 }
 
 func (r *workflowRepository) getStepExecutions(ctx context.Context, workflowExecID string) ([]step.StepExecution, error) {
-	query := `
+	stepsMap, err := r.getStepExecutionsByWorkflowExecIDs(ctx, []string{workflowExecID})
+	if err != nil {
+		return nil, err
+	}
+	return stepsMap[workflowExecID], nil
+}
+
+func (r *workflowRepository) getStepExecutionsByWorkflowExecIDs(ctx context.Context, workflowExecIDs []string) (map[string][]step.StepExecution, error) {
+	result := make(map[string][]step.StepExecution)
+	if r.db == nil || len(workflowExecIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(workflowExecIDs))
+	args := make([]any, len(workflowExecIDs))
+	for i, id := range workflowExecIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
 		SELECT 
 			id, workflow_execution_id, step_id, name, type, config, depends_on,
 			status, output, error_message, attempt, max_attempts, timeout_seconds,
 			backoff_seconds, multiplier, max_backoff_seconds, locked_by, locked_until,
 			is_compensation, executed_at, next_retry_at, created_at, updated_at
 		FROM step_executions
-		WHERE workflow_execution_id = ?
+		WHERE workflow_execution_id IN (%s)
 		ORDER BY is_compensation ASC, created_at ASC
-	`
-	rows, err := r.db.QueryContext(ctx, query, workflowExecID)
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var steps []step.StepExecution
 	for rows.Next() {
 		var (
 			se            step.StepExecution
@@ -625,7 +676,12 @@ func (r *workflowRepository) getStepExecutions(ctx context.Context, workflowExec
 		if seNextRetryAt.Valid {
 			se.NextRetryAt = &seNextRetryAt.Time
 		}
-		steps = append(steps, se)
+		result[se.WorkflowExecutionID] = append(result[se.WorkflowExecutionID], se)
 	}
-	return steps, rows.Err()
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

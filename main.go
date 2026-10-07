@@ -71,6 +71,7 @@ func main() {
 		pool := worker.NewWorkerPool(
 			workerLogic,
 			reg,
+			worker.WithBaseID("server-worker"),
 			worker.WithWorkerCount(workerCount),
 		)
 

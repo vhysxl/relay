@@ -43,7 +43,8 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 			errors.Is(err, step.ErrSelfDependency),
 			errors.Is(err, step.ErrCyclicDependency),
 			errors.Is(err, step.ErrInvalidRetryPolicy),
-			errors.Is(err, step.ErrInvalidCompensation):
+			errors.Is(err, step.ErrInvalidCompensation),
+			errors.Is(err, step.ErrIrreversibleCompensation):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		case errors.Is(err, ErrWorkflowAlreadyExists):
 			util.WriteJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})

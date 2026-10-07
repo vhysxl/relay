@@ -129,6 +129,7 @@ type StepValidator interface {
 type StepRepository interface {
 	CreateStepsTx(ctx context.Context, tx *sql.Tx, workflowID string, steps []Step) error
 	GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]Step, error)
+	GetStepsByWorkflowIDs(ctx context.Context, workflowIDs []string) (map[string][]Step, error)
 	GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error)
 	ClaimNext(ctx context.Context, workerID string, lockDuration time.Duration) (*Step, *StepExecution, error)
 	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error

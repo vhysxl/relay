@@ -285,3 +285,59 @@ func TestValidateSteps_Compensation(t *testing.T) {
 		t.Fatalf("expected valid compensation, got %v", err)
 	}
 }
+
+func TestValidateSteps_IrreversibleWithCompensation(t *testing.T) {
+	logic := NewStepValidator()
+	steps := []Step{
+		{
+			ID:           "step-1",
+			Type:         StepTypeHTTP,
+			Config:       json.RawMessage(`{"url":"https://example.com"}`),
+			Irreversible: true,
+			Compensation: &Compensation{
+				Type:   StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://example.com/rollback"}`),
+			},
+		},
+	}
+
+	err := logic.ValidateSteps(steps)
+	if err != ErrIrreversibleCompensation {
+		t.Fatalf("expected ErrIrreversibleCompensation, got %v", err)
+	}
+
+	// Valid irreversible step (without compensation)
+	steps[0].Compensation = nil
+	if err := logic.ValidateSteps(steps); err != nil {
+		t.Fatalf("expected valid irreversible step without compensation, got %v", err)
+	}
+}
+
+func TestValidateSteps_NegativeTimeout(t *testing.T) {
+	logic := NewStepValidator()
+	steps := []Step{
+		{
+			ID:      "step-1",
+			Type:    StepTypeHTTP,
+			Config:  json.RawMessage(`{}`),
+			Timeout: -5,
+		},
+	}
+
+	err := logic.ValidateSteps(steps)
+	if err == nil || err.Error() != "step timeout cannot be negative" {
+		t.Fatalf("expected negative timeout error, got %v", err)
+	}
+
+	// Negative compensation timeout
+	steps[0].Timeout = 5
+	steps[0].Compensation = &Compensation{
+		Type:    StepTypeHTTP,
+		Config:  json.RawMessage(`{}`),
+		Timeout: -1,
+	}
+	err = logic.ValidateSteps(steps)
+	if err == nil || err.Error() != "compensation timeout cannot be negative" {
+		t.Fatalf("expected negative compensation timeout error, got %v", err)
+	}
+}
