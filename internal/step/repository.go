@@ -282,11 +282,22 @@ func (r *stepRepository) ClaimNext(ctx context.Context, workerID string, lockDur
 		   AND orig.is_compensation = FALSE
 		WHERE (
 		      (se.status = 'PENDING' AND (se.locked_until IS NULL OR se.locked_until < NOW()))
-		      OR (se.status = 'RUNNING' AND se.locked_until < NOW())
+		      OR (se.status = 'RUNNING' AND se.locked_until < NOW() AND se.attempt < se.max_attempts)
 		  )
 		  AND (se.next_retry_at IS NULL OR se.next_retry_at <= NOW())
 		  AND (
-		      (we.status = 'COMPENSATING' AND se.is_compensation = TRUE)
+		      (
+		          we.status = 'COMPENSATING' 
+		          AND se.is_compensation = TRUE
+		          AND NOT EXISTS (
+		              SELECT 1
+		              FROM step_executions dep
+		              WHERE dep.workflow_execution_id = se.workflow_execution_id
+		                AND dep.is_compensation = TRUE
+		                AND JSON_CONTAINS(se.depends_on, JSON_QUOTE(dep.step_id))
+		                AND dep.status NOT IN ('COMPENSATED', 'CANCELLED')
+		          )
+		      )
 		      OR (
 		          we.status = 'RUNNING'
 		          AND se.is_compensation = FALSE
@@ -617,45 +628,51 @@ func (r *stepRepository) CompleteStep(ctx context.Context, stepExecutionID strin
 		}
 
 		if remainingNonComp == 0 {
-			// All regular steps are completed! Update workflow to COMPLETED
+			// All regular steps are completed! Update workflow to COMPLETED if it is currently RUNNING
 			updateWfQuery := `
 				UPDATE workflow_executions
 				SET status = 'COMPLETED',
 				    updated_at = NOW()
 				WHERE id = ? AND status = 'RUNNING'
 			`
-			if _, err := tx.ExecContext(ctx, updateWfQuery, workflowExecID); err != nil {
+			res, err := tx.ExecContext(ctx, updateWfQuery, workflowExecID)
+			if err != nil {
 				return fmt.Errorf("failed to mark workflow completed: %w", err)
 			}
+			rowsAffected, _ := res.RowsAffected()
 
-			// Clean up / cancel unused compensation steps since workflow completed successfully
-			cancelUnusedCompQuery := `
-				UPDATE step_executions
-				SET status = 'CANCELLED',
-				    updated_at = NOW()
-				WHERE workflow_execution_id = ?
-				  AND is_compensation = TRUE
-				  AND status = 'PENDING'
-			`
-			if _, err := tx.ExecContext(ctx, cancelUnusedCompQuery, workflowExecID); err != nil {
-				return fmt.Errorf("failed to cancel unused compensation steps: %w", err)
+			if rowsAffected > 0 {
+				// Clean up / cancel unused compensation steps since workflow completed successfully
+				cancelUnusedCompQuery := `
+					UPDATE step_executions
+					SET status = 'CANCELLED',
+					    updated_at = NOW()
+					WHERE workflow_execution_id = ?
+					  AND is_compensation = TRUE
+					  AND status = 'PENDING'
+				`
+				if _, err := tx.ExecContext(ctx, cancelUnusedCompQuery, workflowExecID); err != nil {
+					return fmt.Errorf("failed to cancel unused compensation steps: %w", err)
+				}
 			}
 		}
 	} else {
-		// Compensation step completed. Check if all active compensation steps are COMPENSATED
-		var remainingComp int
+		// Compensation step completed. Check if all active compensation steps and running normal steps are done
+		var remainingWork int
 		remCompQuery := `
 			SELECT COUNT(*)
 			FROM step_executions
 			WHERE workflow_execution_id = ?
-			  AND is_compensation = TRUE
-			  AND status NOT IN ('COMPENSATED', 'CANCELLED')
+			  AND (
+			      (is_compensation = TRUE AND status NOT IN ('COMPENSATED', 'CANCELLED'))
+			      OR (is_compensation = FALSE AND status = 'RUNNING')
+			  )
 		`
-		if err := tx.QueryRowContext(ctx, remCompQuery, workflowExecID).Scan(&remainingComp); err != nil {
+		if err := tx.QueryRowContext(ctx, remCompQuery, workflowExecID).Scan(&remainingWork); err != nil {
 			return fmt.Errorf("failed to check remaining compensation steps: %w", err)
 		}
 
-		if remainingComp == 0 {
+		if remainingWork == 0 {
 			// All compensation steps are done! Mark workflow as COMPENSATED
 			updateWfQuery := `
 				UPDATE workflow_executions
@@ -808,20 +825,19 @@ func (r *stepRepository) FailStep(ctx context.Context, stepExecutionID string, w
 		return fmt.Errorf("failed to cancel pending steps: %w", err)
 	}
 
-	// Cancel any PENDING compensation steps whose original step was NOT completed successfully
+	// Cancel any PENDING compensation steps whose original step has failed or was cancelled
 	cancelUnneededCompQuery := `
 		UPDATE step_executions comp
-		LEFT JOIN step_executions normal 
+		JOIN step_executions normal 
 		    ON normal.workflow_execution_id = comp.workflow_execution_id
 		   AND normal.step_id = comp.step_id
 		   AND normal.is_compensation = FALSE
-		   AND normal.status = 'COMPLETED'
 		SET comp.status = 'CANCELLED',
 		    comp.updated_at = NOW()
 		WHERE comp.workflow_execution_id = ?
 		  AND comp.is_compensation = TRUE
 		  AND comp.status = 'PENDING'
-		  AND normal.id IS NULL
+		  AND normal.status IN ('FAILED', 'CANCELLED')
 	`
 	if _, err := tx.ExecContext(ctx, cancelUnneededCompQuery, workflowExecID); err != nil {
 		return fmt.Errorf("failed to cancel unneeded compensation steps: %w", err)

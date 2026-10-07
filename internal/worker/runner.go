@@ -133,7 +133,13 @@ func (p *WorkerPool) ProcessOne(ctx context.Context, workerID string) (bool, err
 func (p *WorkerPool) executeTask(ctx context.Context, workerID string, s *step.Step, exec *step.StepExecution) {
 	defer func() {
 		if r := recover(); r != nil {
-			_ = p.logic.FailStep(ctx, exec.ID, workerID, fmt.Sprintf("panic in step execution: %v", r))
+			cleanupCtx := ctx
+			if ctx.Err() != nil {
+				var cancel context.CancelFunc
+				cleanupCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+			}
+			_ = p.logic.FailStep(cleanupCtx, exec.ID, workerID, fmt.Sprintf("panic in step execution: %v", r))
 		}
 	}()
 
@@ -159,9 +165,16 @@ func (p *WorkerPool) executeTask(ctx context.Context, workerID string, s *step.S
 	output, err := execHandler.Execute(ctx, s, exec)
 	stopHB()
 
+	cleanupCtx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		cleanupCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+	}
+
 	if err != nil {
-		_ = p.logic.FailStep(ctx, exec.ID, workerID, err.Error())
+		_ = p.logic.FailStep(cleanupCtx, exec.ID, workerID, err.Error())
 	} else {
-		_ = p.logic.CompleteStep(ctx, exec.ID, workerID, output)
+		_ = p.logic.CompleteStep(cleanupCtx, exec.ID, workerID, output)
 	}
 }

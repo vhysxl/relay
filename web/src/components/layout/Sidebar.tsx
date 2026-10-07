@@ -73,13 +73,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           isCollapsed ? 'justify-center px-2 py-2.5' : 'space-x-3 px-3.5 py-2.5'
         } rounded-lg text-xs transition-all duration-150 cursor-pointer select-none outline-none focus:outline-none focus:ring-0 ${
           isActive
-            ? 'bg-white text-slate-900 font-semibold shadow-xs border border-slate-200/90'
-            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-medium border border-transparent'
+            ? 'bg-neutral-800 text-neutral-100 font-semibold shadow-xs border border-neutral-700'
+            : 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/40 font-medium border border-transparent'
         }`}
       >
         <Icon
           className={`w-4 h-4 flex-shrink-0 transition-colors ${
-            isActive ? 'text-slate-900 stroke-[2.2]' : 'text-slate-500 stroke-[1.8]'
+            isActive ? 'text-neutral-100 stroke-[2.2]' : 'text-neutral-500 stroke-[1.8]'
           }`}
         />
         {!isCollapsed && (
@@ -89,8 +89,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span
                 className={`text-[11px] px-2 py-0.5 rounded-md font-semibold transition-colors ${
                   isActive
-                    ? 'bg-slate-100 text-slate-900'
-                    : 'bg-slate-200/70 text-slate-600'
+                    ? 'bg-neutral-700 text-neutral-100'
+                    : 'bg-neutral-800/90 text-neutral-400'
                 }`}
               >
                 {count}
@@ -106,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={`${
         isCollapsed ? 'w-16' : 'w-56'
-      } flex-shrink-0 bg-[#ECEEF2] border-r border-slate-300/70 flex flex-col justify-between select-none z-20 transition-all duration-200`}
+      } flex-shrink-0 bg-[#0e0e0e] border-r border-neutral-800 flex flex-col justify-between select-none z-20 transition-all duration-200`}
     >
       {/* Top Part: Collapse Button + 3 Menu Items (No logo, No grouping header) */}
       <div className="p-3 space-y-3">
@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-end'} px-1 pt-1`}>
           <button
             onClick={onToggleCollapse}
-            className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-300/50 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="p-1.5 rounded-md text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800/60 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {isCollapsed ? (
@@ -134,15 +134,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Bottom Part: Dev Mode Controller with subtle styling */}
-      <div className="p-3 border-t border-slate-300/60">
+      <div className="p-3 border-t border-neutral-800">
         {!isCollapsed ? (
-          <div className="p-2.5 bg-white/85 border border-slate-200/90 rounded-lg space-y-1.5 shadow-2xs">
+          <div className="p-2.5 bg-[#141414] border border-neutral-800 rounded-lg space-y-1.5 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-800 flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-neutral-300 flex items-center gap-1.5">
                 {isMockMode ? (
                   <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 ) : (
-                  <Database className="w-3.5 h-3.5 text-slate-800" />
+                  <Database className="w-3.5 h-3.5 text-neutral-300" />
                 )}
                 {isMockMode ? 'Mock Data' : 'Live Engine'}
               </span>
@@ -154,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <button
               onClick={onToggleMockMode}
-              className="w-full py-1 text-[11px] font-medium bg-slate-100 hover:bg-slate-200 border border-slate-200/80 rounded-lg text-slate-800 transition cursor-pointer shadow-2xs outline-none focus:outline-none focus:ring-0"
+              className="w-full py-1 text-[11px] font-medium bg-neutral-800 hover:bg-neutral-700/80 border border-neutral-700/80 rounded-lg text-neutral-200 transition cursor-pointer shadow-2xs outline-none focus:outline-none focus:ring-0"
             >
               Switch to {isMockMode ? 'Live API' : 'Dummy Data'}
             </button>
@@ -163,7 +163,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={onToggleMockMode}
             title={isMockMode ? 'Mock Data Active (Click to switch)' : 'Live API Active (Click to switch)'}
-            className="w-full p-2 flex justify-center items-center rounded-lg text-slate-500 hover:bg-slate-300/50 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="w-full p-2 flex justify-center items-center rounded-lg text-neutral-400 hover:bg-neutral-800/60 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
             <span
               className={`w-2.5 h-2.5 rounded-full ${

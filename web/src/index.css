@@ -8,7 +8,8 @@
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  background-color: #f8fafc;
+  background-color: #0c0c0c;
+  color: #e5e5e5;
 }
 
 /* Remove sharp cartoonish focus outlines on buttons and interactive elements */
@@ -32,6 +33,7 @@ a:focus-visible {
   outline: none !important;
 }
 
+/* Neutral Dark Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -40,9 +42,38 @@ a:focus-visible {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #262626;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #404040;
+}
+
+/* React Flow Dark Styling */
+.react-flow__minimap {
+  background-color: #141414 !important;
+}
+.react-flow__minimap-mask {
+  fill: #0a0a0a !important;
+  fill-opacity: 0.85 !important;
+}
+.react-flow__controls {
+  background-color: #141414 !important;
+  border: 1px solid #262626 !important;
+  border-radius: 0.5rem !important;
+  overflow: hidden !important;
+}
+.react-flow__controls-button {
+  background-color: #141414 !important;
+  border-bottom: 1px solid #262626 !important;
+  color: #a3a3a3 !important;
+  fill: #a3a3a3 !important;
+}
+.react-flow__controls-button:hover {
+  background-color: #262626 !important;
+  color: #ededed !important;
+  fill: #ededed !important;
+}
+.react-flow__controls-button svg {
+  fill: currentColor !important;
 }

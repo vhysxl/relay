@@ -82,26 +82,25 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
     fetchWorkflow()
   }, [workflowId])
 
-
   if (isLoading && !workflow) {
     return (
-      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-12 text-center space-y-3 shadow-xs">
-        <Loader2 className="animate-spin h-7 w-7 text-slate-600 mx-auto" />
-        <p className="text-sm font-semibold text-slate-800">Loading Workflow Definition...</p>
-        <p className="text-xs font-mono text-slate-400">{workflowId}</p>
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-12 text-center space-y-3 shadow-xs">
+        <Loader2 className="animate-spin h-7 w-7 text-neutral-400 mx-auto" />
+        <p className="text-sm font-semibold text-neutral-100">Loading Workflow Definition...</p>
+        <p className="text-xs font-mono text-neutral-500">{workflowId}</p>
       </div>
     )
   }
 
   if (error || !workflow) {
     return (
-      <div className="bg-white rounded-lg border-[1.5px] border-rose-300/80 p-8 text-center space-y-3 shadow-xs">
-        <h3 className="text-base font-bold text-slate-900">Workflow Not Found</h3>
-        <p className="text-xs text-rose-600">{error || 'Could not find workflow'}</p>
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-rose-900/60 p-8 text-center space-y-3 shadow-xs">
+        <h3 className="text-base font-bold text-neutral-100">Workflow Not Found</h3>
+        <p className="text-xs text-rose-400">{error || 'Could not find workflow'}</p>
         <div className="pt-2">
           <button
             onClick={onBack}
-            className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-medium transition cursor-pointer"
+            className="px-3.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 rounded-lg text-xs font-medium transition cursor-pointer"
           >
             Back to Workflows
           </button>
@@ -116,11 +115,11 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Top Header Block matching standard pages */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-slate-200/70">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-neutral-800">
         <div className="flex items-center space-x-3">
           <button
             onClick={onBack}
-            className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 shadow-2xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="p-1.5 rounded-lg border border-neutral-700/80 bg-[#141414] hover:bg-neutral-800 text-neutral-400 hover:text-neutral-100 shadow-2xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
             title="Back to workflows"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -128,12 +127,12 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">{workflow.name}</h1>
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200/80">
+              <h1 className="text-xl font-bold tracking-tight text-neutral-100">{workflow.name}</h1>
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
                 v{workflow.version}
               </span>
             </div>
-            <p className="text-xs font-mono text-slate-500">ID: {workflow.id}</p>
+            <p className="text-xs font-mono text-neutral-400">ID: {workflow.id}</p>
           </div>
         </div>
 
@@ -141,9 +140,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
           <button
             onClick={fetchWorkflow}
             disabled={isLoading}
-            className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="px-3 py-1.5 bg-[#141414] border border-neutral-700/80 hover:bg-neutral-800 text-neutral-300 hover:text-neutral-100 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
-            <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+            <RotateCw className={`w-3.5 h-3.5 text-neutral-400 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
         </div>
@@ -151,48 +150,48 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             Steps
           </span>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-2xl font-bold tracking-tight text-slate-900">{steps.length}</span>
-            <span className="text-xs text-slate-500 font-medium">DAG Nodes</span>
+            <span className="text-2xl font-bold tracking-tight text-neutral-100">{steps.length}</span>
+            <span className="text-xs text-neutral-400 font-medium">DAG Nodes</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             Rollbacks
           </span>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-2xl font-bold tracking-tight text-slate-900">
+            <span className="text-2xl font-bold tracking-tight text-neutral-100">
               {hasCompensation ? 'Enabled' : 'None'}
             </span>
-            <span className="text-xs text-slate-500 font-medium">
+            <span className="text-xs text-neutral-400 font-medium">
               {steps.filter((s) => s.compensation).length} steps
             </span>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             Executions
           </span>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-2xl font-bold tracking-tight text-slate-900">
+            <span className="text-2xl font-bold tracking-tight text-neutral-100">
               {recentExecutions.length}
             </span>
-            <span className="text-xs text-slate-500 font-medium">Runs</span>
+            <span className="text-xs text-neutral-400 font-medium">Runs</span>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 p-4 shadow-xs space-y-1">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             Created
           </span>
           <div className="flex items-baseline justify-between pt-1">
-            <span className="text-xs font-mono font-bold text-slate-800">
+            <span className="text-xs font-mono font-bold text-neutral-300">
               {formatTimestamp(workflow.created_at)}
             </span>
           </div>
@@ -200,15 +199,15 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
       </div>
 
       {/* Tabs: DAG Canvas vs Step List vs Raw JSON */}
-      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
-        <div className="px-5 py-3 bg-slate-50/75 border-b border-slate-200/80 flex items-center justify-between">
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
+        <div className="px-5 py-3 bg-[#181818] border-b border-neutral-800 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setActiveTab('canvas')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'canvas'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-[#141414] text-neutral-100 shadow-2xs border border-neutral-700'
+                  : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               <WorkflowIcon className="w-3.5 h-3.5" />
@@ -218,8 +217,8 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               onClick={() => setActiveTab('list')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'list'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-[#141414] text-neutral-100 shadow-2xs border border-neutral-700'
+                  : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               <ListOrdered className="w-3.5 h-3.5" />
@@ -229,8 +228,8 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               onClick={() => setActiveTab('raw')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'raw'
-                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-[#141414] text-neutral-100 shadow-2xs border border-neutral-700'
+                  : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               <FileCode className="w-3.5 h-3.5" />
@@ -246,9 +245,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         )}
 
         {activeTab === 'list' && (
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-neutral-800/80">
             {steps.length === 0 ? (
-              <div className="px-5 py-10 text-center text-slate-400 text-xs">
+              <div className="px-5 py-10 text-center text-neutral-500 text-xs">
                 No steps defined in this workflow.
               </div>
             ) : (
@@ -261,34 +260,34 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                       className="flex items-center justify-between cursor-pointer group"
                     >
                       <div className="flex items-center space-x-3">
-                        <span className="w-6 h-6 rounded-md bg-slate-100 text-slate-700 font-mono font-bold text-xs flex items-center justify-center">
+                        <span className="w-6 h-6 rounded-md bg-neutral-800 text-neutral-300 font-mono font-bold text-xs flex items-center justify-center">
                           {idx + 1}
                         </span>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="font-bold text-sm text-slate-900 group-hover:underline">
+                            <span className="font-bold text-sm text-neutral-200 group-hover:underline">
                               {step.name}
                             </span>
-                            <span className="font-mono text-xs text-slate-400">({step.id})</span>
+                            <span className="font-mono text-xs text-neutral-500">({step.id})</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center space-x-2">
-                        <span className="px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-slate-100 text-slate-700 border border-slate-200/80">
+                        <span className="px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
                           {step.type}
                         </span>
                         {step.compensation && (
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-950/50 text-amber-400 border border-amber-800/60">
                             Rollback
                           </span>
                         )}
                         {step.retry?.max_attempts && (
-                          <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200/80">
+                          <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-neutral-800/80 text-neutral-400 border border-neutral-700/60">
                             {step.retry.max_attempts}x
                           </span>
                         )}
-                        <span className="text-slate-400 pl-1">
+                        <span className="text-neutral-500 pl-1">
                           {isExpanded ? (
                             <ChevronDown className="w-4 h-4" />
                           ) : (
@@ -300,11 +299,11 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
                     {/* Expanded Step Details */}
                     {isExpanded && (
-                      <div className="mt-2 pl-9 space-y-3 pt-2 border-t border-slate-100 text-xs">
+                      <div className="mt-2 pl-9 space-y-3 pt-2 border-t border-neutral-800 text-xs">
                         {step.depends_on && step.depends_on.length > 0 && (
                           <div>
-                            <span className="text-slate-500 font-medium">Depends on: </span>
-                            <span className="font-mono text-slate-800">
+                            <span className="text-neutral-400 font-medium">Depends on: </span>
+                            <span className="font-mono text-neutral-200">
                               {step.depends_on.join(', ')}
                             </span>
                           </div>
@@ -312,21 +311,21 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
                         {step.config && (
                           <div className="space-y-1">
-                            <span className="text-slate-500 font-medium">Configuration:</span>
-                            <pre className="p-3 bg-slate-50 border border-slate-200 rounded-md font-mono text-slate-800 text-[11px] overflow-x-auto">
+                            <span className="text-neutral-400 font-medium">Configuration:</span>
+                            <pre className="p-3 bg-[#0c0c0c] border border-neutral-800 rounded-md font-mono text-neutral-300 text-[11px] overflow-x-auto">
                               {formatJSON(step.config)}
                             </pre>
                           </div>
                         )}
 
                         {step.compensation && (
-                          <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-md space-y-1.5">
-                            <div className="flex items-center gap-1.5 font-semibold text-purple-900">
-                              <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
+                          <div className="p-3 bg-neutral-900 border border-neutral-700/80 rounded-md space-y-1.5">
+                            <div className="flex items-center gap-1.5 font-semibold text-amber-400">
+                              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
                               <span>Rollback: {step.compensation.name}</span>
                             </div>
                             {step.compensation.config && (
-                              <pre className="p-2 bg-white border border-purple-200 rounded font-mono text-slate-800 text-[11px] overflow-x-auto">
+                              <pre className="p-2 bg-[#0c0c0c] border border-neutral-800 rounded font-mono text-neutral-300 text-[11px] overflow-x-auto">
                                 {formatJSON(step.compensation.config)}
                               </pre>
                             )}
@@ -343,7 +342,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
         {activeTab === 'raw' && (
           <div className="p-4">
-            <pre className="p-4 bg-slate-900 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto">
+            <pre className="p-4 bg-[#0c0c0c] border border-neutral-800 text-emerald-400 font-mono text-xs rounded-lg overflow-x-auto">
               {formatJSON(workflow)}
             </pre>
           </div>
@@ -351,16 +350,16 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
       </div>
 
       {/* Recent Executions Table for this Workflow */}
-      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
-        <div className="px-5 py-3 bg-slate-50/75 border-b border-slate-200/80 flex items-center justify-between">
-          <h2 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
+        <div className="px-5 py-3 bg-[#181818] border-b border-neutral-800 flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             Recent Executions
           </h2>
         </div>
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-neutral-800/80">
           {recentExecutions.length === 0 ? (
-            <div className="px-5 py-8 text-center text-slate-400 text-xs">
+            <div className="px-5 py-8 text-center text-neutral-500 text-xs">
               No executions recorded for this workflow yet.
             </div>
           ) : (
@@ -368,21 +367,21 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               <div
                 key={exec.id}
                 onClick={() => onNavigateToExecution && onNavigateToExecution(exec.id)}
-                className="px-5 py-3 hover:bg-slate-50/70 transition-colors group cursor-pointer flex items-center justify-between text-xs"
+                className="px-5 py-3 hover:bg-neutral-800/40 transition-colors group cursor-pointer flex items-center justify-between text-xs"
               >
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-slate-900 group-hover:underline">
+                    <span className="font-mono font-bold text-neutral-200 group-hover:underline">
                       #{exec.id.slice(0, 10)}
                     </span>
-                    <span className="font-mono text-slate-400">
+                    <span className="font-mono text-neutral-500">
                       {formatTimestamp(exec.created_at)}
                     </span>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3">
                   <StatusBadge status={exec.status} size="sm" />
-                  <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700 transition" />
+                  <ExternalLink className="w-3.5 h-3.5 text-neutral-500 group-hover:text-neutral-300 transition" />
                 </div>
               </div>
             ))

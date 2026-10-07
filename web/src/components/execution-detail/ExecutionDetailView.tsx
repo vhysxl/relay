@@ -9,9 +9,8 @@ import {
 } from 'lucide-react'
 import type { Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
-import { ExecutionStepNode } from './ExecutionStepNode'
+import { ExecutionHorizontalTimeline } from './ExecutionHorizontalTimeline'
 import { formatTimestamp, formatDuration, formatJSON } from '../../utils/format'
-
 import { mockExecutions } from '../../data/mockData'
 
 interface ExecutionDetailViewProps {
@@ -60,28 +59,25 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
 
   if (isLoading && !execution) {
     return (
-      <div className="bg-white rounded-lg border border-slate-200/80 p-12 text-center space-y-3 shadow-xs">
-        <Loader2 className="animate-spin h-8 w-8 text-emerald-600 mx-auto" />
-        <p className="text-sm font-semibold text-slate-700">Loading Execution Trace...</p>
-        <p className="text-xs font-mono text-slate-400">ID: {executionId}</p>
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-12 text-center space-y-3 shadow-xs">
+        <Loader2 className="animate-spin h-7 w-7 text-neutral-400 mx-auto" />
+        <p className="text-sm font-semibold text-neutral-100">Loading Execution...</p>
+        <p className="text-xs font-mono text-neutral-500">ID: {executionId}</p>
       </div>
     )
   }
 
   if (error || !execution) {
     return (
-      <div className="bg-white rounded-lg border border-rose-200 p-8 text-center space-y-3 shadow-xs">
-        <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 mx-auto flex items-center justify-center font-bold">
-          !
-        </div>
-        <h3 className="text-base font-bold text-slate-900">Unable to Load Execution</h3>
-        <p className="text-xs text-rose-600 max-w-md mx-auto">{error}</p>
+      <div className="bg-[#141414] rounded-lg border-[1.5px] border-rose-900/60 p-8 text-center space-y-3 shadow-xs">
+        <h3 className="text-base font-bold text-neutral-100">Execution Not Found</h3>
+        <p className="text-xs text-rose-400">{error || 'Could not find execution'}</p>
         <div className="pt-2">
           <button
             onClick={onBack}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold transition cursor-pointer"
+            className="px-3.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 border border-neutral-700 rounded-lg text-xs font-medium transition cursor-pointer"
           >
-            Back to Execution History
+            Back to History
           </button>
         </div>
       </div>
@@ -99,23 +95,30 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
   const contextFormatted = formatJSON(execution.context)
 
   return (
-    <div className="space-y-6">
-      {/* Top Nav / Back button bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-slate-200/80">
+    <div className="space-y-4">
+      {/* Top Nav / Back Button Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-neutral-800">
         <div className="flex items-center space-x-3">
           <button
             onClick={onBack}
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="p-1.5 rounded-lg border border-neutral-700/80 bg-[#141414] hover:bg-neutral-800 text-neutral-400 hover:text-neutral-100 shadow-2xs transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+            title="Back to history"
           >
-            <ArrowLeft className="w-4 h-4 text-slate-500" />
-            <span>Back to History</span>
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="h-4 w-px bg-slate-200" />
-          <div className="flex items-center space-x-2 text-xs font-mono text-slate-500">
-            <span>Execution:</span>
-            <code className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80">
-              {execution.id}
-            </code>
+
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold tracking-tight text-neutral-100">
+                {execution.workflow_name || execution.workflow_id}
+              </h1>
+              <StatusBadge status={execution.status} size="sm" />
+            </div>
+            <p className="text-xs font-mono text-neutral-400">
+              Execution: <span className="font-semibold text-neutral-200">{execution.id}</span>
+              <span className="mx-2 text-neutral-700">|</span>
+              Workflow: <span className="text-neutral-200">{execution.workflow_id}</span>
+            </p>
           </div>
         </div>
 
@@ -123,49 +126,60 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
           <button
             onClick={fetchDetail}
             disabled={isLoading}
-            className="px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="px-3 py-1.5 bg-[#141414] border border-neutral-700/80 hover:bg-neutral-800 text-neutral-300 hover:text-neutral-100 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
-            <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+            <RotateCw className={`w-3.5 h-3.5 text-neutral-400 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* Summary Header Card */}
-      <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                {execution.workflow_name || execution.workflow_id}
-              </h2>
-              <StatusBadge status={execution.status} size="md" />
-            </div>
-            <p className="text-xs font-mono text-slate-500">
-              Workflow:{' '}
-              <span className="font-semibold text-slate-700">{execution.workflow_id}</span>
-            </p>
+      {/* Summary KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+            Status
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-xl font-bold tracking-tight text-neutral-100">
+              {execution.status}
+            </span>
+            <span className="text-xs font-mono text-neutral-400">
+              {completedStepsCount}/{steps.length} steps
+            </span>
           </div>
+        </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t md:border-t-0 md:border-l border-slate-100 pt-3 md:pt-0 md:pl-6 text-xs">
-            <div>
-              <p className="text-slate-400 font-medium">Started</p>
-              <p className="font-mono font-semibold text-slate-700 mt-0.5">
-                {formatTimestamp(execution.created_at)}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-400 font-medium">Completed</p>
-              <p className="font-mono font-semibold text-slate-700 mt-0.5">
-                {execution.updated_at ? formatTimestamp(execution.updated_at) : '—'}
-              </p>
-            </div>
-            <div>
-              <p className="text-slate-400 font-medium">Duration</p>
-              <p className="font-mono font-semibold text-slate-700 mt-0.5">
-                {formatDuration(execution.created_at, execution.updated_at)}
-              </p>
-            </div>
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+            Started
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-xs font-mono font-bold text-neutral-300">
+              {formatTimestamp(execution.created_at)}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+            Completed
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-xs font-mono font-bold text-neutral-300">
+              {execution.updated_at ? formatTimestamp(execution.updated_at) : '—'}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 p-4 shadow-xs space-y-1">
+          <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+            Duration
+          </span>
+          <div className="flex items-baseline justify-between pt-1">
+            <span className="text-xl font-mono font-bold text-neutral-100">
+              {formatDuration(execution.created_at, execution.updated_at)}
+            </span>
           </div>
         </div>
       </div>
@@ -174,44 +188,25 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
       {(failedSteps.length > 0 ||
         execution.status === 'FAILED' ||
         execution.status === 'COMPENSATION_FAILED') && (
-        <div className="bg-rose-50 border-2 border-rose-300 rounded-lg p-5 shadow-xs space-y-3">
-          <div className="flex items-start space-x-3">
-            <div className="w-8 h-8 rounded-md bg-rose-100 text-rose-700 flex items-center justify-center flex-shrink-0 font-bold">
-              <AlertTriangle className="w-5 h-5 text-rose-600" />
-            </div>
-            <div className="flex-1 space-y-0.5">
-              <h3 className="text-sm font-bold text-rose-900">Execution Failed</h3>
-              <p className="text-xs text-rose-700">
-                {failedSteps.length > 0 ? (
-                  <>
-                    Failure occurred at step{' '}
-                    <span className="font-mono font-bold">
-                      {failedSteps.map((s) => s.name || s.step_id).join(', ')}
-                    </span>
-                    .
-                  </>
-                ) : (
-                  'Execution encountered an unhandled failure.'
-                )}
-              </p>
-            </div>
+        <div className="bg-rose-950/20 border border-rose-900/60 rounded-lg p-4 shadow-xs space-y-2">
+          <div className="flex items-center space-x-2 text-rose-400 font-bold text-xs uppercase tracking-wide">
+            <AlertTriangle className="w-4 h-4 text-rose-400" />
+            <span>Execution Failed</span>
           </div>
-
           {failedSteps.map((fs) => (
             <div
               key={fs.step_id}
-              className="bg-white border border-rose-200 rounded-md p-3.5 space-y-1.5 shadow-xs"
+              className="bg-[#141414] border border-rose-900/40 rounded-md p-3 space-y-1 text-xs"
             >
-              <div className="flex items-center justify-between text-xs font-semibold text-rose-800">
+              <div className="flex items-center justify-between font-semibold text-rose-300">
                 <span>
-                  Step: <span className="font-mono font-bold">{fs.name || fs.step_id}</span> (
-                  {fs.step_id})
+                  Step: <strong className="font-mono">{fs.name || fs.step_id}</strong> ({fs.step_id})
                 </span>
-                <span className="font-mono text-slate-500">
-                  Attempt {fs.attempt || 1} / {fs.max_attempts || 1}
+                <span className="font-mono text-neutral-400">
+                  Attempt {fs.attempt || 1}/{fs.max_attempts || 1}
                 </span>
               </div>
-              <pre className="bg-rose-50/70 border border-rose-100 rounded-md p-2.5 text-xs font-mono text-rose-900 whitespace-pre-wrap break-words leading-relaxed">
+              <pre className="bg-[#0c0c0c] border border-rose-900/30 rounded p-2 text-xs font-mono text-rose-300 whitespace-pre-wrap break-words">
                 {fs.error_message || execution.error_message || 'Step execution failed'}
               </pre>
             </div>
@@ -219,19 +214,19 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         </div>
       )}
 
-      {/* Optional Context Payload */}
+      {/* Collapsible Context Payload */}
       {contextFormatted && contextFormatted !== '{}' && (
-        <details className="group bg-white rounded-lg border border-slate-200/80 shadow-xs overflow-hidden">
-          <summary className="px-5 py-3.5 bg-slate-50/80 cursor-pointer flex items-center justify-between select-none hover:bg-slate-100/70 transition">
+        <details className="group bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
+          <summary className="px-5 py-3 bg-[#181818] cursor-pointer flex items-center justify-between select-none hover:bg-neutral-800/40 transition">
             <div className="flex items-center space-x-2">
-              <FileCode className="w-4 h-4 text-slate-500" />
-              <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+              <FileCode className="w-4 h-4 text-neutral-400" />
+              <span className="text-xs font-bold text-neutral-300 uppercase tracking-wider">
                 Context Payload
               </span>
             </div>
-            <ChevronDown className="w-4 h-4 text-slate-400 group-open:rotate-180 transition" />
+            <ChevronDown className="w-4 h-4 text-neutral-500 group-open:rotate-180 transition" />
           </summary>
-          <div className="p-4 bg-slate-900 border-t border-slate-200">
+          <div className="p-4 bg-[#0c0c0c] border-t border-neutral-800">
             <pre className="text-emerald-400 font-mono text-xs overflow-x-auto leading-relaxed max-h-56">
               {contextFormatted}
             </pre>
@@ -239,35 +234,16 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         </details>
       )}
 
-      {/* Steps */}
-      <div className="space-y-4 pt-1">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <h3 className="text-base font-bold text-slate-900 tracking-tight">
-              Steps
-            </h3>
-            <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-md border border-slate-200/80">
-              {completedStepsCount}/{steps.length}
-            </span>
-          </div>
+      {/* Horizontal Steps Stepper + Active Inspector */}
+      <div className="space-y-2">
+        <div className="flex items-center space-x-2 pt-1">
+          <h3 className="text-sm font-bold text-neutral-100">Steps</h3>
+          <span className="text-xs font-mono font-medium text-neutral-300 bg-neutral-800/80 px-2 py-0.5 rounded border border-neutral-700/60">
+            {completedStepsCount}/{steps.length}
+          </span>
         </div>
 
-        <div>
-          {steps.length === 0 ? (
-            <div className="bg-white rounded-lg border border-dashed border-slate-300 p-8 text-center text-slate-400 text-xs">
-              No step executions recorded for this workflow run.
-            </div>
-          ) : (
-            steps.map((step, idx) => (
-              <ExecutionStepNode
-                key={step.id || step.step_id || idx}
-                step={step}
-                index={idx}
-                isLast={idx === steps.length - 1}
-              />
-            ))
-          )}
-        </div>
+        <ExecutionHorizontalTimeline steps={steps} />
       </div>
     </div>
   )

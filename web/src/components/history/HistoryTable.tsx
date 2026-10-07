@@ -22,10 +22,10 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
   const total = totalCount ?? executions.length
 
   return (
-    <div className="bg-white rounded-lg border-[1.5px] border-slate-300/80 shadow-xs overflow-hidden">
+    <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-100 text-left">
-          <thead className="bg-slate-50/75 border-b border-slate-200/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <table className="min-w-full divide-y divide-neutral-800/80 text-left">
+          <thead className="bg-[#181818] border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
             <tr>
               <th scope="col" className="px-5 py-3">
                 Status
@@ -47,16 +47,16 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white text-xs">
+          <tbody className="divide-y divide-neutral-800/80 bg-[#141414] text-xs">
             {isLoading && executions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                <td colSpan={6} className="px-5 py-12 text-center text-neutral-500">
                   Loading history records...
                 </td>
               </tr>
             ) : executions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-5 py-12 text-center text-slate-400">
+                <td colSpan={6} className="px-5 py-12 text-center text-neutral-500">
                   {searchTerm
                     ? `No execution history matches "${searchTerm}".`
                     : 'No execution history found.'}
@@ -90,34 +90,34 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                     onClick={() => onSelectExecution(item.id)}
                     className={`cursor-pointer transition-colors group ${
                       isFailed
-                        ? 'bg-rose-50/40 hover:bg-rose-50/70'
-                        : 'hover:bg-slate-50/70'
+                        ? 'bg-rose-950/20 hover:bg-rose-950/30'
+                        : 'hover:bg-neutral-800/40'
                     }`}
                   >
                     <td className="px-5 py-3 whitespace-nowrap">
                       <StatusBadge status={item.status} size="sm" />
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap">
-                      <span className="font-mono text-sm font-medium text-slate-900 group-hover:underline cursor-pointer">
+                      <span className="font-mono text-sm font-medium text-neutral-200 group-hover:underline cursor-pointer">
                         {item.workflow_id}
                       </span>
                       {displayName && displayName !== item.workflow_id && (
-                        <div className="text-xs text-slate-500 font-normal mt-0.5">{displayName}</div>
+                        <div className="text-xs text-neutral-500 font-normal mt-0.5">{displayName}</div>
                       )}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200/60 uppercase">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-neutral-800/80 text-neutral-300 border border-neutral-700/60 uppercase">
                         {execType}
                       </span>
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-slate-600">
+                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-neutral-400">
                       {startedAt}
                     </td>
-                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-slate-600">
+                    <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-neutral-400">
                       {isFinished ? formatTimestamp(item.updated_at || item.created_at) : '—'}
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap text-right">
-                      <span className="inline-flex items-center space-x-1 text-xs font-medium text-slate-400 group-hover:text-slate-800 transition">
+                      <span className="inline-flex items-center space-x-1 text-xs font-medium text-neutral-500 group-hover:text-neutral-300 transition">
                         <span>Details</span>
                         <ChevronRight className="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition" />
                       </span>
@@ -132,7 +132,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
 
       {/* Footer info matching WorkflowsView */}
       {executions.length > 0 && (
-        <div className="px-5 py-2.5 bg-slate-50/40 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <div className="px-5 py-2.5 bg-[#181818] border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400">
           <span>
             Showing <strong>{executions.length}</strong> of{' '}
             <strong>{total}</strong> executions

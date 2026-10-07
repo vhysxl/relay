@@ -940,6 +940,325 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	t.Logf("✓ Fixed 3 WorkerPool successfully processed 3 parallel tasks and completed workflow %s!", wfExec.ID)
 }
 
+func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// Workflow: Step A -> (Step B & Step C in parallel) -> Step D
+	// All steps have compensation defined.
+	stepAID := "step-a-" + uuid.NewString()[:8]
+	stepBID := "step-b-" + uuid.NewString()[:8]
+	stepCID := "step-c-" + uuid.NewString()[:8]
+	stepDID := "step-d-" + uuid.NewString()[:8]
+
+	wfName := "dag-mirror-wf-" + uuid.NewString()[:8]
+	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
+		Name:    wfName,
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     stepAID,
+				Name:   "Step A (Order)",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/a"}`),
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/a-rollback"}`),
+				},
+			},
+			{
+				ID:        stepBID,
+				Name:      "Step B (Payment)",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/b"}`),
+				DependsOn: []string{stepAID},
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/b-rollback"}`),
+				},
+			},
+			{
+				ID:        stepCID,
+				Name:      "Step C (Stock)",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/c"}`),
+				DependsOn: []string{stepAID},
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/c-rollback"}`),
+				},
+			},
+			{
+				ID:        stepDID,
+				Name:      "Step D (Ship)",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/d"}`),
+				DependsOn: []string{stepBID, stepCID},
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/d-rollback"}`),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to execute workflow: %v", err)
+	}
+
+	// 1. Claim and complete Step A
+	_, execA, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || execA == nil || execA.StepID != stepAID {
+		t.Fatalf("expected to claim Step A, got %v, err=%v", execA, err)
+	}
+	if err := workerLogic.CompleteStep(ctx, execA.ID, "worker-1", json.RawMessage(`{"status":"ok"}`)); err != nil {
+		t.Fatalf("failed to complete Step A: %v", err)
+	}
+
+	// 2. Claim and complete Step B & Step C in parallel
+	_, execB, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || execB == nil {
+		t.Fatalf("failed to claim parallel step: %v", err)
+	}
+	_, execC, err := workerLogic.ClaimNext(ctx, "worker-2")
+	if err != nil || execC == nil {
+		t.Fatalf("failed to claim parallel step: %v", err)
+	}
+	if err := workerLogic.CompleteStep(ctx, execB.ID, "worker-1", json.RawMessage(`{"status":"ok"}`)); err != nil {
+		t.Fatalf("failed to complete step: %v", err)
+	}
+	if err := workerLogic.CompleteStep(ctx, execC.ID, "worker-2", json.RawMessage(`{"status":"ok"}`)); err != nil {
+		t.Fatalf("failed to complete step: %v", err)
+	}
+
+	// 3. Claim Step D and fail it (exhausting attempts)
+	_, execD, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || execD == nil || execD.StepID != stepDID {
+		t.Fatalf("expected to claim Step D, got %v, err=%v", execD, err)
+	}
+	if err := workerLogic.FailStep(ctx, execD.ID, "worker-1", "shipping provider down"); err != nil {
+		t.Fatalf("failed to fail Step D: %v", err)
+	}
+
+	// 4. Verify workflow transitioned to COMPENSATING
+	var wfStatus string
+	if err := db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&wfStatus); err != nil {
+		t.Fatalf("failed to check workflow status: %v", err)
+	}
+	if wfStatus != "COMPENSATING" {
+		t.Fatalf("expected workflow status COMPENSATING, got %s", wfStatus)
+	}
+
+	// 5. Verify DAG Mirror Rollback:
+	// Step D failed, so Step D's compensation was CANCELLED (only completed steps are compensated).
+	// Steps B and C both completed, and their downstream dependency (D) is now CANCELLED.
+	// Therefore, Step B and Step C's compensations are immediately UNBLOCKED and claimed in parallel!
+	_, comp1, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || comp1 == nil || !comp1.IsCompensation {
+		t.Fatalf("expected to claim parallel compensation (B or C), got %v, err=%v", comp1, err)
+	}
+	_, comp2, err := workerLogic.ClaimNext(ctx, "worker-2")
+	if err != nil || comp2 == nil || !comp2.IsCompensation {
+		t.Fatalf("expected to claim parallel compensation (B or C), got %v, err=%v", comp2, err)
+	}
+
+	claimedIDs := map[string]bool{comp1.StepID: true, comp2.StepID: true}
+	if !claimedIDs[stepBID] || !claimedIDs[stepCID] {
+		t.Fatalf("expected compensations for B and C, got %s and %s", comp1.StepID, comp2.StepID)
+	}
+
+	// While B and C's compensations are running, Step A's compensation must remain BLOCKED!
+	_, blockedA, err := workerLogic.ClaimNext(ctx, "worker-3")
+	if err != nil {
+		t.Fatalf("unexpected error claiming while B and C are compensating: %v", err)
+	}
+	if blockedA != nil {
+		t.Fatalf("Step A's compensation must be blocked until both B and C finish, but got %s", blockedA.StepID)
+	}
+
+	// Worker 1 and Worker 2 complete B and C compensations
+	if err := workerLogic.CompleteStep(ctx, comp1.ID, "worker-1", json.RawMessage(`{"rollback":"done"}`)); err != nil {
+		t.Fatalf("failed to complete compensation 1: %v", err)
+	}
+	if err := workerLogic.CompleteStep(ctx, comp2.ID, "worker-2", json.RawMessage(`{"rollback":"done"}`)); err != nil {
+		t.Fatalf("failed to complete compensation 2: %v", err)
+	}
+
+	// 6. Finally, Step A's compensation is unblocked and claimed!
+	_, compA, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || compA == nil || compA.StepID != stepAID || !compA.IsCompensation {
+		t.Fatalf("expected to claim compensation A, got %v, err=%v", compA, err)
+	}
+	if err := workerLogic.CompleteStep(ctx, compA.ID, "worker-1", json.RawMessage(`{"rollback":"a-done"}`)); err != nil {
+		t.Fatalf("failed to complete A compensation: %v", err)
+	}
+
+	// 7. Verify workflow execution is now COMPENSATED
+	if err := db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&wfStatus); err != nil {
+		t.Fatalf("failed to check final workflow status: %v", err)
+	}
+	if wfStatus != "COMPENSATED" {
+		t.Fatalf("expected final workflow status COMPENSATED, got %s", wfStatus)
+	}
+
+	t.Logf("✓ Verified DAG Mirror Rollback: (B & C in parallel) -> A completed in exact reverse topological order!")
+}
+
+func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) {
+	db := getTestDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	stepRepo := step.NewStepRepository(db)
+	stepValidator := step.NewStepValidator()
+	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	workerLogic := worker.NewWorkerLogic(stepRepo)
+
+	// Step A -> (Step B & Step C in parallel)
+	stepAID := "step-a-" + uuid.NewString()[:8]
+	stepBID := "step-b-" + uuid.NewString()[:8]
+	stepCID := "step-c-" + uuid.NewString()[:8]
+
+	wfName := "parallel-protect-wf-" + uuid.NewString()[:8]
+	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
+		Name:    wfName,
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     stepAID,
+				Name:   "Step A",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://api.test/a"}`),
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/a-rollback"}`),
+				},
+			},
+			{
+				ID:        stepBID,
+				Name:      "Step B (Slow payment)",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/b"}`),
+				DependsOn: []string{stepAID},
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/b-rollback"}`),
+				},
+			},
+			{
+				ID:        stepCID,
+				Name:      "Step C (Fast fail)",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{"url":"https://api.test/c"}`),
+				DependsOn: []string{stepAID},
+				Compensation: &step.Compensation{
+					Type:   step.StepTypeHTTP,
+					Config: json.RawMessage(`{"url":"https://api.test/c-rollback"}`),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to execute workflow: %v", err)
+	}
+
+	// 1. Complete Step A
+	_, execA, _ := workerLogic.ClaimNext(ctx, "worker-1")
+	_ = workerLogic.CompleteStep(ctx, execA.ID, "worker-1", json.RawMessage(`{}`))
+
+	// 2. Claim parallel steps: one keeps running, one fails
+	_, exec1, _ := workerLogic.ClaimNext(ctx, "worker-1")
+	_, exec2, _ := workerLogic.ClaimNext(ctx, "worker-2")
+	if exec1 == nil || exec2 == nil {
+		t.Fatalf("expected both parallel steps to be claimed, got exec1=%v, exec2=%v", exec1, exec2)
+	}
+
+	// Identify which is the slow step (to keep running) and which is to fail
+	var slowExec, failExec *step.StepExecution
+	var slowWorker, failWorker string
+	if exec1.StepID == stepCID {
+		failExec = exec1
+		failWorker = "worker-1"
+		slowExec = exec2
+		slowWorker = "worker-2"
+	} else {
+		failExec = exec2
+		failWorker = "worker-2"
+		slowExec = exec1
+		slowWorker = "worker-1"
+	}
+
+	// 3. Fail the fast step
+	if err := workerLogic.FailStep(ctx, failExec.ID, failWorker, "immediate error"); err != nil {
+		t.Fatalf("failed to fail step: %v", err)
+	}
+
+	// 4. CRITICAL CHECK: slowExec is still RUNNING. Verify its compensation ticket was NOT cancelled!
+	var slowCompStatus string
+	err = db.QueryRowContext(ctx, `
+		SELECT status FROM step_executions
+		WHERE workflow_execution_id = ? AND step_id = ? AND is_compensation = TRUE
+	`, wfExec.ID, slowExec.StepID).Scan(&slowCompStatus)
+	if err != nil {
+		t.Fatalf("failed to check slow comp status: %v", err)
+	}
+	if slowCompStatus != "PENDING" {
+		t.Fatalf("CRITICAL: Sibling step %s was RUNNING, but its compensation ticket was set to %s instead of PENDING!", slowExec.StepID, slowCompStatus)
+	}
+	t.Logf("✓ Verified sibling step %s compensation ticket was protected and remained PENDING while RUNNING!", slowExec.StepID)
+
+	// 5. Worker now finishes the slow step successfully
+	if err := workerLogic.CompleteStep(ctx, slowExec.ID, slowWorker, json.RawMessage(`{"status":"ok"}`)); err != nil {
+		t.Fatalf("failed to complete slow step: %v", err)
+	}
+
+	// 6. Worker claims slow step's compensation!
+	_, compSlow, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || compSlow == nil || compSlow.StepID != slowExec.StepID || !compSlow.IsCompensation {
+		t.Fatalf("expected to claim compensation for slow step, got %v, err=%v", compSlow, err)
+	}
+	if err := workerLogic.CompleteStep(ctx, compSlow.ID, "worker-1", json.RawMessage(`{"refund":"done"}`)); err != nil {
+		t.Fatalf("failed to complete slow step comp: %v", err)
+	}
+
+	// 7. Worker claims Step A's compensation
+	_, compA, err := workerLogic.ClaimNext(ctx, "worker-1")
+	if err != nil || compA == nil || compA.StepID != stepAID || !compA.IsCompensation {
+		t.Fatalf("expected to claim compensation A, got %v, err=%v", compA, err)
+	}
+	if err := workerLogic.CompleteStep(ctx, compA.ID, "worker-1", json.RawMessage(`{"cancel":"done"}`)); err != nil {
+		t.Fatalf("failed to complete comp A: %v", err)
+	}
+
+	// 8. Workflow reaches COMPENSATED
+	var finalStatus string
+	_ = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExec.ID).Scan(&finalStatus)
+	if finalStatus != "COMPENSATED" {
+		t.Fatalf("expected final status COMPENSATED, got %s", finalStatus)
+	}
+	t.Logf("✓ Sibling parallel running step successfully protected and compensated end-to-end!")
+}
+
+
 
 
 

@@ -201,6 +201,15 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 		) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
+	// Build transpose / reverse dependency map for compensation DAG (Mirror Rollback)
+	// If step B depends on step A, then in compensation DAG, compensation A depends on compensation B.
+	reverseDeps := make(map[string][]string, len(steps))
+	for _, s := range steps {
+		for _, depID := range s.DependsOn {
+			reverseDeps[depID] = append(reverseDeps[depID], s.ID)
+		}
+	}
+
 	for _, s := range steps {
 		stepExecID := util.GenerateUUID()
 		maxAttempts := 1
@@ -310,6 +319,15 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 				compName = "Compensation for " + s.ID
 			}
 
+			compDependsOn := reverseDeps[s.ID]
+			if compDependsOn == nil {
+				compDependsOn = []string{}
+			}
+			compDependsOnJSON, err := json.Marshal(compDependsOn)
+			if err != nil {
+				compDependsOnJSON = []byte("[]")
+			}
+
 			_, err = tx.ExecContext(
 				ctx,
 				insertStepExecQuery,
@@ -319,7 +337,7 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 				compName,
 				string(s.Compensation.Type),
 				string(compConfigJSON),
-				"[]",
+				string(compDependsOnJSON),
 				compMaxAttempts,
 				s.Compensation.Timeout,
 				compBackoff,
@@ -340,6 +358,7 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 				Name:                compName,
 				Type:                string(s.Compensation.Type),
 				Config:              compConfigJSON,
+				DependsOn:           compDependsOn,
 				Status:              step.StatusPending,
 				MaxAttempts:         compMaxAttempts,
 				TimeoutSeconds:      s.Compensation.Timeout,

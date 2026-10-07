@@ -15,11 +15,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'COMPLETED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-emerald-50 text-emerald-700 border-emerald-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-emerald-950/40 text-emerald-400 border-emerald-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <Check className={`${iconClass} text-emerald-600 stroke-[2.5]`} />
+          <Check className={`${iconClass} text-emerald-400 stroke-[2.5]`} />
           <span>COMPLETED</span>
         </span>
       )
@@ -27,11 +27,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'RUNNING':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-blue-50 text-blue-700 border-blue-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-blue-950/40 text-blue-400 border-blue-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <Loader2 className={`${iconClass} text-blue-600 animate-spin`} />
+          <Loader2 className={`${iconClass} text-blue-400 animate-spin`} />
           <span>RUNNING</span>
         </span>
       )
@@ -39,11 +39,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'FAILED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-50 text-rose-700 border-rose-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-950/40 text-rose-400 border-rose-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <AlertCircle className={`${iconClass} text-rose-600 stroke-[2.5]`} />
+          <AlertCircle className={`${iconClass} text-rose-400 stroke-[2.5]`} />
           <span>FAILED</span>
         </span>
       )
@@ -51,11 +51,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'COMPENSATING':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-50 text-amber-800 border-amber-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-950/40 text-amber-400 border-amber-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <Loader2 className={`${iconClass} text-amber-600 animate-spin`} />
+          <Loader2 className={`${iconClass} text-amber-400 animate-spin`} />
           <span>COMPENSATING</span>
         </span>
       )
@@ -63,11 +63,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'COMPENSATED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-50 text-amber-800 border-amber-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-950/40 text-amber-400 border-amber-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <RotateCcw className={`${iconClass} text-amber-600 stroke-[2]`} />
+          <RotateCcw className={`${iconClass} text-amber-400 stroke-[2]`} />
           <span>COMPENSATED</span>
         </span>
       )
@@ -75,11 +75,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     case 'COMPENSATION_FAILED':
       return (
         <span
-          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-50 text-rose-700 border-rose-300 ${
+          className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-950/40 text-rose-400 border-rose-800/60 ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
-          <AlertCircle className={`${iconClass} text-rose-600 stroke-[2.5]`} />
+          <AlertCircle className={`${iconClass} text-rose-400 stroke-[2.5]`} />
           <span>COMPENSATION FAILED</span>
         </span>
       )
@@ -87,7 +87,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
     default:
       return (
         <span
-          className={`inline-flex items-center gap-1 font-semibold rounded-lg border bg-slate-100 text-slate-700 border-slate-300 uppercase ${
+          className={`inline-flex items-center gap-1 font-semibold rounded-lg border bg-neutral-900 text-neutral-400 border-neutral-800 uppercase ${
             isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
           }`}
         >

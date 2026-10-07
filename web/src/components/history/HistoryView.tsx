@@ -51,10 +51,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Page Header Block matching Workflows page */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-slate-200/70">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2 border-b border-neutral-800">
         <div className="space-y-0.5">
-          <h1 className="text-xl font-bold tracking-tight text-slate-900">Execution History</h1>
-          <p className="text-xs text-slate-500 font-normal">
+          <h1 className="text-xl font-bold tracking-tight text-neutral-100">Execution History</h1>
+          <p className="text-xs text-neutral-400 font-normal">
             Audit log of workflow executions
           </p>
         </div>
@@ -66,17 +66,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search executions..."
-              className="pl-8 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400 w-56 text-slate-700 placeholder-slate-400 shadow-2xs"
+              className="pl-8 pr-3 py-1.5 text-xs bg-[#141414] border border-neutral-700/80 rounded-lg focus:outline-none focus:ring-1 focus:ring-neutral-500 focus:border-neutral-500 w-56 text-neutral-200 placeholder-neutral-500 shadow-2xs"
             />
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+            <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-2.5 top-2.5" />
           </div>
 
           <button
             onClick={onRefresh}
             disabled={isLoading}
-            className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
+            className="px-3 py-1.5 bg-[#141414] border border-neutral-700/80 hover:bg-neutral-800 text-neutral-300 hover:text-neutral-100 text-xs font-medium rounded-lg shadow-2xs flex items-center space-x-1.5 transition disabled:opacity-50 cursor-pointer outline-none focus:outline-none focus:ring-0"
           >
-            <RotateCw className={`w-3.5 h-3.5 text-slate-500 ${isLoading ? 'animate-spin' : ''}`} />
+            <RotateCw className={`w-3.5 h-3.5 text-neutral-400 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
         </div>
@@ -84,13 +84,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
       {/* Filter Tabs for History */}
       <div className="flex items-center justify-between">
-        <div className="inline-flex p-0.5 bg-slate-200/60 rounded-lg text-xs font-medium text-slate-600">
+        <div className="inline-flex p-0.5 bg-neutral-900 border border-neutral-800 rounded-lg text-xs font-medium text-neutral-400">
           <button
             onClick={() => setCurrentFilter('all')}
             className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'all'
-                ? 'bg-white text-slate-900 shadow-xs font-medium'
-                : 'hover:text-slate-900'
+                ? 'bg-[#181818] text-neutral-100 shadow-xs font-medium border border-neutral-700/60'
+                : 'hover:text-neutral-200'
             }`}
           >
             All
@@ -99,8 +99,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onClick={() => setCurrentFilter('COMPLETED')}
             className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'COMPLETED'
-                ? 'bg-white text-slate-900 shadow-xs font-medium'
-                : 'hover:text-slate-900'
+                ? 'bg-[#181818] text-neutral-100 shadow-xs font-medium border border-neutral-700/60'
+                : 'hover:text-neutral-200'
             }`}
           >
             Completed
@@ -109,8 +109,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onClick={() => setCurrentFilter('RUNNING')}
             className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'RUNNING'
-                ? 'bg-white text-slate-900 shadow-xs font-medium'
-                : 'hover:text-slate-900'
+                ? 'bg-[#181818] text-neutral-100 shadow-xs font-medium border border-neutral-700/60'
+                : 'hover:text-neutral-200'
             }`}
           >
             Running
@@ -119,8 +119,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onClick={() => setCurrentFilter('FAILED')}
             className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'FAILED'
-                ? 'bg-white text-rose-700 shadow-xs font-medium'
-                : 'text-rose-600 hover:text-rose-700'
+                ? 'bg-[#181818] text-rose-400 shadow-xs font-medium border border-rose-900/60'
+                : 'text-rose-400/90 hover:text-rose-300'
             }`}
           >
             Failed
@@ -129,8 +129,8 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             onClick={() => setCurrentFilter('COMPENSATED')}
             className={`px-3 py-1 rounded-md transition cursor-pointer outline-none focus:outline-none focus:ring-0 ${
               currentFilter === 'COMPENSATED'
-                ? 'bg-white text-amber-800 shadow-xs font-medium'
-                : 'text-amber-600 hover:text-amber-700'
+                ? 'bg-[#181818] text-amber-400 shadow-xs font-medium border border-amber-900/60'
+                : 'text-amber-400/90 hover:text-amber-300'
             }`}
           >
             Compensated

@@ -156,7 +156,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="text-slate-800 bg-[#F4F6F9] flex h-screen overflow-hidden antialiased">
+    <div className="text-neutral-200 bg-[#0c0c0c] flex h-screen overflow-hidden antialiased">
       {/* Refactored Clean Left Sidebar */}
       <Sidebar
         currentView={currentView}
@@ -170,7 +170,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Workspace */}
-      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-[#F4F6F9]">
+      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-[#0c0c0c]">
         {/* Workspace Body */}
         <main className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
           {currentView === 'dashboard' && (
@@ -222,34 +222,34 @@ export const App: React.FC = () => {
         </main>
 
         {/* Slim System Status Footer Bar (RAM & CPU) */}
-        <footer className="h-7 bg-white border-t border-slate-300/70 px-6 flex items-center justify-between text-[11px] font-mono text-slate-500 select-none flex-shrink-0">
+        <footer className="h-7 bg-[#111111] border-t border-neutral-800 px-6 flex items-center justify-between text-[11px] font-mono text-neutral-400 select-none flex-shrink-0">
           <div className="flex items-center space-x-3.5">
             <span className="flex items-center gap-1">
-              <Cpu className="w-3.5 h-3.5 text-slate-400" />
+              <Cpu className="w-3.5 h-3.5 text-neutral-500" />
               <span>CPU:</span>
-              <strong className="text-slate-800 font-semibold">
+              <strong className="text-neutral-200 font-semibold">
                 {systemMetrics?.cpu_percent?.toFixed(1) ?? '—'}%
               </strong>
             </span>
-            <span className="text-slate-300">|</span>
+            <span className="text-neutral-700">|</span>
             <span className="flex items-center gap-1">
-              <HardDrive className="w-3.5 h-3.5 text-slate-400" />
+              <HardDrive className="w-3.5 h-3.5 text-neutral-500" />
               <span>RAM:</span>
-              <strong className="text-slate-800 font-semibold">
+              <strong className="text-neutral-200 font-semibold">
                 {systemMetrics?.go_alloc_mb?.toFixed(1) ?? '—'} MB
               </strong>
               {systemMetrics && (
-                <span className="text-slate-400">
+                <span className="text-neutral-500">
                   ({(systemMetrics.memory_used_mb / 1024).toFixed(1)}/{(systemMetrics.memory_total_mb / 1024).toFixed(0)} GB • {systemMetrics.memory_percent.toFixed(0)}%)
                 </span>
               )}
             </span>
           </div>
 
-          <div className="hidden sm:flex items-center space-x-3 text-slate-400 text-[10px]">
+          <div className="hidden sm:flex items-center space-x-3 text-neutral-500 text-[10px]">
             <span>Go 1.26.1</span>
             <span>•</span>
-            <span>Goroutines: <strong className="text-slate-600">{systemMetrics?.goroutines ?? '—'}</strong></span>
+            <span>Goroutines: <strong className="text-neutral-400">{systemMetrics?.goroutines ?? '—'}</strong></span>
           </div>
         </footer>
       </div>
