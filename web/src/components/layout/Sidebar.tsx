@@ -5,7 +5,6 @@ import {
   History,
   ChevronsLeft,
   ChevronsRight,
-  Database,
 } from 'lucide-react'
 import type { ViewMode } from '../../types/relay'
 
@@ -101,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside
       className={`${
         isCollapsed ? 'w-16' : 'w-56'
-      } flex-shrink-0 bg-[#0e0e0e] border-r border-neutral-800 flex flex-col justify-between select-none z-20 transition-all duration-200`}
+      } flex-shrink-0 bg-[#0e0e0e] border-r border-neutral-800 flex flex-col select-none z-20 transition-all duration-200`}
     >
       {/* Top Part: Collapse Button + 3 Menu Items (No logo, No grouping header) */}
       <div className="p-3 space-y-3">
@@ -126,31 +125,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             renderNavButton(item.id, item.label, item.icon, item.count)
           )}
         </nav>
-      </div>
-
-      {/* Bottom Part: Live Engine Status */}
-      <div className="p-3 border-t border-neutral-800">
-        {!isCollapsed ? (
-          <div className="p-2.5 bg-[#141414] border border-neutral-800 rounded-lg space-y-1 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-neutral-300 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-neutral-400" />
-                Relay Engine
-              </span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            </div>
-            <div className="text-[10px] text-neutral-500 font-mono">
-              Live REST API
-            </div>
-          </div>
-        ) : (
-          <div
-            title="Relay Engine Connected"
-            className="w-full p-2 flex justify-center items-center rounded-lg text-neutral-400"
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-          </div>
-        )}
       </div>
     </aside>
   )

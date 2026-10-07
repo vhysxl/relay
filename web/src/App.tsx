@@ -224,7 +224,6 @@ export const App: React.FC = () => {
             </span>
           </div>
 
-          {/* Bottom right emptied as requested */}
           <div />
         </footer>
       </div>
