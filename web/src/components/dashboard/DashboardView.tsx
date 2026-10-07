@@ -206,7 +206,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {systemMetrics?.cpu_percent != null ? `${systemMetrics.cpu_percent.toFixed(1)}%` : '—'}
             </span>
             <span className="text-xs text-neutral-400 font-medium">
-              {systemMetrics?.num_cpu ?? 8} Cores Active
+              {systemMetrics?.num_cpu ? `${systemMetrics.num_cpu} Cores Active` : '—'}
             </span>
           </div>
         </div>

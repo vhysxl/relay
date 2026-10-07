@@ -224,11 +224,8 @@ export const App: React.FC = () => {
             </span>
           </div>
 
-          <div className="hidden sm:flex items-center space-x-3 text-neutral-500 text-[10px]">
-            <span>Go 1.26.1</span>
-            <span>•</span>
-            <span>Goroutines: <strong className="text-neutral-400">{systemMetrics?.goroutines ?? '—'}</strong></span>
-          </div>
+          {/* Bottom right emptied as requested */}
+          <div />
         </footer>
       </div>
     </div>
