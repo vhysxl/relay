@@ -11,7 +11,6 @@ import type { Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
 import { ExecutionHorizontalTimeline } from './ExecutionHorizontalTimeline'
 import { formatTimestamp, formatDuration, formatJSON } from '../../utils/format'
-import { mockExecutions } from '../../data/mockData'
 
 interface ExecutionDetailViewProps {
   executionId: string
@@ -29,25 +28,16 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
   const fetchDetail = async () => {
     setIsLoading(true)
     setError(null)
-    const mockMatch = mockExecutions.find((m) => m.id === executionId)
 
     try {
       const res = await fetch(`/executions/${encodeURIComponent(executionId)}`)
       if (!res.ok) {
-        if (mockMatch) {
-          setExecution(mockMatch)
-          return
-        }
-        throw new Error(`Execution not found (HTTP ${res.status})`)
+        throw new Error(`Execution "${executionId}" not found (HTTP ${res.status})`)
       }
       const data: Execution = await res.json()
       setExecution(data)
     } catch (err: any) {
-      if (mockMatch) {
-        setExecution(mockMatch)
-      } else {
-        setError(err.message || 'Failed to load execution')
-      }
+      setError(err.message || 'Failed to load execution')
     } finally {
       setIsLoading(false)
     }

@@ -66,7 +66,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       .filter((d) => !isNaN(d) && d > 0)
 
     if (durations.length === 0) {
-      return { avgDurationText: '< 1.5s', p95DurationText: '3.2s' }
+      return { avgDurationText: '—', p95DurationText: '—' }
     }
 
     const sum = durations.reduce((a, b) => a + b, 0)

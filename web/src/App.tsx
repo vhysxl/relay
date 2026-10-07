@@ -7,23 +7,33 @@ import { WorkflowsView } from './components/workflows/WorkflowsView'
 import { HistoryView } from './components/history/HistoryView'
 import { ExecutionDetailView } from './components/execution-detail/ExecutionDetailView'
 import { WorkflowDetailView } from './components/workflows/WorkflowDetailView'
-import { mockWorkflows, mockExecutions, mockSystemMetrics } from './data/mockData'
+
+const initialSystemMetrics: SystemMetrics = {
+  cpu_percent: 0,
+  memory_used_mb: 0,
+  memory_total_mb: 0,
+  memory_percent: 0,
+  go_alloc_mb: 0,
+  go_sys_mb: 0,
+  goroutines: 0,
+  num_cpu: 0,
+  uptime_seconds: 0,
+}
 
 export const App: React.FC = () => {
   const [workflows, setWorkflows] = useState<Workflow[]>([])
   const [executions, setExecutions] = useState<Execution[]>([])
-  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>(mockSystemMetrics)
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>(initialSystemMetrics)
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard')
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
 
-  // Default to mock data mode during dev so UI is always previewable
-  const [isMockMode, setIsMockMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('relay_mock_mode')
-    return saved !== null ? saved === 'true' : true
-  })
+  // Clear any legacy mock mode preference
+  useEffect(() => {
+    localStorage.removeItem('relay_mock_mode')
+  }, [])
 
   // Fetch real-time system metrics (CPU, RAM, Goroutines)
   const fetchSystemMetrics = useCallback(async () => {
@@ -33,27 +43,16 @@ export const App: React.FC = () => {
         const data: SystemMetrics = await res.json().catch(() => null)
         if (data) {
           setSystemMetrics(data)
-          return
         }
       }
-      setSystemMetrics(mockSystemMetrics)
-    } catch {
-      setSystemMetrics(mockSystemMetrics)
+    } catch (err) {
+      console.warn('System metrics fetch error:', err)
     }
   }, [])
 
-  // Fetch workflows and executions or load mock data
-  const loadData = useCallback(async (forceMock = isMockMode) => {
+  // Fetch live workflows and executions
+  const loadData = useCallback(async () => {
     setIsLoading(true)
-
-    if (forceMock) {
-      setTimeout(() => {
-        setWorkflows(mockWorkflows)
-        setExecutions(mockExecutions)
-        setIsLoading(false)
-      }, 100)
-      return
-    }
 
     try {
       const [execRes, wfRes] = await Promise.all([
@@ -64,35 +63,16 @@ export const App: React.FC = () => {
       const execData = execRes && execRes.ok ? await execRes.json().catch(() => []) : []
       const wfData = wfRes && wfRes.ok ? await wfRes.json().catch(() => []) : []
 
-      const hasLiveWorkflows = Array.isArray(wfData) && wfData.length > 0
-      const hasLiveExecutions = Array.isArray(execData) && execData.length > 0
-
-      if (hasLiveWorkflows || hasLiveExecutions) {
-        setExecutions(Array.isArray(execData) ? execData : [])
-        setWorkflows(Array.isArray(wfData) ? wfData : [])
-      } else {
-        setWorkflows(mockWorkflows)
-        setExecutions(mockExecutions)
-        setIsMockMode(true)
-        localStorage.setItem('relay_mock_mode', 'true')
-      }
+      setExecutions(Array.isArray(execData) ? execData : [])
+      setWorkflows(Array.isArray(wfData) ? wfData : [])
     } catch (err) {
-      console.warn('Backend unavailable, falling back to mock data:', err)
-      setWorkflows(mockWorkflows)
-      setExecutions(mockExecutions)
-      setIsMockMode(true)
-      localStorage.setItem('relay_mock_mode', 'true')
+      console.error('Failed to load workflows or executions from server:', err)
+      setExecutions([])
+      setWorkflows([])
     } finally {
       setIsLoading(false)
     }
-  }, [isMockMode])
-
-  const handleToggleMockMode = () => {
-    const nextMode = !isMockMode
-    setIsMockMode(nextMode)
-    localStorage.setItem('relay_mock_mode', String(nextMode))
-    loadData(nextMode)
-  }
+  }, [])
 
   // Handle URL hash changes for deep linking & back button support
   const handleHashChange = useCallback(() => {
@@ -165,8 +145,6 @@ export const App: React.FC = () => {
         executionCount={executions.length}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        isMockMode={isMockMode}
-        onToggleMockMode={handleToggleMockMode}
       />
 
       {/* Main Content Workspace */}

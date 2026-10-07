@@ -14,7 +14,6 @@ import {
 import type { Workflow, Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
 import { formatTimestamp, formatJSON } from '../../utils/format'
-import { mockWorkflows, mockExecutions } from '../../data/mockData'
 import { WorkflowDagCanvas } from './WorkflowDagCanvas'
 
 interface WorkflowDetailViewProps {
@@ -43,8 +42,6 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
     setIsLoading(true)
     setError(null)
 
-    const mockMatch = mockWorkflows.find((w) => w.id === workflowId)
-
     try {
       const [wfRes, execRes] = await Promise.all([
         fetch(`/workflows/${encodeURIComponent(workflowId)}`).catch(() => null),
@@ -54,25 +51,18 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
       if (wfRes && wfRes.ok) {
         const data = await wfRes.json()
         setWorkflow(data)
-      } else if (mockMatch) {
-        setWorkflow(mockMatch)
       } else {
         throw new Error(`Workflow "${workflowId}" not found`)
       }
 
       if (execRes && execRes.ok) {
         const execs: Execution[] = await execRes.json().catch(() => [])
-        setRecentExecutions(execs.filter((e) => e.workflow_id === workflowId))
+        setRecentExecutions(Array.isArray(execs) ? execs.filter((e) => e.workflow_id === workflowId) : [])
       } else {
-        setRecentExecutions(mockExecutions.filter((e) => e.workflow_id === workflowId))
+        setRecentExecutions([])
       }
     } catch (err: any) {
-      if (mockMatch) {
-        setWorkflow(mockMatch)
-        setRecentExecutions(mockExecutions.filter((e) => e.workflow_id === workflowId))
-      } else {
-        setError(err.message || 'Failed to load workflow')
-      }
+      setError(err.message || 'Failed to load workflow')
     } finally {
       setIsLoading(false)
     }

@@ -6,7 +6,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Database,
-  Sparkles,
 } from 'lucide-react'
 import type { ViewMode } from '../../types/relay'
 
@@ -17,8 +16,6 @@ interface SidebarProps {
   executionCount: number
   isCollapsed: boolean
   onToggleCollapse: () => void
-  isMockMode: boolean
-  onToggleMockMode: () => void
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -28,8 +25,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   executionCount,
   isCollapsed,
   onToggleCollapse,
-  isMockMode,
-  onToggleMockMode,
 }) => {
   // 3 navigation items without grouping or branding
   const menuItems = [
@@ -133,44 +128,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Bottom Part: Dev Mode Controller with subtle styling */}
+      {/* Bottom Part: Live Engine Status */}
       <div className="p-3 border-t border-neutral-800">
         {!isCollapsed ? (
-          <div className="p-2.5 bg-[#141414] border border-neutral-800 rounded-lg space-y-1.5 shadow-2xs">
+          <div className="p-2.5 bg-[#141414] border border-neutral-800 rounded-lg space-y-1 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-semibold text-neutral-300 flex items-center gap-1.5">
-                {isMockMode ? (
-                  <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                ) : (
-                  <Database className="w-3.5 h-3.5 text-neutral-300" />
-                )}
-                {isMockMode ? 'Mock Data' : 'Live Engine'}
+                <Database className="w-3.5 h-3.5 text-neutral-400" />
+                Relay Engine
               </span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isMockMode ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
-                }`}
-              />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             </div>
-            <button
-              onClick={onToggleMockMode}
-              className="w-full py-1 text-[11px] font-medium bg-neutral-800 hover:bg-neutral-700/80 border border-neutral-700/80 rounded-lg text-neutral-200 transition cursor-pointer shadow-2xs outline-none focus:outline-none focus:ring-0"
-            >
-              Switch to {isMockMode ? 'Live API' : 'Dummy Data'}
-            </button>
+            <div className="text-[10px] text-neutral-500 font-mono">
+              Live REST API
+            </div>
           </div>
         ) : (
-          <button
-            onClick={onToggleMockMode}
-            title={isMockMode ? 'Mock Data Active (Click to switch)' : 'Live API Active (Click to switch)'}
-            className="w-full p-2 flex justify-center items-center rounded-lg text-neutral-400 hover:bg-neutral-800/60 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
+          <div
+            title="Relay Engine Connected"
+            className="w-full p-2 flex justify-center items-center rounded-lg text-neutral-400"
           >
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                isMockMode ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
-              }`}
-            />
-          </button>
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          </div>
         )}
       </div>
     </aside>
