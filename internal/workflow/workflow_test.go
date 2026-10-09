@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/vhysxl/relay/internal/step"
@@ -82,13 +83,58 @@ func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 		t.Fatalf("expected ErrInvalidWorkflowName, got %v", err)
 	}
 
+	// Test empty steps
+	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:    "no-steps-workflow",
+		Version: 1,
+	})
+	if err != ErrWorkflowEmptySteps {
+		t.Fatalf("expected ErrWorkflowEmptySteps, got %v", err)
+	}
+
+	validStep := step.Step{
+		ID:     "step-1",
+		Type:   step.StepTypeHTTP,
+		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+	}
+
+	// Test name too long
+	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:  strings.Repeat("a", 256),
+		Steps: []step.Step{validStep},
+	})
+	if err != ErrWorkflowNameTooLong {
+		t.Fatalf("expected ErrWorkflowNameTooLong, got %v", err)
+	}
+
+	// Test negative version
+	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:    "test-workflow",
+		Version: -1,
+		Steps:   []step.Step{validStep},
+	})
+	if err != ErrInvalidWorkflowVersion {
+		t.Fatalf("expected ErrInvalidWorkflowVersion, got %v", err)
+	}
+
 	// Test invalid JSON context
 	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
 		Name:    "test-workflow",
 		Context: json.RawMessage(`{invalid-json`),
+		Steps:   []step.Step{validStep},
 	})
 	if err != ErrInvalidWorkflowContext {
 		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	}
+
+	// Test non-object JSON context (array or primitive)
+	_, err = logic.CreateWorkflow(context.Background(), &WorkflowRequest{
+		Name:    "test-workflow",
+		Context: json.RawMessage(`["not", "an", "object"]`),
+		Steps:   []step.Step{validStep},
+	})
+	if err != ErrInvalidWorkflowContext {
+		t.Fatalf("expected ErrInvalidWorkflowContext for array context, got %v", err)
 	}
 
 	// Test success & defaults
@@ -96,6 +142,7 @@ func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 		Name:    "my-workflow",
 		Version: 0, // should default to 1
 		Context: json.RawMessage(`{"key":"value"}`),
+		Steps:   []step.Step{validStep},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -480,9 +527,6 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 func TestWorkflowStatus_Constants(t *testing.T) {
 	if WorkflowStatusCompleted != "COMPLETED" {
 		t.Errorf("expected WorkflowStatusCompleted to be 'COMPLETED', got %q", WorkflowStatusCompleted)
-	}
-	if WorkflowStatusSuccess != WorkflowStatusCompleted {
-		t.Errorf("expected WorkflowStatusSuccess to alias WorkflowStatusCompleted")
 	}
 	if WorkflowStatusCancelled != "CANCELLED" {
 		t.Errorf("expected WorkflowStatusCancelled to be 'CANCELLED', got %q", WorkflowStatusCancelled)

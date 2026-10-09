@@ -34,6 +34,9 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidWorkflowName),
+			errors.Is(err, ErrWorkflowNameTooLong),
+			errors.Is(err, ErrInvalidWorkflowVersion),
+			errors.Is(err, ErrWorkflowEmptySteps),
 			errors.Is(err, ErrInvalidWorkflowContext),
 			errors.Is(err, step.ErrEmptyStepType),
 			errors.Is(err, step.ErrInvalidStepType),

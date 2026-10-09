@@ -38,4 +38,3 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 	mux.HandleFunc("GET /executions", workflowHandler.ListExecutions)
 	mux.HandleFunc("GET /executions/{id}", workflowHandler.GetExecution)
 }
-

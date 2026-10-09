@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/vhysxl/relay/internal/step"
@@ -15,11 +16,19 @@ const (
 	WorkflowStatusRunning            WorkflowStatus = "RUNNING"
 	WorkflowStatusCompensating       WorkflowStatus = "COMPENSATING"
 	WorkflowStatusCompleted          WorkflowStatus = "COMPLETED"
-	WorkflowStatusSuccess                           = WorkflowStatusCompleted
 	WorkflowStatusFailed             WorkflowStatus = "FAILED"
 	WorkflowStatusCompensated        WorkflowStatus = "COMPENSATED"
 	WorkflowStatusCompensationFailed WorkflowStatus = "COMPENSATION_FAILED"
 	WorkflowStatusCancelled          WorkflowStatus = "CANCELLED"
+)
+
+var (
+	ErrInvalidWorkflowName    = errors.New("workflow name is required")
+	ErrWorkflowNameTooLong    = errors.New("workflow name cannot exceed 255 characters")
+	ErrInvalidWorkflowVersion = errors.New("workflow version cannot be negative")
+	ErrWorkflowEmptySteps     = errors.New("workflow must have at least one step")
+	ErrInvalidWorkflowID      = errors.New("workflow id is required")
+	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
 )
 
 type WorkflowRequest struct {
@@ -72,4 +81,3 @@ type WorkflowRepository interface {
 	GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error)
 	// DeleteWorkflow(ctx context.Context, workflowID string) (*Workflow, error)
 }
-

@@ -11,18 +11,15 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-var (
-	ErrInvalidWorkflowName    = errors.New("workflow name is required")
-	ErrInvalidWorkflowID      = errors.New("workflow id is required")
-	ErrInvalidWorkflowContext = errors.New("workflow context must be valid JSON")
-)
-
 type workflowLogic struct {
 	repo      WorkflowRepository
 	validator step.StepValidator
 }
 
 func NewWorkflowLogic(repo WorkflowRepository, validator step.StepValidator) WorkflowLogic {
+	if validator == nil {
+		validator = step.NewStepValidator()
+	}
 	return &workflowLogic{
 		repo:      repo,
 		validator: validator,
@@ -30,57 +27,36 @@ func NewWorkflowLogic(repo WorkflowRepository, validator step.StepValidator) Wor
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
-	if req == nil {
-		return nil, ErrInvalidWorkflowName
+	if err := req.ValidateAndNormalize(); err != nil {
+		return nil, err
 	}
 
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return nil, ErrInvalidWorkflowName
-	}
-
+	name := req.Name
 	version := req.Version
-	if version <= 0 {
-		version = 1
-	}
-
-	var ctxBytes []byte
-	if len(req.Context) > 0 {
-		trimmed := strings.TrimSpace(string(req.Context))
-		if trimmed != "" && trimmed != "null" {
-			if !json.Valid(req.Context) {
-				return nil, ErrInvalidWorkflowContext
-			}
-			ctxBytes = req.Context
-		}
-	}
+	ctxReq := req.Context
 
 	id := util.GenerateUUID()
 	now := time.Now().UTC()
 
-	steps := make([]step.Step, len(req.Steps))
-	copy(steps, req.Steps)
-
-	for i := range steps {
-		if strings.TrimSpace(steps[i].ID) == "" {
-			steps[i].ID = util.GenerateUUID()
+	for i := range req.Steps {
+		s := &req.Steps[i]
+		s.ID = strings.TrimSpace(s.ID)
+		if s.ID == "" {
+			s.ID = util.GenerateUUID()
 		}
-		steps[i].WorkflowID = id
-		if steps[i].CreatedAt.IsZero() {
-			steps[i].CreatedAt = now
+		for j := range s.DependsOn {
+			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
 		}
-		if steps[i].UpdatedAt.IsZero() {
-			steps[i].UpdatedAt = now
-		}
+		s.WorkflowID = id
+		s.CreatedAt = now
+		s.UpdatedAt = now
 	}
 
-	if len(steps) > 0 && l.validator != nil {
-		if err := l.validator.ValidateSteps(steps); err != nil {
-			return nil, err
-		}
+	if err := l.validator.ValidateSteps(req.Steps); err != nil {
+		return nil, err
 	}
 
-	hash := util.GenerateWorkflowHash(name, version, ctxBytes)
+	hash := util.GenerateWorkflowHash(name, version, ctxReq)
 
 	wf := &Workflow{
 		ID:        id,
@@ -88,10 +64,10 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		Version:   version,
 		Status:    WorkflowStatusPending,
 		Hash:      hash,
-		Context:   ctxBytes,
+		Context:   ctxReq,
 		CreatedAt: now,
 		UpdatedAt: now,
-		Steps:     steps,
+		Steps:     req.Steps,
 	}
 
 	return l.repo.CreateWorkflow(ctx, wf)
@@ -154,5 +130,3 @@ func (l *workflowLogic) GetExecution(ctx context.Context, executionID string) (*
 	}
 	return l.repo.GetExecution(ctx, id)
 }
-
-

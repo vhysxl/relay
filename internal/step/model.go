@@ -31,7 +31,7 @@ type Step struct {
 	Compensation *Compensation   `json:"compensation,omitempty" db:"compensation"`
 	Irreversible bool            `json:"irreversible,omitempty" db:"irreversible"`
 	CreatedAt    time.Time       `json:"created_at,omitempty" db:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at,omitempty" db:"updated_at"`
+	UpdatedAt    time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type Compensation struct {
