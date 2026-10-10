@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 func (r *WorkflowRequest) ValidateAndNormalize() error {
@@ -33,6 +35,17 @@ func (r *WorkflowRequest) ValidateAndNormalize() error {
 	// Steps
 	if len(r.Steps) == 0 {
 		return ErrWorkflowEmptySteps
+	}
+
+	for i := range r.Steps {
+		s := &r.Steps[i]
+		s.ID = strings.TrimSpace(s.ID)
+		if s.ID == "" {
+			s.ID = util.GenerateUUID()
+		}
+		for j := range s.DependsOn {
+			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
+		}
 	}
 
 	// Context

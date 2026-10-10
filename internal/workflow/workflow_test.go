@@ -151,14 +151,11 @@ func TestWorkflowLogic_CreateWorkflow_Validation(t *testing.T) {
 	if wf.Version != 1 {
 		t.Errorf("expected version 1, got %d", wf.Version)
 	}
-	if wf.Status != WorkflowStatusPending {
-		t.Errorf("expected status PENDING, got %s", wf.Status)
+	if wf.Status != WorkflowStatusActive {
+		t.Errorf("expected status ACTIVE, got %s", wf.Status)
 	}
 	if wf.ID == "" {
 		t.Errorf("expected non-empty ID")
-	}
-	if wf.Hash == "" {
-		t.Errorf("expected non-empty Hash")
 	}
 }
 
@@ -270,8 +267,8 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 	if created.Name != "order-saga" || created.Version != 2 {
 		t.Errorf("unexpected created workflow: %+v", created)
 	}
-	if created.Status != WorkflowStatusPending {
-		t.Errorf("expected PENDING, got %s", created.Status)
+	if created.Status != WorkflowStatusActive {
+		t.Errorf("expected ACTIVE, got %s", created.Status)
 	}
 	if len(created.Steps) != 1 {
 		t.Errorf("expected 1 step, got %d", len(created.Steps))
@@ -342,7 +339,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		ID:      "test-uuid-1234",
 		Name:    "order-saga",
 		Version: 1,
-		Status:  WorkflowStatusPending,
+		Status:  WorkflowStatusActive,
 		Steps: []step.Step{
 			{
 				ID:         "step-1",
@@ -455,6 +452,9 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 			if workflowID == "wf-not-found" {
 				return nil, ErrWorkflowNotFound
 			}
+			if workflowID == "wf-inactive" {
+				return nil, ErrWorkflowInactive
+			}
 			return &step.WorkflowExecution{
 				ID:         "exec-999",
 				WorkflowID: workflowID,
@@ -522,14 +522,24 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 	if recUnknown.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", recUnknown.Code)
 	}
+
+	// 5. Trigger inactive workflow
+	reqInactive := httptest.NewRequest(http.MethodPost, "/workflows/wf-inactive/execute", nil)
+	reqInactive.SetPathValue("id", "wf-inactive")
+	recInactive := httptest.NewRecorder()
+
+	handler.ExecuteWorkflow(recInactive, reqInactive)
+	if recInactive.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for inactive workflow, got %d", recInactive.Code)
+	}
 }
 
 func TestWorkflowStatus_Constants(t *testing.T) {
-	if WorkflowStatusCompleted != "COMPLETED" {
-		t.Errorf("expected WorkflowStatusCompleted to be 'COMPLETED', got %q", WorkflowStatusCompleted)
+	if WorkflowStatusActive != "ACTIVE" {
+		t.Errorf("expected WorkflowStatusActive to be 'ACTIVE', got %q", WorkflowStatusActive)
 	}
-	if WorkflowStatusCancelled != "CANCELLED" {
-		t.Errorf("expected WorkflowStatusCancelled to be 'CANCELLED', got %q", WorkflowStatusCancelled)
+	if WorkflowStatusInactive != "INACTIVE" {
+		t.Errorf("expected WorkflowStatusInactive to be 'INACTIVE', got %q", WorkflowStatusInactive)
 	}
 }
 

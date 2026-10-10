@@ -31,43 +31,30 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		return nil, err
 	}
 
-	name := req.Name
-	version := req.Version
-	ctxReq := req.Context
-
-	id := util.GenerateUUID()
-	now := time.Now().UTC()
-
-	for i := range req.Steps {
-		s := &req.Steps[i]
-		s.ID = strings.TrimSpace(s.ID)
-		if s.ID == "" {
-			s.ID = util.GenerateUUID()
-		}
-		for j := range s.DependsOn {
-			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
-		}
-		s.WorkflowID = id
-		s.CreatedAt = now
-		s.UpdatedAt = now
-	}
-
 	if err := l.validator.ValidateSteps(req.Steps); err != nil {
 		return nil, err
 	}
 
-	hash := util.GenerateWorkflowHash(name, version, ctxReq)
+	id := util.GenerateUUID()
+	now := time.Now().UTC()
+
+	steps := make([]step.Step, len(req.Steps))
+	for i, s := range req.Steps {
+		s.WorkflowID = id
+		s.CreatedAt = now
+		s.UpdatedAt = now
+		steps[i] = s
+	}
 
 	wf := &Workflow{
 		ID:        id,
-		Name:      name,
-		Version:   version,
-		Status:    WorkflowStatusPending,
-		Hash:      hash,
-		Context:   ctxReq,
+		Name:      req.Name,
+		Version:   req.Version,
+		Status:    WorkflowStatusActive,
+		Context:   req.Context,
 		CreatedAt: now,
 		UpdatedAt: now,
-		Steps:     req.Steps,
+		Steps:     steps,
 	}
 
 	return l.repo.CreateWorkflow(ctx, wf)

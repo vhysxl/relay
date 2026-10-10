@@ -12,14 +12,8 @@ import (
 type WorkflowStatus string
 
 const (
-	WorkflowStatusPending            WorkflowStatus = "PENDING"
-	WorkflowStatusRunning            WorkflowStatus = "RUNNING"
-	WorkflowStatusCompensating       WorkflowStatus = "COMPENSATING"
-	WorkflowStatusCompleted          WorkflowStatus = "COMPLETED"
-	WorkflowStatusFailed             WorkflowStatus = "FAILED"
-	WorkflowStatusCompensated        WorkflowStatus = "COMPENSATED"
-	WorkflowStatusCompensationFailed WorkflowStatus = "COMPENSATION_FAILED"
-	WorkflowStatusCancelled          WorkflowStatus = "CANCELLED"
+	WorkflowStatusActive   WorkflowStatus = "ACTIVE"
+	WorkflowStatusInactive WorkflowStatus = "INACTIVE"
 )
 
 var (
@@ -29,6 +23,7 @@ var (
 	ErrWorkflowEmptySteps     = errors.New("workflow must have at least one step")
 	ErrInvalidWorkflowID      = errors.New("workflow id is required")
 	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
+	ErrWorkflowInactive       = errors.New("workflow is inactive")
 )
 
 type WorkflowRequest struct {
@@ -43,7 +38,6 @@ type Workflow struct {
 	Name      string          `json:"name"`
 	Version   int             `json:"version"`
 	Status    WorkflowStatus  `json:"status"`
-	Hash      string          `json:"hash"`
 	Context   json.RawMessage `json:"context,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`

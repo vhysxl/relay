@@ -117,7 +117,8 @@ func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request
 		case errors.Is(err, ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
 		case errors.Is(err, ErrInvalidWorkflowID),
-			errors.Is(err, ErrInvalidWorkflowContext):
+			errors.Is(err, ErrInvalidWorkflowContext),
+			errors.Is(err, ErrWorkflowInactive):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		default:
 			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})

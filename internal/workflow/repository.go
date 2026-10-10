@@ -39,8 +39,8 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO workflow_definitions (id, name, version, status, hash, context, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO workflow_definitions (id, name, version, status, context, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	var contextVal any
@@ -57,7 +57,6 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 		wf.Name,
 		wf.Version,
 		string(wf.Status),
-		wf.Hash,
 		contextVal,
 		wf.CreatedAt,
 		wf.UpdatedAt,
@@ -85,7 +84,7 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 
 func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error) {
 	query := `
-		SELECT id, name, version, status, hash, context, created_at, updated_at
+		SELECT id, name, version, status, context, created_at, updated_at
 		FROM workflow_definitions
 		WHERE id = ? OR name = ?
 		ORDER BY version DESC LIMIT 1
@@ -102,7 +101,6 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 		&wf.Name,
 		&wf.Version,
 		&statusStr,
-		&wf.Hash,
 		&contextData,
 		&wf.CreatedAt,
 		&wf.UpdatedAt,
@@ -149,6 +147,10 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 			return nil, ErrWorkflowNotFound
 		}
 		return nil, fmt.Errorf("failed to query workflow definition: %w", err)
+	}
+
+	if WorkflowStatus(wfStatus) == WorkflowStatusInactive {
+		return nil, ErrWorkflowInactive
 	}
 
 	// 2. Resolve effective context
@@ -390,7 +392,7 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 		return []Workflow{}, nil
 	}
 	query := `
-		SELECT id, name, version, status, hash, context, created_at, updated_at
+		SELECT id, name, version, status, context, created_at, updated_at
 		FROM workflow_definitions
 		ORDER BY created_at DESC
 	`
@@ -412,7 +414,6 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 			&wf.Name,
 			&wf.Version,
 			&statusStr,
-			&wf.Hash,
 			&ctxData,
 			&wf.CreatedAt,
 			&wf.UpdatedAt,
