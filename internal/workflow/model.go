@@ -3,16 +3,9 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/vhysxl/relay/internal/step"
-)
-
-var (
-	ErrInvalidWorkflow        = errors.New("workflow is invalid")
-	ErrInvalidWorkflowID      = errors.New("workflow id is required")
-	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
 )
 
 type WorkflowRequest struct {

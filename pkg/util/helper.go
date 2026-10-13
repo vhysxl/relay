@@ -159,7 +159,9 @@ func AreJSONEqual(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(valA, valB)
 }
 
-func AreStringSlicesEqual(a, b []string) bool {
+// AreStringSlicesEqualUnordered checks whether two string slices contain the same elements
+// regardless of order, trimming surrounding whitespace from each element.
+func AreStringSlicesEqualUnordered(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}

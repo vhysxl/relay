@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
@@ -24,23 +25,19 @@ func NewWorkflowLogic(repo WorkflowRepository, v Validator) WorkflowLogic {
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
-	if req == nil {
-		return nil, ErrInvalidWorkflow
-	}
-
-	if req.Version <= 0 {
-		req.Version = 1
+	if err := l.validator.ValidateAndNormalizeWorkflow(req); err != nil {
+		return nil, err
 	}
 
 	// Check if a workflow with this name already exists in the database
 	existing, err := l.repo.GetWorkflow(ctx, req.Name)
-	if err != nil && !errors.Is(err, ErrWorkflowNotFound) {
+	if err != nil && !errors.Is(err, errdefs.ErrWorkflowNotFound) {
 		return nil, err
 	}
 
-	if err == nil && existing != nil {
+	if existing != nil {
 		// If 1:1 match with existing workflow, return it idempotently
-		if l.validator != nil && l.validator.IsWorkflowEqual(existing.Steps, existing.Context, req) {
+		if l.validator.IsWorkflowEqual(existing.Steps, existing.Context, req) {
 			return existing, nil
 		}
 		// If not 1:1 match, auto-increment the version
@@ -74,7 +71,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 func (l *workflowLogic) GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error) {
 	id := strings.TrimSpace(workflowID)
 	if id == "" {
-		return nil, ErrInvalidWorkflowID
+		return nil, errdefs.ErrInvalidWorkflowID
 	}
 
 	return l.repo.GetWorkflow(ctx, id)
@@ -83,7 +80,7 @@ func (l *workflowLogic) GetWorkflow(ctx context.Context, workflowID string) (*Wo
 func (l *workflowLogic) ExecuteWorkflow(ctx context.Context, workflowID string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error) {
 	id := strings.TrimSpace(workflowID)
 	if id == "" {
-		return nil, ErrInvalidWorkflowID
+		return nil, errdefs.ErrInvalidWorkflowID
 	}
 
 	var ctxBytes []byte
@@ -91,7 +88,7 @@ func (l *workflowLogic) ExecuteWorkflow(ctx context.Context, workflowID string, 
 		trimmed := strings.TrimSpace(string(req.Context))
 		if trimmed != "" && trimmed != "null" {
 			if !json.Valid(req.Context) {
-				return nil, ErrInvalidWorkflowContext
+				return nil, errdefs.ErrInvalidWorkflowContext
 			}
 			ctxBytes = req.Context
 		}
@@ -128,4 +125,3 @@ func (l *workflowLogic) GetExecution(ctx context.Context, executionID string) (*
 	}
 	return l.repo.GetExecution(ctx, id)
 }
-

@@ -6,6 +6,7 @@ import (
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 func TestValidateSteps_Empty(t *testing.T) {
@@ -91,8 +92,8 @@ func TestValidateSteps_SelfDependency(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrSelfDependency {
-		t.Fatalf("expected ErrSelfDependency, got %v", err)
+	if err != errdefs.ErrSelfDependency {
+		t.Fatalf("expected errdefs.ErrSelfDependency, got %v", err)
 	}
 }
 
@@ -114,8 +115,8 @@ func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrCyclicDependency {
-		t.Fatalf("expected ErrCyclicDependency, got %v", err)
+	if err != errdefs.ErrCyclicDependency {
+		t.Fatalf("expected errdefs.ErrCyclicDependency, got %v", err)
 	}
 }
 
@@ -143,8 +144,8 @@ func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrCyclicDependency {
-		t.Fatalf("expected ErrCyclicDependency, got %v", err)
+	if err != errdefs.ErrCyclicDependency {
+		t.Fatalf("expected errdefs.ErrCyclicDependency, got %v", err)
 	}
 }
 
@@ -160,8 +161,8 @@ func TestValidateSteps_MissingDependency(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrDependencyNotFound {
-		t.Fatalf("expected ErrDependencyNotFound, got %v", err)
+	if err != errdefs.ErrDependencyNotFound {
+		t.Fatalf("expected errdefs.ErrDependencyNotFound, got %v", err)
 	}
 }
 
@@ -181,8 +182,8 @@ func TestValidateSteps_DuplicateID(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrDuplicateStepID {
-		t.Fatalf("expected ErrDuplicateStepID, got %v", err)
+	if err != errdefs.ErrDuplicateStepID {
+		t.Fatalf("expected errdefs.ErrDuplicateStepID, got %v", err)
 	}
 }
 
@@ -197,14 +198,14 @@ func TestValidateSteps_InvalidType(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrInvalidStepType {
-		t.Fatalf("expected ErrInvalidStepType, got %v", err)
+	if err != errdefs.ErrInvalidStepType {
+		t.Fatalf("expected errdefs.ErrInvalidStepType, got %v", err)
 	}
 
 	steps[0].Type = ""
 	err = logic.ValidateSteps(steps)
-	if err != ErrEmptyStepType {
-		t.Fatalf("expected ErrEmptyStepType, got %v", err)
+	if err != errdefs.ErrEmptyStepType {
+		t.Fatalf("expected errdefs.ErrEmptyStepType, got %v", err)
 	}
 }
 
@@ -219,14 +220,14 @@ func TestValidateSteps_InvalidConfig(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrInvalidStepConfig {
-		t.Fatalf("expected ErrInvalidStepConfig, got %v", err)
+	if err != errdefs.ErrInvalidStepConfig {
+		t.Fatalf("expected errdefs.ErrInvalidStepConfig, got %v", err)
 	}
 
 	steps[0].Config = nil
 	err = logic.ValidateSteps(steps)
-	if err != ErrInvalidStepConfig {
-		t.Fatalf("expected ErrInvalidStepConfig, got %v", err)
+	if err != errdefs.ErrInvalidStepConfig {
+		t.Fatalf("expected errdefs.ErrInvalidStepConfig, got %v", err)
 	}
 }
 
@@ -244,8 +245,8 @@ func TestValidateSteps_RetryPolicy(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrInvalidRetryPolicy {
-		t.Fatalf("expected ErrInvalidRetryPolicy, got %v", err)
+	if err != errdefs.ErrInvalidRetryPolicy {
+		t.Fatalf("expected errdefs.ErrInvalidRetryPolicy, got %v", err)
 	}
 
 	// Valid retry
@@ -275,8 +276,8 @@ func TestValidateSteps_Compensation(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrInvalidCompensation {
-		t.Fatalf("expected ErrInvalidCompensation, got %v", err)
+	if err != errdefs.ErrInvalidCompensation {
+		t.Fatalf("expected errdefs.ErrInvalidCompensation, got %v", err)
 	}
 
 	// Valid compensation
@@ -305,8 +306,8 @@ func TestValidateSteps_IrreversibleWithCompensation(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrIrreversibleCompensation {
-		t.Fatalf("expected ErrIrreversibleCompensation, got %v", err)
+	if err != errdefs.ErrIrreversibleCompensation {
+		t.Fatalf("expected errdefs.ErrIrreversibleCompensation, got %v", err)
 	}
 
 	// Valid irreversible step (without compensation)
@@ -328,8 +329,8 @@ func TestValidateSteps_NegativeTimeout(t *testing.T) {
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err != ErrStepTimeoutNegative {
-		t.Fatalf("expected ErrStepTimeoutNegative, got %v", err)
+	if err != errdefs.ErrStepTimeoutNegative {
+		t.Fatalf("expected errdefs.ErrStepTimeoutNegative, got %v", err)
 	}
 
 	// Negative compensation timeout
@@ -340,8 +341,8 @@ func TestValidateSteps_NegativeTimeout(t *testing.T) {
 		Timeout: -1,
 	}
 	err = logic.ValidateSteps(steps)
-	if err != ErrCompensationTimeoutNegative {
-		t.Fatalf("expected ErrCompensationTimeoutNegative, got %v", err)
+	if err != errdefs.ErrCompensationTimeoutNegative {
+		t.Fatalf("expected errdefs.ErrCompensationTimeoutNegative, got %v", err)
 	}
 }
 
@@ -349,14 +350,14 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	v := NewValidator()
 
 	// Nil request
-	if err := v.ValidateAndNormalizeWorkflow(nil); err != ErrInvalidWorkflowName {
-		t.Fatalf("expected ErrInvalidWorkflowName, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(nil); err != errdefs.ErrInvalidWorkflow {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflow, got %v", err)
 	}
 
 	// Empty name
 	req := &workflow.WorkflowRequest{Name: "   "}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowName {
-		t.Fatalf("expected ErrInvalidWorkflowName, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowName {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowName, got %v", err)
 	}
 
 	// Name too long
@@ -364,8 +365,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Name:  string(make([]byte, 256)),
 		Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrWorkflowNameTooLong {
-		t.Fatalf("expected ErrWorkflowNameTooLong, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrWorkflowNameTooLong {
+		t.Fatalf("expected errdefs.ErrWorkflowNameTooLong, got %v", err)
 	}
 
 	// Negative version
@@ -374,8 +375,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Version: -1,
 		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowVersion {
-		t.Fatalf("expected ErrInvalidWorkflowVersion, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowVersion {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowVersion, got %v", err)
 	}
 
 	// Empty steps
@@ -384,8 +385,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Version: 1,
 		Steps:   nil,
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrWorkflowEmptySteps {
-		t.Fatalf("expected ErrWorkflowEmptySteps, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrWorkflowEmptySteps {
+		t.Fatalf("expected errdefs.ErrWorkflowEmptySteps, got %v", err)
 	}
 
 	// Empty step ID must return ErrEmptyID
@@ -394,8 +395,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Version: 1,
 		Steps:   []step.Step{{ID: "   ", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrEmptyID {
-		t.Fatalf("expected ErrEmptyID, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrEmptyID {
+		t.Fatalf("expected errdefs.ErrEmptyID, got %v", err)
 	}
 
 	// Invalid context JSON
@@ -404,8 +405,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Context: json.RawMessage(`invalid`),
 		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowContext {
-		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowContext {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
 	}
 
 	// Non-object context JSON
@@ -414,8 +415,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Context: json.RawMessage(`[1, 2, 3]`),
 		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
 	}
-	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowContext {
-		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowContext {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
 	}
 
 	// Success and normalization
@@ -424,6 +425,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Version: 0,
 		Context: json.RawMessage(`{"key": "val"}`),
 		Steps: []step.Step{
+			{ID: "dep1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
 			{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{" dep1 "}},
 		},
 	}
@@ -436,11 +438,22 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	if req.Version != 1 {
 		t.Errorf("expected default version 1, got %d", req.Version)
 	}
-	if req.Steps[0].ID != "step-1" {
-		t.Errorf("expected step ID to be preserved, got %s", req.Steps[0].ID)
+	if req.Steps[1].ID != "step-1" {
+		t.Errorf("expected step ID to be preserved, got %s", req.Steps[1].ID)
 	}
-	if req.Steps[0].DependsOn[0] != "dep1" {
-		t.Errorf("expected trimmed dependsOn, got %s", req.Steps[0].DependsOn[0])
+	if req.Steps[1].DependsOn[0] != "dep1" {
+		t.Errorf("expected trimmed dependsOn, got %s", req.Steps[1].DependsOn[0])
+	}
+
+	// Step validation integrated into ValidateAndNormalizeWorkflow
+	req = &workflow.WorkflowRequest{
+		Name:    "flow-self-dep",
+		Version: 1,
+		Steps: []step.Step{
+			{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"s1"}},
+		},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrSelfDependency {
+		t.Fatalf("expected errdefs.ErrSelfDependency, got %v", err)
 	}
 }
-

@@ -11,12 +11,8 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
-)
-
-var (
-	ErrWorkflowNotFound      = errors.New("workflow not found")
-	ErrWorkflowAlreadyExists = errors.New("workflow with this name and version already exists")
 )
 
 type workflowRepository struct {
@@ -63,7 +59,7 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 	if err != nil {
 		var mysqlErr *mysql.MySQLError
 		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-			return nil, ErrWorkflowAlreadyExists
+			return nil, errdefs.ErrWorkflowAlreadyExists
 		}
 		return nil, err
 	}
@@ -104,7 +100,7 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		}
 		return nil, err
 	}
@@ -138,7 +134,7 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 	err := r.db.QueryRowContext(ctx, checkQuery, workflowID, workflowID).Scan(&realWfID, &defaultContext)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		}
 		return nil, fmt.Errorf("failed to query workflow definition: %w", err)
 	}

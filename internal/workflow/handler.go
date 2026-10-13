@@ -8,18 +8,17 @@ import (
 	"strings"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
 type WorkflowHandler struct {
-	logic     WorkflowLogic
-	validator Validator
+	logic WorkflowLogic
 }
 
-func NewWorkflowHandler(logic WorkflowLogic, validator Validator) *WorkflowHandler {
+func NewWorkflowHandler(logic WorkflowLogic) *WorkflowHandler {
 	return &WorkflowHandler{
-		logic:     logic,
-		validator: validator,
+		logic: logic,
 	}
 }
 
@@ -30,25 +29,13 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if h.validator != nil {
-		if err := h.validator.ValidateAndNormalizeWorkflow(&req); err != nil {
-			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-			return
-		}
-
-		if err := h.validator.ValidateSteps(req.Steps); err != nil {
-			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-			return
-		}
-	}
-
 	wf, err := h.logic.CreateWorkflow(r.Context(), &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrWorkflowAlreadyExists):
+		case errors.Is(err, errdefs.ErrWorkflowAlreadyExists):
 			util.WriteJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
 		default:
-			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		}
 		return
 	}
@@ -66,10 +53,10 @@ func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	wf, err := h.logic.GetWorkflow(r.Context(), id)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrWorkflowNotFound):
+		case errors.Is(err, errdefs.ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
 		default:
-			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		}
 		return
 	}
@@ -108,12 +95,10 @@ func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request
 	exec, err := h.logic.ExecuteWorkflow(r.Context(), id, &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrWorkflowNotFound):
+		case errors.Is(err, errdefs.ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
-		case errors.Is(err, ErrInvalidWorkflowID), errors.Is(err, ErrInvalidWorkflowContext):
-			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		default:
-			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		}
 		return
 	}

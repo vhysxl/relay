@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
@@ -17,7 +18,7 @@ func validateWorkflowContext(data json.RawMessage) (json.RawMessage, error) {
 	// make sure context is an object, not array or primitive
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(trimmed, &obj); err != nil || obj == nil {
-		return nil, ErrInvalidWorkflowContext
+		return nil, errdefs.ErrInvalidWorkflowContext
 	}
 	return trimmed, nil
 }
@@ -55,7 +56,7 @@ func isStepEqual(s1, s2 step.Step) bool {
 		s1.Timeout == s2.Timeout &&
 		s1.Irreversible == s2.Irreversible &&
 		util.AreJSONEqual(s1.Config, s2.Config) &&
-		util.AreStringSlicesEqual(s1.DependsOn, s2.DependsOn) &&
+		util.AreStringSlicesEqualUnordered(s1.DependsOn, s2.DependsOn) &&
 		areRetriesEqual(s1.Retry, s2.Retry) &&
 		areCompensationsEqual(s1.Compensation, s2.Compensation)
 }

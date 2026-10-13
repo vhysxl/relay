@@ -1,6 +1,8 @@
 package util
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -25,23 +27,19 @@ func TestInterpolateContext(t *testing.T) {
 
 	interpolated := InterpolateContext(template, ctxData)
 	expectedStr := `"CART-USER-9921"`
-	if !contains(string(interpolated), expectedStr) {
+	if !strings.Contains(string(interpolated), expectedStr) {
 		t.Errorf("expected %s in result, got: %s", expectedStr, string(interpolated))
 	}
 
 	expectedURL := `http://cart-service.internal/validate/CART-USER-9921`
-	if !contains(string(interpolated), expectedURL) {
+	if !strings.Contains(string(interpolated), expectedURL) {
 		t.Errorf("expected %s in result, got: %s", expectedURL, string(interpolated))
 	}
 
 	expectedUserID := `"user_id": "USR-881"`
-	if !contains(string(interpolated), expectedUserID) {
+	if !strings.Contains(string(interpolated), expectedUserID) {
 		t.Errorf("expected %s in result, got: %s", expectedUserID, string(interpolated))
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && len(substr) > 0 && (s[:len(substr)] == substr || contains(s[1:], substr))))
 }
 
 func TestInterpolateContext_Advanced(t *testing.T) {
@@ -71,25 +69,78 @@ func TestInterpolateContext_Advanced(t *testing.T) {
 	interpolated := InterpolateContext(template, ctxData)
 
 	// 1. Array index
-	if !contains(string(interpolated), "https://api.com/items/item-101") {
+	if !strings.Contains(string(interpolated), "https://api.com/items/item-101") {
 		t.Errorf("expected item-101 in url, got: %s", string(interpolated))
 	}
-	if !contains(string(interpolated), `"item_name": "Beta"`) {
+	if !strings.Contains(string(interpolated), `"item_name": "Beta"`) {
 		t.Errorf("expected Beta in item_name, got: %s", string(interpolated))
 	}
 
 	// 2. Object substitution without broken quotes
-	if !contains(string(interpolated), `"full_obj": {"active":true,"score":99}`) {
+	if !strings.Contains(string(interpolated), `"full_obj": {"active":true,"score":99}`) {
 		t.Errorf("expected embedded full_obj json, got: %s", string(interpolated))
 	}
 
 	// 3. Array substitution without broken quotes
-	if !contains(string(interpolated), `"array_val": ["go","distributed"]`) {
+	if !strings.Contains(string(interpolated), `"array_val": ["go","distributed"]`) {
 		t.Errorf("expected embedded array_val json, got: %s", string(interpolated))
 	}
 
 	// 4. Safe string escaping
-	if !contains(string(interpolated), `quote \"here\" and newline \n`) {
+	if !strings.Contains(string(interpolated), `quote \"here\" and newline \n`) {
 		t.Errorf("expected escaped quote and newline, got: %s", string(interpolated))
 	}
 }
+
+func TestAreStringSlicesEqualUnordered(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected bool
+	}{
+		{"both empty", []string{}, []string{}, true},
+		{"identical order", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"different order", []string{"a", "b"}, []string{"b", "a"}, true},
+		{"with whitespace", []string{" a ", "b"}, []string{"a", " b "}, true},
+		{"different lengths", []string{"a"}, []string{"a", "b"}, false},
+		{"duplicate mismatch", []string{"a", "a", "b"}, []string{"a", "b", "b"}, false},
+		{"duplicate match", []string{"a", "b", "a"}, []string{"b", "a", "a"}, true},
+		{"different content", []string{"a", "b"}, []string{"a", "c"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AreStringSlicesEqualUnordered(tt.a, tt.b)
+			if got != tt.expected {
+				t.Errorf("AreStringSlicesEqualUnordered(%v, %v) = %v; want %v", tt.a, tt.b, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestAreJSONEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        json.RawMessage
+		b        json.RawMessage
+		expected bool
+	}{
+		{"both nil", nil, nil, true},
+		{"both empty or null", json.RawMessage(""), json.RawMessage("null"), true},
+		{"one empty one not", json.RawMessage(`{"a": 1}`), nil, false},
+		{"different key order", json.RawMessage(`{"a": 1, "b": 2}`), json.RawMessage(`{"b": 2, "a": 1}`), true},
+		{"different values", json.RawMessage(`{"a": 1}`), json.RawMessage(`{"a": 2}`), false},
+		{"invalid json", json.RawMessage(`invalid`), json.RawMessage(`{"a": 1}`), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AreJSONEqual(tt.a, tt.b)
+			if got != tt.expected {
+				t.Errorf("AreJSONEqual(%s, %s) = %v; want %v", tt.a, tt.b, got, tt.expected)
+			}
+		})
+	}
+}
+

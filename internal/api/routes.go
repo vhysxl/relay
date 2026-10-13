@@ -18,7 +18,7 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, v)
-	workflowHandler := workflow.NewWorkflowHandler(workflowLogic, v)
+	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
 
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())

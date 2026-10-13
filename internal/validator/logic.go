@@ -7,6 +7,7 @@ import (
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
@@ -18,21 +19,21 @@ func NewValidator() Validator {
 
 func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowRequest) error {
 	if workflowReq == nil {
-		return ErrInvalidWorkflowName
+		return errdefs.ErrInvalidWorkflow
 	}
 
 	// Name
 	workflowReq.Name = strings.TrimSpace(workflowReq.Name)
 	if workflowReq.Name == "" {
-		return ErrInvalidWorkflowName
+		return errdefs.ErrInvalidWorkflowName
 	}
 	if utf8.RuneCountInString(workflowReq.Name) > 255 {
-		return ErrWorkflowNameTooLong
+		return errdefs.ErrWorkflowNameTooLong
 	}
 
 	// Version
 	if workflowReq.Version < 0 {
-		return ErrInvalidWorkflowVersion
+		return errdefs.ErrInvalidWorkflowVersion
 	}
 
 	if workflowReq.Version == 0 {
@@ -41,14 +42,14 @@ func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowR
 
 	// Steps
 	if len(workflowReq.Steps) == 0 {
-		return ErrWorkflowEmptySteps
+		return errdefs.ErrWorkflowEmptySteps
 	}
 
 	for i := range workflowReq.Steps {
 		s := &workflowReq.Steps[i]
 		s.ID = strings.TrimSpace(s.ID)
 		if s.ID == "" {
-			return ErrEmptyID
+			return errdefs.ErrEmptyID
 		}
 		for j := range s.DependsOn {
 			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
@@ -64,7 +65,7 @@ func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowR
 		workflowReq.Context = ctx
 	}
 
-	return nil
+	return v.ValidateSteps(workflowReq.Steps)
 }
 
 func (v *validator) ValidateSteps(steps []step.Step) error {
@@ -77,65 +78,65 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 	for _, s := range steps {
 		stepID := strings.TrimSpace(s.ID)
 		if stepID == "" {
-			return ErrEmptyID
+			return errdefs.ErrEmptyID
 		}
 
 		if idMap[stepID] {
-			return ErrDuplicateStepID
+			return errdefs.ErrDuplicateStepID
 		}
 		idMap[stepID] = true
 
 		if s.Type == "" {
-			return ErrEmptyStepType
+			return errdefs.ErrEmptyStepType
 		}
 		if s.Type != step.StepTypeHTTP && s.Type != step.StepTypeMessage {
-			return ErrInvalidStepType
+			return errdefs.ErrInvalidStepType
 		}
 
 		if len(s.Config) == 0 {
-			return ErrInvalidStepConfig
+			return errdefs.ErrInvalidStepConfig
 		}
 		trimmedConfig := strings.TrimSpace(string(s.Config))
 		if trimmedConfig == "" || trimmedConfig == "null" || !json.Valid(s.Config) {
-			return ErrInvalidStepConfig
+			return errdefs.ErrInvalidStepConfig
 		}
 
 		if s.Timeout < 0 {
-			return ErrStepTimeoutNegative
+			return errdefs.ErrStepTimeoutNegative
 		}
 
 		if s.Retry != nil {
 			if s.Retry.MaxAttempts < 1 || s.Retry.Backoff < 0 || s.Retry.Multiplier < 0 || s.Retry.MaxBackoff < 0 {
-				return ErrInvalidRetryPolicy
+				return errdefs.ErrInvalidRetryPolicy
 			}
 			if s.Retry.MaxBackoff > 0 && s.Retry.MaxBackoff < s.Retry.Backoff {
-				return ErrInvalidRetryPolicy
+				return errdefs.ErrInvalidRetryPolicy
 			}
 		}
 
 		if s.Compensation != nil {
 			if s.Irreversible {
-				return ErrIrreversibleCompensation
+				return errdefs.ErrIrreversibleCompensation
 			}
 			if s.Compensation.Timeout < 0 {
-				return ErrCompensationTimeoutNegative
+				return errdefs.ErrCompensationTimeoutNegative
 			}
 			if s.Compensation.Type != step.StepTypeHTTP && s.Compensation.Type != step.StepTypeMessage {
-				return ErrInvalidCompensation
+				return errdefs.ErrInvalidCompensation
 			}
 			if len(s.Compensation.Config) == 0 {
-				return ErrInvalidCompensation
+				return errdefs.ErrInvalidCompensation
 			}
 			trimmedComp := strings.TrimSpace(string(s.Compensation.Config))
 			if trimmedComp == "" || trimmedComp == "null" || !json.Valid(s.Compensation.Config) {
-				return ErrInvalidCompensation
+				return errdefs.ErrInvalidCompensation
 			}
 			if s.Compensation.Retry != nil {
 				if s.Compensation.Retry.MaxAttempts < 1 || s.Compensation.Retry.Backoff < 0 || s.Compensation.Retry.Multiplier < 0 || s.Compensation.Retry.MaxBackoff < 0 {
-					return ErrInvalidRetryPolicy
+					return errdefs.ErrInvalidRetryPolicy
 				}
 				if s.Compensation.Retry.MaxBackoff > 0 && s.Compensation.Retry.MaxBackoff < s.Compensation.Retry.Backoff {
-					return ErrInvalidRetryPolicy
+					return errdefs.ErrInvalidRetryPolicy
 				}
 			}
 		}
@@ -151,10 +152,10 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 		for _, dep := range s.DependsOn {
 			depID := strings.TrimSpace(dep)
 			if depID == s.ID {
-				return ErrSelfDependency
+				return errdefs.ErrSelfDependency
 			}
 			if !idMap[depID] {
-				return ErrDependencyNotFound
+				return errdefs.ErrDependencyNotFound
 			}
 			dependents[depID] = append(dependents[depID], s.ID)
 		}
@@ -182,7 +183,7 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 	}
 
 	if visited != len(steps) {
-		return ErrCyclicDependency
+		return errdefs.ErrCyclicDependency
 	}
 
 	return nil

@@ -11,6 +11,7 @@ import (
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 type mockRepository struct {
@@ -32,7 +33,7 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*workflow.
 	if m.getFn != nil {
 		return m.getFn(ctx, id)
 	}
-	return nil, workflow.ErrWorkflowNotFound
+	return nil, errdefs.ErrWorkflowNotFound
 }
 
 func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
@@ -72,8 +73,8 @@ func TestWorkflowLogic_CreateWorkflow_Nil(t *testing.T) {
 
 	// Test nil request
 	_, err := logic.CreateWorkflow(context.Background(), nil)
-	if err != workflow.ErrInvalidWorkflow {
-		t.Fatalf("expected workflow.ErrInvalidWorkflow, got %v", err)
+	if err != errdefs.ErrInvalidWorkflow {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflow, got %v", err)
 	}
 }
 
@@ -148,8 +149,8 @@ func TestWorkflowLogic_GetWorkflow_Validation(t *testing.T) {
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
 
 	_, err := logic.GetWorkflow(context.Background(), "")
-	if err != workflow.ErrInvalidWorkflowID {
-		t.Fatalf("expected workflow.ErrInvalidWorkflowID, got %v", err)
+	if err != errdefs.ErrInvalidWorkflowID {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowID, got %v", err)
 	}
 }
 
@@ -161,7 +162,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "order-saga",
@@ -202,7 +203,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "order-saga",
@@ -229,7 +230,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.T) {
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(&mockRepository{}, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "irreversible-flow",
@@ -262,7 +263,7 @@ func TestWorkflowHandler_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	// Test empty name
 	body, _ := json.Marshal(workflow.WorkflowRequest{
@@ -312,12 +313,12 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 			if id == "test-uuid-1234" {
 				return testWf, nil
 			}
-			return nil, workflow.ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		},
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	// Test found
 	req := httptest.NewRequest(http.MethodGet, "/workflows/test-uuid-1234", nil)
@@ -371,22 +372,22 @@ func TestWorkflowLogic_ExecuteWorkflow_Validation(t *testing.T) {
 
 	// Test empty workflowID
 	_, err := logic.ExecuteWorkflow(context.Background(), "", nil)
-	if err != workflow.ErrInvalidWorkflowID {
-		t.Fatalf("expected workflow.ErrInvalidWorkflowID, got %v", err)
+	if err != errdefs.ErrInvalidWorkflowID {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowID, got %v", err)
 	}
 
 	// Test whitespace workflowID
 	_, err = logic.ExecuteWorkflow(context.Background(), "   ", nil)
-	if err != workflow.ErrInvalidWorkflowID {
-		t.Fatalf("expected workflow.ErrInvalidWorkflowID for whitespace, got %v", err)
+	if err != errdefs.ErrInvalidWorkflowID {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowID for whitespace, got %v", err)
 	}
 
 	// Test invalid JSON context
 	_, err = logic.ExecuteWorkflow(context.Background(), "wf-123", &workflow.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{not-json`),
 	})
-	if err != workflow.ErrInvalidWorkflowContext {
-		t.Fatalf("expected workflow.ErrInvalidWorkflowContext, got %v", err)
+	if err != errdefs.ErrInvalidWorkflowContext {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
 	}
 
 	// Test success with valid context
@@ -408,7 +409,7 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 	repo := &mockRepository{
 		executeFn: func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
 			if workflowID == "wf-not-found" {
-				return nil, workflow.ErrWorkflowNotFound
+				return nil, errdefs.ErrWorkflowNotFound
 			}
 			return &step.WorkflowExecution{
 				ID:         "exec-999",
@@ -423,7 +424,7 @@ func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic, v)
+	handler := workflow.NewWorkflowHandler(logic)
 
 	// 1. Trigger with {"context": {"amount": 50000}}
 	body := bytes.NewBufferString(`{"context":{"amount":50000}}`)
@@ -506,7 +507,7 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 			if id == "order-saga" {
 				return existingWf, nil
 			}
-			return nil, workflow.ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		},
 		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
 			createCalled = true
@@ -570,7 +571,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 			if id == "order-saga" {
 				return existingWf, nil
 			}
-			return nil, workflow.ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		},
 		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
 			createdWf = wf
@@ -627,7 +628,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 			if id == "order-saga" {
 				return existingWf, nil
 			}
-			return nil, workflow.ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		},
 		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
 			createdWf = wf
@@ -686,7 +687,7 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 			if id == "order-saga" {
 				return existingWf, nil
 			}
-			return nil, workflow.ErrWorkflowNotFound
+			return nil, errdefs.ErrWorkflowNotFound
 		},
 		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
 			createdWf = wf
