@@ -13,26 +13,38 @@ import (
 
 type workflowLogic struct {
 	repo      WorkflowRepository
-	validator step.StepValidator
+	validator Validator
 }
 
-func NewWorkflowLogic(repo WorkflowRepository, validator step.StepValidator) WorkflowLogic {
-	if validator == nil {
-		validator = step.NewStepValidator()
-	}
+func NewWorkflowLogic(repo WorkflowRepository, v Validator) WorkflowLogic {
 	return &workflowLogic{
 		repo:      repo,
-		validator: validator,
+		validator: v,
 	}
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
-	if err := req.ValidateAndNormalize(); err != nil {
+	if req == nil {
+		return nil, ErrInvalidWorkflow
+	}
+
+	if req.Version <= 0 {
+		req.Version = 1
+	}
+
+	// Check if a workflow with this name already exists in the database
+	existing, err := l.repo.GetWorkflow(ctx, req.Name)
+	if err != nil && !errors.Is(err, ErrWorkflowNotFound) {
 		return nil, err
 	}
 
-	if err := l.validator.ValidateSteps(req.Steps); err != nil {
-		return nil, err
+	if err == nil && existing != nil {
+		// If 1:1 match with existing workflow, return it idempotently
+		if l.validator != nil && l.validator.IsWorkflowEqual(existing.Steps, existing.Context, req) {
+			return existing, nil
+		}
+		// If not 1:1 match, auto-increment the version
+		req.Version = existing.Version + 1
 	}
 
 	id := util.GenerateUUID()
@@ -50,7 +62,6 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		ID:        id,
 		Name:      req.Name,
 		Version:   req.Version,
-		Status:    WorkflowStatusActive,
 		Context:   req.Context,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -117,3 +128,4 @@ func (l *workflowLogic) GetExecution(ctx context.Context, executionID string) (*
 	}
 	return l.repo.GetExecution(ctx, id)
 }
+

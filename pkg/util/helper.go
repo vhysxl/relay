@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -135,4 +136,46 @@ func getNestedValue(m map[string]interface{}, path string) (interface{}, bool) {
 		}
 	}
 	return current, true
+}
+
+func AreJSONEqual(a, b json.RawMessage) bool {
+	trimmedA := bytes.TrimSpace(a)
+	trimmedB := bytes.TrimSpace(b)
+	aEmpty := len(trimmedA) == 0 || bytes.Equal(trimmedA, []byte("null"))
+	bEmpty := len(trimmedB) == 0 || bytes.Equal(trimmedB, []byte("null"))
+	if aEmpty && bEmpty {
+		return true
+	}
+	if aEmpty || bEmpty {
+		return false
+	}
+	var valA, valB any
+	if err := json.Unmarshal(trimmedA, &valA); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(trimmedB, &valB); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(valA, valB)
+}
+
+func AreStringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	counts := make(map[string]int, len(a))
+	for _, v := range a {
+		counts[strings.TrimSpace(v)]++
+	}
+	for _, v := range b {
+		trimmed := strings.TrimSpace(v)
+		counts[trimmed]--
+		if counts[trimmed] < 0 {
+			return false
+		}
+	}
+	return true
 }

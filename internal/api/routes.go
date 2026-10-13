@@ -6,6 +6,7 @@ import (
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/system"
+	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/web"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/util"
@@ -13,11 +14,11 @@ import (
 
 func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	v := validator.NewValidator()
 
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
-	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, v)
+	workflowHandler := workflow.NewWorkflowHandler(workflowLogic, v)
 
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())

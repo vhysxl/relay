@@ -39,8 +39,8 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO workflow_definitions (id, name, version, status, context, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO workflow_definitions (id, name, version, context, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`
 
 	var contextVal any
@@ -56,7 +56,6 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 		wf.ID,
 		wf.Name,
 		wf.Version,
-		string(wf.Status),
 		contextVal,
 		wf.CreatedAt,
 		wf.UpdatedAt,
@@ -84,7 +83,7 @@ func (r *workflowRepository) CreateWorkflow(ctx context.Context, wf *Workflow) (
 
 func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error) {
 	query := `
-		SELECT id, name, version, status, context, created_at, updated_at
+		SELECT id, name, version, context, created_at, updated_at
 		FROM workflow_definitions
 		WHERE id = ? OR name = ?
 		ORDER BY version DESC LIMIT 1
@@ -92,7 +91,6 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 
 	var (
 		wf          Workflow
-		statusStr   string
 		contextData sql.NullString
 	)
 
@@ -100,7 +98,6 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 		&wf.ID,
 		&wf.Name,
 		&wf.Version,
-		&statusStr,
 		&contextData,
 		&wf.CreatedAt,
 		&wf.UpdatedAt,
@@ -111,8 +108,6 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, workflowID string)
 		}
 		return nil, err
 	}
-
-	wf.Status = WorkflowStatus(statusStr)
 	if contextData.Valid && len(contextData.String) > 0 {
 		wf.Context = json.RawMessage(contextData.String)
 	}
@@ -133,24 +128,19 @@ func (r *workflowRepository) ExecuteWorkflowTx(ctx context.Context, workflowID s
 	var (
 		realWfID       string
 		defaultContext sql.NullString
-		wfStatus       string
 	)
 	checkQuery := `
-		SELECT id, status, context
+		SELECT id, context
 		FROM workflow_definitions
 		WHERE id = ? OR name = ?
 		ORDER BY version DESC LIMIT 1
 	`
-	err := r.db.QueryRowContext(ctx, checkQuery, workflowID, workflowID).Scan(&realWfID, &wfStatus, &defaultContext)
+	err := r.db.QueryRowContext(ctx, checkQuery, workflowID, workflowID).Scan(&realWfID, &defaultContext)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrWorkflowNotFound
 		}
 		return nil, fmt.Errorf("failed to query workflow definition: %w", err)
-	}
-
-	if WorkflowStatus(wfStatus) == WorkflowStatusInactive {
-		return nil, ErrWorkflowInactive
 	}
 
 	// 2. Resolve effective context
@@ -392,7 +382,7 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 		return []Workflow{}, nil
 	}
 	query := `
-		SELECT id, name, version, status, context, created_at, updated_at
+		SELECT id, name, version, context, created_at, updated_at
 		FROM workflow_definitions
 		ORDER BY created_at DESC
 	`
@@ -405,22 +395,19 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context) ([]Workflow, err
 	var wfs []Workflow
 	for rows.Next() {
 		var (
-			wf        Workflow
-			statusStr string
-			ctxData   sql.NullString
+			wf      Workflow
+			ctxData sql.NullString
 		)
 		if err := rows.Scan(
 			&wf.ID,
 			&wf.Name,
 			&wf.Version,
-			&statusStr,
 			&ctxData,
 			&wf.CreatedAt,
 			&wf.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-		wf.Status = WorkflowStatus(statusStr)
 		if ctxData.Valid && len(ctxData.String) > 0 {
 			wf.Context = json.RawMessage(ctxData.String)
 		}

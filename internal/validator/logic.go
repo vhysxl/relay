@@ -1,31 +1,73 @@
-package step
+package validator
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
-var (
-	ErrEmptyStepType       = errors.New("step type is required")
-	ErrInvalidStepType     = errors.New("invalid step type, must be http or message")
-	ErrInvalidStepConfig   = errors.New("step config must be valid non-empty JSON")
-	ErrDuplicateStepID     = errors.New("duplicate step id in workflow")
-	ErrDependencyNotFound  = errors.New("dependency step not found in workflow")
-	ErrSelfDependency      = errors.New("step cannot depend on itself")
-	ErrCyclicDependency    = errors.New("cyclic dependency detected in workflow steps")
-	ErrInvalidRetryPolicy       = errors.New("invalid retry policy")
-	ErrInvalidCompensation      = errors.New("invalid compensation configuration")
-	ErrIrreversibleCompensation = errors.New("irreversible step cannot define compensation")
-)
+type validator struct{}
 
-type stepValidator struct{}
-
-func NewStepValidator() StepValidator {
-	return &stepValidator{}
+func NewValidator() Validator {
+	return &validator{}
 }
 
-func (v *stepValidator) ValidateSteps(steps []Step) error {
+func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowRequest) error {
+	if workflowReq == nil {
+		return ErrInvalidWorkflowName
+	}
+
+	// Name
+	workflowReq.Name = strings.TrimSpace(workflowReq.Name)
+	if workflowReq.Name == "" {
+		return ErrInvalidWorkflowName
+	}
+	if utf8.RuneCountInString(workflowReq.Name) > 255 {
+		return ErrWorkflowNameTooLong
+	}
+
+	// Version
+	if workflowReq.Version < 0 {
+		return ErrInvalidWorkflowVersion
+	}
+
+	if workflowReq.Version == 0 {
+		workflowReq.Version = 1
+	}
+
+	// Steps
+	if len(workflowReq.Steps) == 0 {
+		return ErrWorkflowEmptySteps
+	}
+
+	for i := range workflowReq.Steps {
+		s := &workflowReq.Steps[i]
+		s.ID = strings.TrimSpace(s.ID)
+		if s.ID == "" {
+			return ErrEmptyID
+		}
+		for j := range s.DependsOn {
+			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
+		}
+	}
+
+	// Context
+	if len(workflowReq.Context) > 0 {
+		ctx, err := validateWorkflowContext(workflowReq.Context)
+		if err != nil {
+			return err
+		}
+		workflowReq.Context = ctx
+	}
+
+	return nil
+}
+
+func (v *validator) ValidateSteps(steps []step.Step) error {
 	if len(steps) == 0 {
 		return nil
 	}
@@ -35,7 +77,7 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 	for _, s := range steps {
 		stepID := strings.TrimSpace(s.ID)
 		if stepID == "" {
-			return errors.New("step id cannot be empty")
+			return ErrEmptyID
 		}
 
 		if idMap[stepID] {
@@ -46,7 +88,7 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 		if s.Type == "" {
 			return ErrEmptyStepType
 		}
-		if s.Type != StepTypeHTTP && s.Type != StepTypeMessage {
+		if s.Type != step.StepTypeHTTP && s.Type != step.StepTypeMessage {
 			return ErrInvalidStepType
 		}
 
@@ -59,7 +101,7 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 		}
 
 		if s.Timeout < 0 {
-			return errors.New("step timeout cannot be negative")
+			return ErrStepTimeoutNegative
 		}
 
 		if s.Retry != nil {
@@ -76,9 +118,9 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 				return ErrIrreversibleCompensation
 			}
 			if s.Compensation.Timeout < 0 {
-				return errors.New("compensation timeout cannot be negative")
+				return ErrCompensationTimeoutNegative
 			}
-			if s.Compensation.Type != StepTypeHTTP && s.Compensation.Type != StepTypeMessage {
+			if s.Compensation.Type != step.StepTypeHTTP && s.Compensation.Type != step.StepTypeMessage {
 				return ErrInvalidCompensation
 			}
 			if len(s.Compensation.Config) == 0 {
@@ -144,4 +186,33 @@ func (v *stepValidator) ValidateSteps(steps []Step) error {
 	}
 
 	return nil
+}
+
+func (v *validator) IsWorkflowEqual(existingSteps []step.Step, existingContext json.RawMessage, req *workflow.WorkflowRequest) bool {
+	if req == nil {
+		return false
+	}
+	if !util.AreJSONEqual(existingContext, req.Context) {
+		return false
+	}
+	if len(existingSteps) != len(req.Steps) {
+		return false
+	}
+
+	existingByID := make(map[string]step.Step, len(existingSteps))
+	for _, s := range existingSteps {
+		existingByID[s.ID] = s
+	}
+
+	for _, reqStep := range req.Steps {
+		existStep, ok := existingByID[reqStep.ID]
+		if !ok {
+			return false
+		}
+		if !isStepEqual(existStep, reqStep) {
+			return false
+		}
+	}
+
+	return true
 }

@@ -12,15 +12,15 @@ import (
 )
 
 type WorkflowHandler struct {
-	logic WorkflowLogic
+	logic     WorkflowLogic
+	validator Validator
 }
 
-func NewWorkflowHandler(logic WorkflowLogic) *WorkflowHandler {
-	return &WorkflowHandler{logic: logic}
-}
-
-type ErrorResponse struct {
-	Error string `json:"error"`
+func NewWorkflowHandler(logic WorkflowLogic, validator Validator) *WorkflowHandler {
+	return &WorkflowHandler{
+		logic:     logic,
+		validator: validator,
+	}
 }
 
 func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request) {
@@ -30,25 +30,21 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if h.validator != nil {
+		if err := h.validator.ValidateAndNormalizeWorkflow(&req); err != nil {
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+
+		if err := h.validator.ValidateSteps(req.Steps); err != nil {
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+			return
+		}
+	}
+
 	wf, err := h.logic.CreateWorkflow(r.Context(), &req)
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrInvalidWorkflowName),
-			errors.Is(err, ErrWorkflowNameTooLong),
-			errors.Is(err, ErrInvalidWorkflowVersion),
-			errors.Is(err, ErrWorkflowEmptySteps),
-			errors.Is(err, ErrInvalidWorkflowContext),
-			errors.Is(err, step.ErrEmptyStepType),
-			errors.Is(err, step.ErrInvalidStepType),
-			errors.Is(err, step.ErrInvalidStepConfig),
-			errors.Is(err, step.ErrDuplicateStepID),
-			errors.Is(err, step.ErrDependencyNotFound),
-			errors.Is(err, step.ErrSelfDependency),
-			errors.Is(err, step.ErrCyclicDependency),
-			errors.Is(err, step.ErrInvalidRetryPolicy),
-			errors.Is(err, step.ErrInvalidCompensation),
-			errors.Is(err, step.ErrIrreversibleCompensation):
-			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		case errors.Is(err, ErrWorkflowAlreadyExists):
 			util.WriteJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
 		default:
@@ -61,7 +57,7 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow id is required"})
 		return
@@ -72,8 +68,6 @@ func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
-		case errors.Is(err, ErrInvalidWorkflowID):
-			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		default:
 			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})
 		}
@@ -84,7 +78,7 @@ func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id := strings.TrimSpace(r.PathValue("id"))
 	if id == "" {
 		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow id is required"})
 		return
@@ -116,9 +110,7 @@ func (h *WorkflowHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Request
 		switch {
 		case errors.Is(err, ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
-		case errors.Is(err, ErrInvalidWorkflowID),
-			errors.Is(err, ErrInvalidWorkflowContext),
-			errors.Is(err, ErrWorkflowInactive):
+		case errors.Is(err, ErrInvalidWorkflowID), errors.Is(err, ErrInvalidWorkflowContext):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		default:
 			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "internal server error"})

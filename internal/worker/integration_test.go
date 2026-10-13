@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
 )
@@ -65,7 +66,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 
 	// setup repositories and logic
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -241,7 +242,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -407,7 +408,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 
 	// 1. Create test workflow and execution
 	wfID := uuid.NewString()
-	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', NOW(), NOW())", wfID, "test-complete-wf-"+wfID[:8])
+	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-complete-wf-"+wfID[:8])
 	if err != nil {
 		t.Fatalf("failed to insert workflow: %v", err)
 	}
@@ -515,7 +516,7 @@ func TestIntegration_FailStep_Retry(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', NOW(), NOW())", wfID, "test-fail-retry-wf-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-retry-wf-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -591,7 +592,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', NOW(), NOW())", wfID, "test-fail-saga-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-saga-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -705,7 +706,7 @@ func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *test
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	wfID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, status, created_at, updated_at) VALUES (?, ?, 1, 'ACTIVE', NOW(), NOW())", wfID, "test-fail-immediate-wf-"+wfID[:8])
+	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-immediate-wf-"+wfID[:8])
 
 	wfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", wfExecID, wfID)
@@ -758,7 +759,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -843,7 +844,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	defer cancel()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -942,7 +943,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -1118,7 +1119,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -1259,7 +1260,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
@@ -1410,7 +1411,7 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	stepValidator := step.NewStepValidator()
+	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	workerLogic := worker.NewWorkerLogic(stepRepo)

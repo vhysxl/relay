@@ -9,21 +9,10 @@ import (
 	"github.com/vhysxl/relay/internal/step"
 )
 
-type WorkflowStatus string
-
-const (
-	WorkflowStatusActive   WorkflowStatus = "ACTIVE"
-	WorkflowStatusInactive WorkflowStatus = "INACTIVE"
-)
-
 var (
-	ErrInvalidWorkflowName    = errors.New("workflow name is required")
-	ErrWorkflowNameTooLong    = errors.New("workflow name cannot exceed 255 characters")
-	ErrInvalidWorkflowVersion = errors.New("workflow version cannot be negative")
-	ErrWorkflowEmptySteps     = errors.New("workflow must have at least one step")
+	ErrInvalidWorkflow        = errors.New("workflow is invalid")
 	ErrInvalidWorkflowID      = errors.New("workflow id is required")
 	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
-	ErrWorkflowInactive       = errors.New("workflow is inactive")
 )
 
 type WorkflowRequest struct {
@@ -37,7 +26,6 @@ type Workflow struct {
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Version   int             `json:"version"`
-	Status    WorkflowStatus  `json:"status"`
 	Context   json.RawMessage `json:"context,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
@@ -55,6 +43,16 @@ type ExecuteWorkflowResponse struct {
 	Context    json.RawMessage `json:"context,omitempty"`
 	TotalSteps int             `json:"total_steps"`
 	CreatedAt  time.Time       `json:"created_at"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+type Validator interface {
+	ValidateAndNormalizeWorkflow(workflowReq *WorkflowRequest) error
+	ValidateSteps(steps []step.Step) error
+	IsWorkflowEqual(existingSteps []step.Step, existingContext json.RawMessage, req *WorkflowRequest) bool
 }
 
 type WorkflowLogic interface {

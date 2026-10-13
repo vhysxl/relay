@@ -1,37 +1,40 @@
-package step
+package validator
 
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/workflow"
 )
 
 func TestValidateSteps_Empty(t *testing.T) {
-	logic := NewStepValidator()
+	logic := NewValidator()
 	if err := logic.ValidateSteps(nil); err != nil {
 		t.Fatalf("expected nil for empty steps, got %v", err)
 	}
-	if err := logic.ValidateSteps([]Step{}); err != nil {
+	if err := logic.ValidateSteps([]step.Step{}); err != nil {
 		t.Fatalf("expected nil for empty steps, got %v", err)
 	}
 }
 
 func TestValidateSteps_LinearDAG(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{"url":"https://example.com"}`),
 		},
 		{
 			ID:        "step-2",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{"url":"https://example.com"}`),
 			DependsOn: []string{"step-1"},
 		},
 		{
 			ID:        "step-3",
-			Type:      StepTypeMessage,
+			Type:      step.StepTypeMessage,
 			Config:    json.RawMessage(`{"exchange":"events"}`),
 			DependsOn: []string{"step-2"},
 		},
@@ -43,29 +46,29 @@ func TestValidateSteps_LinearDAG(t *testing.T) {
 }
 
 func TestValidateSteps_BranchingDAG(t *testing.T) {
-	logic := NewStepValidator()
+	logic := NewValidator()
 	// Diamond: A -> B, A -> C, B+C -> D
-	steps := []Step{
+	steps := []step.Step{
 		{
 			ID:     "step-a",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{}`),
 		},
 		{
 			ID:        "step-b",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-a"},
 		},
 		{
 			ID:        "step-c",
-			Type:      StepTypeMessage,
+			Type:      step.StepTypeMessage,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-a"},
 		},
 		{
 			ID:        "step-d",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-b", "step-c"},
 		},
@@ -77,11 +80,11 @@ func TestValidateSteps_BranchingDAG(t *testing.T) {
 }
 
 func TestValidateSteps_SelfDependency(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:        "step-1",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-1"},
 		},
@@ -94,17 +97,17 @@ func TestValidateSteps_SelfDependency(t *testing.T) {
 }
 
 func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:        "step-1",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-2"},
 		},
 		{
 			ID:        "step-2",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-1"},
 		},
@@ -117,23 +120,23 @@ func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
 }
 
 func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:        "step-1",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-3"},
 		},
 		{
 			ID:        "step-2",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-1"},
 		},
 		{
 			ID:        "step-3",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"step-2"},
 		},
@@ -146,11 +149,11 @@ func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
 }
 
 func TestValidateSteps_MissingDependency(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:        "step-1",
-			Type:      StepTypeHTTP,
+			Type:      step.StepTypeHTTP,
 			Config:    json.RawMessage(`{}`),
 			DependsOn: []string{"non-existent-step"},
 		},
@@ -163,16 +166,16 @@ func TestValidateSteps_MissingDependency(t *testing.T) {
 }
 
 func TestValidateSteps_DuplicateID(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{}`),
 		},
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{}`),
 		},
 	}
@@ -184,8 +187,8 @@ func TestValidateSteps_DuplicateID(t *testing.T) {
 }
 
 func TestValidateSteps_InvalidType(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
 			Type:   "unknown_type",
@@ -206,11 +209,11 @@ func TestValidateSteps_InvalidType(t *testing.T) {
 }
 
 func TestValidateSteps_InvalidConfig(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`invalid-json`),
 		},
 	}
@@ -228,13 +231,13 @@ func TestValidateSteps_InvalidConfig(t *testing.T) {
 }
 
 func TestValidateSteps_RetryPolicy(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{}`),
-			Retry: &RetryPolicy{
+			Retry: &step.RetryPolicy{
 				MaxAttempts: 0,
 			},
 		},
@@ -246,7 +249,7 @@ func TestValidateSteps_RetryPolicy(t *testing.T) {
 	}
 
 	// Valid retry
-	steps[0].Retry = &RetryPolicy{
+	steps[0].Retry = &step.RetryPolicy{
 		MaxAttempts: 3,
 		Backoff:     2,
 		Multiplier:  2.0,
@@ -258,13 +261,13 @@ func TestValidateSteps_RetryPolicy(t *testing.T) {
 }
 
 func TestValidateSteps_Compensation(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:     "step-1",
-			Type:   StepTypeHTTP,
+			Type:   step.StepTypeHTTP,
 			Config: json.RawMessage(`{}`),
-			Compensation: &Compensation{
+			Compensation: &step.Compensation{
 				Type:   "invalid",
 				Config: json.RawMessage(`{}`),
 			},
@@ -277,8 +280,8 @@ func TestValidateSteps_Compensation(t *testing.T) {
 	}
 
 	// Valid compensation
-	steps[0].Compensation = &Compensation{
-		Type:   StepTypeHTTP,
+	steps[0].Compensation = &step.Compensation{
+		Type:   step.StepTypeHTTP,
 		Config: json.RawMessage(`{"url":"https://example.com/rollback"}`),
 	}
 	if err := logic.ValidateSteps(steps); err != nil {
@@ -287,15 +290,15 @@ func TestValidateSteps_Compensation(t *testing.T) {
 }
 
 func TestValidateSteps_IrreversibleWithCompensation(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:           "step-1",
-			Type:         StepTypeHTTP,
+			Type:         step.StepTypeHTTP,
 			Config:       json.RawMessage(`{"url":"https://example.com"}`),
 			Irreversible: true,
-			Compensation: &Compensation{
-				Type:   StepTypeHTTP,
+			Compensation: &step.Compensation{
+				Type:   step.StepTypeHTTP,
 				Config: json.RawMessage(`{"url":"https://example.com/rollback"}`),
 			},
 		},
@@ -314,30 +317,130 @@ func TestValidateSteps_IrreversibleWithCompensation(t *testing.T) {
 }
 
 func TestValidateSteps_NegativeTimeout(t *testing.T) {
-	logic := NewStepValidator()
-	steps := []Step{
+	logic := NewValidator()
+	steps := []step.Step{
 		{
 			ID:      "step-1",
-			Type:    StepTypeHTTP,
+			Type:    step.StepTypeHTTP,
 			Config:  json.RawMessage(`{}`),
 			Timeout: -5,
 		},
 	}
 
 	err := logic.ValidateSteps(steps)
-	if err == nil || err.Error() != "step timeout cannot be negative" {
-		t.Fatalf("expected negative timeout error, got %v", err)
+	if err != ErrStepTimeoutNegative {
+		t.Fatalf("expected ErrStepTimeoutNegative, got %v", err)
 	}
 
 	// Negative compensation timeout
 	steps[0].Timeout = 5
-	steps[0].Compensation = &Compensation{
-		Type:    StepTypeHTTP,
+	steps[0].Compensation = &step.Compensation{
+		Type:    step.StepTypeHTTP,
 		Config:  json.RawMessage(`{}`),
 		Timeout: -1,
 	}
 	err = logic.ValidateSteps(steps)
-	if err == nil || err.Error() != "compensation timeout cannot be negative" {
-		t.Fatalf("expected negative compensation timeout error, got %v", err)
+	if err != ErrCompensationTimeoutNegative {
+		t.Fatalf("expected ErrCompensationTimeoutNegative, got %v", err)
 	}
 }
+
+func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
+	v := NewValidator()
+
+	// Nil request
+	if err := v.ValidateAndNormalizeWorkflow(nil); err != ErrInvalidWorkflowName {
+		t.Fatalf("expected ErrInvalidWorkflowName, got %v", err)
+	}
+
+	// Empty name
+	req := &workflow.WorkflowRequest{Name: "   "}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowName {
+		t.Fatalf("expected ErrInvalidWorkflowName, got %v", err)
+	}
+
+	// Name too long
+	req = &workflow.WorkflowRequest{
+		Name:  string(make([]byte, 256)),
+		Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrWorkflowNameTooLong {
+		t.Fatalf("expected ErrWorkflowNameTooLong, got %v", err)
+	}
+
+	// Negative version
+	req = &workflow.WorkflowRequest{
+		Name:    "valid-name",
+		Version: -1,
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowVersion {
+		t.Fatalf("expected ErrInvalidWorkflowVersion, got %v", err)
+	}
+
+	// Empty steps
+	req = &workflow.WorkflowRequest{
+		Name:    "valid-name",
+		Version: 1,
+		Steps:   nil,
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrWorkflowEmptySteps {
+		t.Fatalf("expected ErrWorkflowEmptySteps, got %v", err)
+	}
+
+	// Empty step ID must return ErrEmptyID
+	req = &workflow.WorkflowRequest{
+		Name:    "valid-name",
+		Version: 1,
+		Steps:   []step.Step{{ID: "   ", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrEmptyID {
+		t.Fatalf("expected ErrEmptyID, got %v", err)
+	}
+
+	// Invalid context JSON
+	req = &workflow.WorkflowRequest{
+		Name:    "valid-name",
+		Context: json.RawMessage(`invalid`),
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowContext {
+		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	}
+
+	// Non-object context JSON
+	req = &workflow.WorkflowRequest{
+		Name:    "valid-name",
+		Context: json.RawMessage(`[1, 2, 3]`),
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != ErrInvalidWorkflowContext {
+		t.Fatalf("expected ErrInvalidWorkflowContext, got %v", err)
+	}
+
+	// Success and normalization
+	req = &workflow.WorkflowRequest{
+		Name:    "  flow-1  ",
+		Version: 0,
+		Context: json.RawMessage(`{"key": "val"}`),
+		Steps: []step.Step{
+			{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{" dep1 "}},
+		},
+	}
+	if err := v.ValidateAndNormalizeWorkflow(req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Name != "flow-1" {
+		t.Errorf("expected trimmed name, got %s", req.Name)
+	}
+	if req.Version != 1 {
+		t.Errorf("expected default version 1, got %d", req.Version)
+	}
+	if req.Steps[0].ID != "step-1" {
+		t.Errorf("expected step ID to be preserved, got %s", req.Steps[0].ID)
+	}
+	if req.Steps[0].DependsOn[0] != "dep1" {
+		t.Errorf("expected trimmed dependsOn, got %s", req.Steps[0].DependsOn[0])
+	}
+}
+

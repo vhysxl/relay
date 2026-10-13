@@ -122,9 +122,6 @@ type StepExecution struct {
 
 const DefaultLockDuration = 30 * time.Second
 
-type StepValidator interface {
-	ValidateSteps(steps []Step) error
-}
 
 type StepRepository interface {
 	CreateStepsTx(ctx context.Context, tx *sql.Tx, workflowID string, steps []Step) error
