@@ -103,7 +103,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                   return (
                     <tr
                       key={wf.id}
-                      onClick={() => onSelectWorkflow(wf.id)}
+                      onClick={() => onSelectWorkflow(wf.name)}
                       className="hover:bg-neutral-800/40 transition-colors group cursor-pointer"
                     >
                       {/* Name - hover shows underline */}

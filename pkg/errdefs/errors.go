@@ -9,10 +9,9 @@ var (
 	ErrWorkflowNameTooLong    = errors.New("workflow name cannot exceed 255 characters")
 	ErrInvalidWorkflowVersion = errors.New("workflow version cannot be negative")
 	ErrWorkflowEmptySteps     = errors.New("workflow must have at least one step")
-	ErrInvalidWorkflowID      = errors.New("workflow id is required")
 	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
 	ErrWorkflowNotFound       = errors.New("workflow not found")
-	ErrWorkflowAlreadyExists   = errors.New("workflow with this name and version already exists")
+	ErrWorkflowAlreadyExists  = errors.New("workflow with this name and version already exists")
 
 	// Step definitions and DAG validation
 	ErrEmptyStepType               = errors.New("step type is required")

@@ -57,7 +57,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
       if (execRes && execRes.ok) {
         const execs: Execution[] = await execRes.json().catch(() => [])
-        setRecentExecutions(Array.isArray(execs) ? execs.filter((e) => e.workflow_id === workflowId) : [])
+        setRecentExecutions(Array.isArray(execs) ? execs.filter((e) => e.workflow_id === workflowId || e.workflow_name === workflowId || (data && e.workflow_id === data.id)) : [])
       } else {
         setRecentExecutions([])
       }

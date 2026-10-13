@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/validator"
@@ -762,6 +763,8 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execLogic := execution.NewExecutionLogic(execRepo)
 	workerLogic := worker.NewWorkerLogic(stepRepo)
 
 	// 1. Create a workflow definition with 1 step
@@ -786,7 +789,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 
 	// 2. Trigger workflow with custom initial context
 	customContext := json.RawMessage(`{"order_id":"ORD-456","amount":75000}`)
-	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, &workflow.ExecuteWorkflowRequest{
+	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
 		Context: customContext,
 	})
 	if err != nil {
@@ -898,7 +901,9 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	}()
 
 	// 4. Trigger workflow execution
-	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, &workflow.ExecuteWorkflowRequest{
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execLogic := execution.NewExecutionLogic(execRepo)
+	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{"batch_id":"batch-123"}`),
 	})
 	if err != nil {
@@ -1009,7 +1014,9 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execLogic := execution.NewExecutionLogic(execRepo)
+	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
@@ -1172,7 +1179,9 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	wfExec, err := wfLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execLogic := execution.NewExecutionLogic(execRepo)
+	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
@@ -1310,7 +1319,8 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	wfExec, err := wfRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}
@@ -1462,7 +1472,8 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	wfExec, err := wfRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}

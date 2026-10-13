@@ -2,8 +2,9 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,16 +13,48 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-type workflowLogic struct {
-	repo      WorkflowRepository
-	validator Validator
+var (
+	// DefaultMaxRetries defines the fallback maximum retry attempts for concurrent workflow creation.
+	DefaultMaxRetries = 3
+)
+
+// GetMaxRetries returns the configured max retries from the WORKFLOW_MAX_RETRIES environment variable,
+// falling back to DefaultMaxRetries if unset or invalid.
+func GetMaxRetries() int {
+	if val := os.Getenv("WORKFLOW_MAX_RETRIES"); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			return n
+		}
+	}
+	return DefaultMaxRetries
 }
 
-func NewWorkflowLogic(repo WorkflowRepository, v Validator) WorkflowLogic {
-	return &workflowLogic{
-		repo:      repo,
-		validator: v,
+type WorkflowLogicOption func(*workflowLogic)
+
+func WithMaxRetries(maxRetries int) WorkflowLogicOption {
+	return func(l *workflowLogic) {
+		if maxRetries > 0 {
+			l.maxRetries = maxRetries
+		}
 	}
+}
+
+type workflowLogic struct {
+	repo       WorkflowRepository
+	validator  Validator
+	maxRetries int
+}
+
+func NewWorkflowLogic(repo WorkflowRepository, v Validator, opts ...WorkflowLogicOption) WorkflowLogic {
+	l := &workflowLogic{
+		repo:       repo,
+		validator:  v,
+		maxRetries: GetMaxRetries(),
+	}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
@@ -29,99 +62,78 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		return nil, err
 	}
 
-	// Check if a workflow with this name already exists in the database
-	existing, err := l.repo.GetWorkflow(ctx, req.Name)
-	if err != nil && !errors.Is(err, errdefs.ErrWorkflowNotFound) {
+	maxRetries := l.maxRetries
+	if maxRetries <= 0 {
+		maxRetries = GetMaxRetries()
+	}
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		// Check if a workflow with this name already exists in the database
+		existing, err := l.repo.GetWorkflow(ctx, req.Name)
+		if err != nil && !errors.Is(err, errdefs.ErrWorkflowNotFound) {
+			return nil, err
+		}
+
+		if existing != nil {
+			// If 1:1 match with existing workflow, return it idempotently
+			if l.validator.IsWorkflowEqual(existing.Steps, existing.Context, req) {
+				return existing, nil
+			}
+			// If not 1:1 match, auto-increment the version
+			req.Version = existing.Version + 1
+		}
+
+		id := util.GenerateUUID()
+		now := time.Now().UTC()
+
+		steps := make([]step.Step, len(req.Steps))
+		for i, s := range req.Steps {
+			s.WorkflowID = id
+			s.CreatedAt = now
+			s.UpdatedAt = now
+			steps[i] = s
+		}
+
+		wf := &Workflow{
+			ID:        id,
+			Name:      req.Name,
+			Version:   req.Version,
+			Context:   req.Context,
+			CreatedAt: now,
+			UpdatedAt: now,
+			Steps:     steps,
+		}
+
+		created, err := l.repo.CreateWorkflow(ctx, wf)
+		if err == nil {
+			return created, nil
+		}
+
+		// If race condition lost (ErrWorkflowAlreadyExists), retry to fetch the newest workflow
+		if errors.Is(err, errdefs.ErrWorkflowAlreadyExists) {
+			continue
+		}
+
 		return nil, err
 	}
 
-	if existing != nil {
-		// If 1:1 match with existing workflow, return it idempotently
-		if l.validator.IsWorkflowEqual(existing.Steps, existing.Context, req) {
-			return existing, nil
-		}
-		// If not 1:1 match, auto-increment the version
-		req.Version = existing.Version + 1
-	}
-
-	id := util.GenerateUUID()
-	now := time.Now().UTC()
-
-	steps := make([]step.Step, len(req.Steps))
-	for i, s := range req.Steps {
-		s.WorkflowID = id
-		s.CreatedAt = now
-		s.UpdatedAt = now
-		steps[i] = s
-	}
-
-	wf := &Workflow{
-		ID:        id,
-		Name:      req.Name,
-		Version:   req.Version,
-		Context:   req.Context,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Steps:     steps,
-	}
-
-	return l.repo.CreateWorkflow(ctx, wf)
+	return nil, errdefs.ErrWorkflowAlreadyExists
 }
 
-func (l *workflowLogic) GetWorkflow(ctx context.Context, workflowID string) (*Workflow, error) {
-	id := strings.TrimSpace(workflowID)
-	if id == "" {
-		return nil, errdefs.ErrInvalidWorkflowID
+func (l *workflowLogic) GetWorkflow(ctx context.Context, name string) (*Workflow, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errdefs.ErrInvalidWorkflowName
 	}
 
-	return l.repo.GetWorkflow(ctx, id)
+	return l.repo.GetWorkflow(ctx, name)
 }
 
-func (l *workflowLogic) ExecuteWorkflow(ctx context.Context, workflowID string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error) {
-	id := strings.TrimSpace(workflowID)
-	if id == "" {
-		return nil, errdefs.ErrInvalidWorkflowID
-	}
-
-	var ctxBytes []byte
-	if req != nil && len(req.Context) > 0 {
-		trimmed := strings.TrimSpace(string(req.Context))
-		if trimmed != "" && trimmed != "null" {
-			if !json.Valid(req.Context) {
-				return nil, errdefs.ErrInvalidWorkflowContext
-			}
-			ctxBytes = req.Context
-		}
-	}
-
-	if l.repo == nil {
-		return nil, errors.New("workflow repository is not configured")
-	}
-
-	return l.repo.ExecuteWorkflowTx(ctx, id, ctxBytes)
-}
-
-func (l *workflowLogic) ListWorkflows(ctx context.Context) ([]Workflow, error) {
-	if l.repo == nil {
-		return nil, errors.New("workflow repository is not configured")
-	}
-	return l.repo.ListWorkflows(ctx)
-}
-
-func (l *workflowLogic) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
-	if l.repo == nil {
-		return nil, errors.New("workflow repository is not configured")
-	}
-	return l.repo.ListExecutions(ctx)
-}
-
-func (l *workflowLogic) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
-	id := strings.TrimSpace(executionID)
-	if id == "" {
-		return nil, errors.New("execution id is required")
-	}
-	if l.repo == nil {
-		return nil, errors.New("workflow repository is not configured")
-	}
-	return l.repo.GetExecution(ctx, id)
+func (l *workflowLogic) ListWorkflows(ctx context.Context, limit, offset int) ([]Workflow, error) {
+	limit, offset = util.NormalizePagination(limit, offset, 50, 100)
+	return l.repo.ListWorkflows(ctx, limit, offset)
 }

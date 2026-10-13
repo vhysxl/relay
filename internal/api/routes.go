@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/system"
 	"github.com/vhysxl/relay/internal/validator"
@@ -20,6 +21,10 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, v)
 	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
 
+	executionRepo := execution.NewExecutionRepository(db, stepRepo)
+	executionLogic := execution.NewExecutionLogic(executionRepo)
+	executionHandler := execution.NewExecutionHandler(executionLogic)
+
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())
 
@@ -31,11 +36,13 @@ func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
 		util.WriteJSON(w, http.StatusOK, system.GetMetrics())
 	})
 
+	// Workflow Definitions
 	mux.HandleFunc("GET /workflows", workflowHandler.ListWorkflows)
 	mux.HandleFunc("POST /workflows", workflowHandler.CreateWorkflow)
-	mux.HandleFunc("GET /workflows/{id}", workflowHandler.GetWorkflow)
-	mux.HandleFunc("POST /workflows/{id}/execute", workflowHandler.ExecuteWorkflow)
+	mux.HandleFunc("GET /workflows/{name}", workflowHandler.GetWorkflow)
 
-	mux.HandleFunc("GET /executions", workflowHandler.ListExecutions)
-	mux.HandleFunc("GET /executions/{id}", workflowHandler.GetExecution)
+	// Workflow Executions
+	mux.HandleFunc("POST /workflows/{name}/execute", executionHandler.ExecuteWorkflow)
+	mux.HandleFunc("GET /executions", executionHandler.ListExecutions)
+	mux.HandleFunc("GET /executions/{id}", executionHandler.GetExecution)
 }

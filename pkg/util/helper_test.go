@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -141,6 +142,48 @@ func TestAreJSONEqual(t *testing.T) {
 				t.Errorf("AreJSONEqual(%s, %s) = %v; want %v", tt.a, tt.b, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestParsePagination(t *testing.T) {
+	tests := []struct {
+		name         string
+		url          string
+		defaultLimit int
+		maxLimit     int
+		wantLimit    int
+		wantOffset   int
+	}{
+		{"empty query params use defaults", "/workflows", 50, 100, 50, 0},
+		{"valid limit and offset", "/workflows?limit=25&offset=10", 50, 100, 25, 10},
+		{"limit exceeds maxLimit is capped", "/workflows?limit=500&offset=5", 50, 100, 100, 5},
+		{"negative limit falls back to default", "/workflows?limit=-10&offset=5", 50, 100, 50, 5},
+		{"invalid limit string falls back to default", "/workflows?limit=abc", 50, 100, 50, 0},
+		{"negative offset clamped to zero", "/workflows?limit=10&offset=-5", 50, 100, 10, 0},
+		{"invalid offset string clamped to zero", "/workflows?offset=xyz", 50, 100, 50, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			pg := ParsePagination(req, tt.defaultLimit, tt.maxLimit)
+			if pg.Limit != tt.wantLimit || pg.Offset != tt.wantOffset {
+				t.Errorf("ParsePagination(%s) = {Limit: %d, Offset: %d}; want {Limit: %d, Offset: %d}",
+					tt.url, pg.Limit, pg.Offset, tt.wantLimit, tt.wantOffset)
+			}
+		})
+	}
+}
+
+func TestNormalizePagination(t *testing.T) {
+	limit, offset := NormalizePagination(0, -1, 50, 100)
+	if limit != 50 || offset != 0 {
+		t.Errorf("expected 50, 0; got %d, %d", limit, offset)
+	}
+
+	limit, offset = NormalizePagination(500, 20, 50, 100)
+	if limit != 100 || offset != 20 {
+		t.Errorf("expected 100, 20; got %d, %d", limit, offset)
 	}
 }
 

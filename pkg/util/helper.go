@@ -181,3 +181,48 @@ func AreStringSlicesEqualUnordered(a, b []string) bool {
 	}
 	return true
 }
+
+// PaginationParams holds normalized limit and offset values for paginated queries.
+type PaginationParams struct {
+	Limit  int
+	Offset int
+}
+
+// ParsePagination extracts and normalizes limit and offset query parameters from an HTTP request.
+// It applies defaultLimit if limit is non-positive or unparseable, caps limit at maxLimit, and ensures offset >= 0.
+func ParsePagination(r *http.Request, defaultLimit, maxLimit int) PaginationParams {
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = defaultLimit
+	}
+	if maxLimit > 0 && limit > maxLimit {
+		limit = maxLimit
+	}
+
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+
+	return PaginationParams{
+		Limit:  limit,
+		Offset: offset,
+	}
+}
+
+// NormalizePagination ensures limit and offset integers fall within safe boundaries.
+func NormalizePagination(limit, offset, defaultLimit, maxLimit int) (int, int) {
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if maxLimit > 0 && limit > maxLimit {
+		limit = maxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}

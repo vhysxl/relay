@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,11 +16,9 @@ import (
 )
 
 type mockRepository struct {
-	createFn         func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error)
-	getFn            func(ctx context.Context, id string) (*workflow.Workflow, error)
-	executeFn        func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
-	listWorkflowsFn  func(ctx context.Context) ([]workflow.Workflow, error)
-	listExecutionsFn func(ctx context.Context) ([]step.WorkflowExecution, error)
+	createFn        func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error)
+	getFn           func(ctx context.Context, name string) (*workflow.Workflow, error)
+	listWorkflowsFn func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error)
 }
 
 func (m *mockRepository) CreateWorkflow(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
@@ -29,41 +28,18 @@ func (m *mockRepository) CreateWorkflow(ctx context.Context, wf *workflow.Workfl
 	return wf, nil
 }
 
-func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*workflow.Workflow, error) {
+func (m *mockRepository) GetWorkflow(ctx context.Context, name string) (*workflow.Workflow, error) {
 	if m.getFn != nil {
-		return m.getFn(ctx, id)
+		return m.getFn(ctx, name)
 	}
 	return nil, errdefs.ErrWorkflowNotFound
 }
 
-func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
-	if m.executeFn != nil {
-		return m.executeFn(ctx, workflowID, initialContext)
-	}
-	return &step.WorkflowExecution{
-		ID:         "exec-123",
-		WorkflowID: workflowID,
-		Status:     step.StatusRunning,
-		Context:    initialContext,
-	}, nil
-}
-
-func (m *mockRepository) ListWorkflows(ctx context.Context) ([]workflow.Workflow, error) {
+func (m *mockRepository) ListWorkflows(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
 	if m.listWorkflowsFn != nil {
-		return m.listWorkflowsFn(ctx)
+		return m.listWorkflowsFn(ctx, limit, offset)
 	}
 	return []workflow.Workflow{}, nil
-}
-
-func (m *mockRepository) ListExecutions(ctx context.Context) ([]step.WorkflowExecution, error) {
-	if m.listExecutionsFn != nil {
-		return m.listExecutionsFn(ctx)
-	}
-	return []step.WorkflowExecution{}, nil
-}
-
-func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
-	return &step.WorkflowExecution{ID: executionID, Status: step.StatusRunning}, nil
 }
 
 
@@ -149,8 +125,8 @@ func TestWorkflowLogic_GetWorkflow_Validation(t *testing.T) {
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
 
 	_, err := logic.GetWorkflow(context.Background(), "")
-	if err != errdefs.ErrInvalidWorkflowID {
-		t.Fatalf("expected errdefs.ErrInvalidWorkflowID, got %v", err)
+	if err != errdefs.ErrInvalidWorkflowName {
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowName, got %v", err)
 	}
 }
 
@@ -309,8 +285,8 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	}
 
 	repo := &mockRepository{
-		getFn: func(ctx context.Context, id string) (*workflow.Workflow, error) {
-			if id == "test-uuid-1234" {
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			if name == "test-uuid-1234" {
 				return testWf, nil
 			}
 			return nil, errdefs.ErrWorkflowNotFound
@@ -322,7 +298,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 
 	// Test found
 	req := httptest.NewRequest(http.MethodGet, "/workflows/test-uuid-1234", nil)
-	req.SetPathValue("id", "test-uuid-1234")
+	req.SetPathValue("name", "test-uuid-1234")
 	rec := httptest.NewRecorder()
 
 	handler.GetWorkflow(rec, req)
@@ -341,7 +317,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 
 	// Test not found
 	reqNotFound := httptest.NewRequest(http.MethodGet, "/workflows/unknown-id", nil)
-	reqNotFound.SetPathValue("id", "unknown-id")
+	reqNotFound.SetPathValue("name", "unknown-id")
 	recNotFound := httptest.NewRecorder()
 
 	handler.GetWorkflow(recNotFound, reqNotFound)
@@ -349,136 +325,17 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	if recNotFound.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d", recNotFound.Code)
 	}
-}
 
-func TestWorkflowLogic_ExecuteWorkflow_Validation(t *testing.T) {
-	called := false
-	repo := &mockRepository{
-		executeFn: func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
-			called = true
-			if workflowID != "wf-123" {
-				t.Errorf("expected wf-123, got %s", workflowID)
-			}
-			return &step.WorkflowExecution{
-				ID:         "exec-123",
-				WorkflowID: workflowID,
-				Status:     step.StatusRunning,
-				Context:    initialContext,
-			}, nil
-		},
-	}
-
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
-
-	// Test empty workflowID
-	_, err := logic.ExecuteWorkflow(context.Background(), "", nil)
-	if err != errdefs.ErrInvalidWorkflowID {
-		t.Fatalf("expected errdefs.ErrInvalidWorkflowID, got %v", err)
-	}
-
-	// Test whitespace workflowID
-	_, err = logic.ExecuteWorkflow(context.Background(), "   ", nil)
-	if err != errdefs.ErrInvalidWorkflowID {
-		t.Fatalf("expected errdefs.ErrInvalidWorkflowID for whitespace, got %v", err)
-	}
-
-	// Test invalid JSON context
-	_, err = logic.ExecuteWorkflow(context.Background(), "wf-123", &workflow.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{not-json`),
-	})
-	if err != errdefs.ErrInvalidWorkflowContext {
-		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
-	}
-
-	// Test success with valid context
-	exec, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &workflow.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{"order_id":"ORD-1"}`),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Fatalf("expected executeFn to be called")
-	}
-	if string(exec.Context) != `{"order_id":"ORD-1"}` {
-		t.Errorf("expected context ORD-1, got %s", string(exec.Context))
-	}
-}
-
-func TestWorkflowHandler_ExecuteWorkflow(t *testing.T) {
-	repo := &mockRepository{
-		executeFn: func(ctx context.Context, workflowID string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
-			if workflowID == "wf-not-found" {
-				return nil, errdefs.ErrWorkflowNotFound
-			}
-			return &step.WorkflowExecution{
-				ID:         "exec-999",
-				WorkflowID: workflowID,
-				Status:     step.StatusRunning,
-				Context:    initialContext,
-				Steps: []step.StepExecution{
-					{ID: "step-exec-1", Status: step.StatusPending},
-				},
-			}, nil
-		},
-	}
-	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
-
-	// 1. Trigger with {"context": {"amount": 50000}}
-	body := bytes.NewBufferString(`{"context":{"amount":50000}}`)
-	req := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", body)
-	req.SetPathValue("id", "wf-1")
-	rec := httptest.NewRecorder()
-
-	handler.ExecuteWorkflow(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status 201, got %d (body: %s)", rec.Code, rec.Body.String())
-	}
-
-	var resp workflow.ExecuteWorkflowResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.ID != "exec-999" || resp.WorkflowID != "wf-1" || resp.TotalSteps != 1 {
-		t.Errorf("unexpected response: %+v", resp)
-	}
-	if string(resp.Context) != `{"amount":50000}` {
-		t.Errorf("expected context amount 50000, got %s", string(resp.Context))
-	}
-
-	// 2. Trigger with raw json body {"amount": 99000}
-	rawBody := bytes.NewBufferString(`{"amount":99000}`)
-	reqRaw := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", rawBody)
-	reqRaw.SetPathValue("id", "wf-1")
-	recRaw := httptest.NewRecorder()
-
-	handler.ExecuteWorkflow(recRaw, reqRaw)
-	if recRaw.Code != http.StatusCreated {
-		t.Fatalf("expected status 201 for raw body, got %d", recRaw.Code)
-	}
-
-	// 3. Trigger with empty body
-	reqEmpty := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", nil)
-	reqEmpty.SetPathValue("id", "wf-1")
+	// Test empty name
+	reqEmpty := httptest.NewRequest(http.MethodGet, "/workflows/", nil)
 	recEmpty := httptest.NewRecorder()
-
-	handler.ExecuteWorkflow(recEmpty, reqEmpty)
-	if recEmpty.Code != http.StatusCreated {
-		t.Fatalf("expected status 201 for empty body, got %d", recEmpty.Code)
-	}
-
-	// 4. Trigger unknown workflow
-	reqUnknown := httptest.NewRequest(http.MethodPost, "/workflows/wf-not-found/execute", nil)
-	reqUnknown.SetPathValue("id", "wf-not-found")
-	recUnknown := httptest.NewRecorder()
-
-	handler.ExecuteWorkflow(recUnknown, reqUnknown)
-	if recUnknown.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", recUnknown.Code)
+	handler.GetWorkflow(recEmpty, reqEmpty)
+	if recEmpty.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for empty name, got %d", recEmpty.Code)
 	}
 }
+
+
 
 func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 	existingWf := &workflow.Workflow{
@@ -724,8 +581,11 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 		{ID: "s-1", Name: "Step 1", Type: step.StepTypeHTTP},
 		{ID: "s-2", Name: "Step 2", Type: step.StepTypeMessage},
 	}
+	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listWorkflowsFn: func(ctx context.Context) ([]workflow.Workflow, error) {
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+			capturedLimit = limit
+			capturedOffset = offset
 			return []workflow.Workflow{
 				{ID: "wf-1", Name: "Order Flow", Steps: expectedSteps},
 				{ID: "wf-2", Name: "Invoice Flow", Steps: []step.Step{}},
@@ -733,7 +593,7 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 		},
 	}
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
-	wfs, err := logic.ListWorkflows(context.Background())
+	wfs, err := logic.ListWorkflows(context.Background(), 20, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -743,31 +603,255 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 	if len(wfs[0].Steps) != 2 {
 		t.Errorf("expected 2 steps in wf-1, got %d", len(wfs[0].Steps))
 	}
+	if capturedLimit != 20 || capturedOffset != 10 {
+		t.Errorf("expected limit=20, offset=10, got limit=%d, offset=%d", capturedLimit, capturedOffset)
+	}
 }
 
-func TestWorkflowLogic_ListExecutions_Batch(t *testing.T) {
-	expectedSteps := []step.StepExecution{
-		{ID: "se-1", StepID: "s-1", Status: step.StatusCompleted},
-		{ID: "se-2", StepID: "s-2", Status: step.StatusRunning},
-	}
+func TestWorkflowLogic_ListWorkflows_PaginationNormalization(t *testing.T) {
+	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listExecutionsFn: func(ctx context.Context) ([]step.WorkflowExecution, error) {
-			return []step.WorkflowExecution{
-				{ID: "exec-1", WorkflowID: "wf-1", Status: step.StatusRunning, Steps: expectedSteps},
-				{ID: "exec-2", WorkflowID: "wf-2", Status: step.StatusCompleted, Steps: []step.StepExecution{}},
-			}, nil
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+			capturedLimit = limit
+			capturedOffset = offset
+			return []workflow.Workflow{}, nil
 		},
 	}
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
-	execs, err := logic.ListExecutions(context.Background())
+
+	// Test default when <= 0
+	_, err := logic.ListWorkflows(context.Background(), 0, -5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(execs) != 2 {
-		t.Fatalf("expected 2 executions, got %d", len(execs))
+	if capturedLimit != 50 || capturedOffset != 0 {
+		t.Errorf("expected default limit=50, offset=0; got limit=%d, offset=%d", capturedLimit, capturedOffset)
 	}
-	if len(execs[0].Steps) != 2 {
-		t.Errorf("expected 2 steps in exec-1, got %d", len(execs[0].Steps))
+
+	// Test max clamp
+	_, err = logic.ListWorkflows(context.Background(), 500, 15)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedLimit != 100 || capturedOffset != 15 {
+		t.Errorf("expected clamped limit=100, offset=15; got limit=%d, offset=%d", capturedLimit, capturedOffset)
 	}
 }
+
+
+func TestWorkflowHandler_ListWorkflows(t *testing.T) {
+	var capturedLimit, capturedOffset int
+	repo := &mockRepository{
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+			capturedLimit = limit
+			capturedOffset = offset
+			return []workflow.Workflow{
+				{ID: "wf-1", Name: "Order Flow", Version: 1},
+			}, nil
+		},
+	}
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v)
+	handler := workflow.NewWorkflowHandler(logic)
+
+	// 1. With query params ?limit=25&offset=50
+	req := httptest.NewRequest(http.MethodGet, "/workflows?limit=25&offset=50", nil)
+	rec := httptest.NewRecorder()
+	handler.ListWorkflows(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if capturedLimit != 25 || capturedOffset != 50 {
+		t.Errorf("expected limit=25, offset=50; got limit=%d, offset=%d", capturedLimit, capturedOffset)
+	}
+
+	var wfs []workflow.Workflow
+	if err := json.NewDecoder(rec.Body).Decode(&wfs); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(wfs) != 1 || wfs[0].Name != "Order Flow" {
+		t.Errorf("unexpected workflows response: %+v", wfs)
+	}
+
+	// 2. Default without query params
+	reqDefault := httptest.NewRequest(http.MethodGet, "/workflows", nil)
+	recDefault := httptest.NewRecorder()
+	handler.ListWorkflows(recDefault, reqDefault)
+
+	if recDefault.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recDefault.Code)
+	}
+	if capturedLimit != 50 || capturedOffset != 0 {
+		t.Errorf("expected default limit=50, offset=0; got limit=%d, offset=%d", capturedLimit, capturedOffset)
+	}
+}
+
+func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryIdempotent(t *testing.T) {
+	validStep := step.Step{
+		ID:     "step-1",
+		Type:   step.StepTypeHTTP,
+		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+	}
+
+	concurrentlyCreatedWf := &workflow.Workflow{
+		ID:      "race-winner-uuid",
+		Name:    "order-race",
+		Version: 1,
+		Context: json.RawMessage(`{"currency":"IDR"}`),
+		Steps:   []step.Step{validStep},
+	}
+
+	getCallCount := 0
+	createCallCount := 0
+
+	repo := &mockRepository{
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			getCallCount++
+			if getCallCount == 1 {
+				// First check: DB still doesn't have it
+				return nil, errdefs.ErrWorkflowNotFound
+			}
+			// Second check: Competitor just committed the identical workflow!
+			return concurrentlyCreatedWf, nil
+		},
+		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
+			createCallCount++
+			// First attempt fails due to competitor finishing insert first
+			return nil, errdefs.ErrWorkflowAlreadyExists
+		},
+	}
+
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v)
+
+	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
+		Name:    "order-race",
+		Context: json.RawMessage(`{"currency":"IDR"}`),
+		Steps:   []step.Step{validStep},
+	})
+	if err != nil {
+		t.Fatalf("expected successful recovery via retry, got error: %v", err)
+	}
+
+	if wf.ID != "race-winner-uuid" {
+		t.Errorf("expected idempotent return of winner workflow, got ID %s", wf.ID)
+	}
+	if getCallCount != 2 {
+		t.Errorf("expected 2 get calls (initial check + retry), got %d", getCallCount)
+	}
+	if createCallCount != 1 {
+		t.Errorf("expected 1 create call, got %d", createCallCount)
+	}
+}
+
+func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryAutoIncrement(t *testing.T) {
+	validStep := step.Step{
+		ID:     "step-1",
+		Type:   step.StepTypeHTTP,
+		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+	}
+
+	differentStep := step.Step{
+		ID:     "step-different",
+		Type:   step.StepTypeHTTP,
+		Config: json.RawMessage(`{"url":"https://api.test/other"}`),
+	}
+
+	concurrentlyCreatedWf := &workflow.Workflow{
+		ID:      "race-winner-uuid",
+		Name:    "order-race-diff",
+		Version: 1,
+		Steps:   []step.Step{differentStep},
+	}
+
+	getCallCount := 0
+	createCallCount := 0
+	var finalCreated *workflow.Workflow
+
+	repo := &mockRepository{
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			getCallCount++
+			if getCallCount == 1 {
+				return nil, errdefs.ErrWorkflowNotFound
+			}
+			return concurrentlyCreatedWf, nil
+		},
+		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
+			createCallCount++
+			if createCallCount == 1 {
+				return nil, errdefs.ErrWorkflowAlreadyExists
+			}
+			finalCreated = wf
+			return wf, nil
+		},
+	}
+
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v)
+
+	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
+		Name:  "order-race-diff",
+		Steps: []step.Step{validStep},
+	})
+	if err != nil {
+		t.Fatalf("expected successful version increment, got error: %v", err)
+	}
+
+	if wf.Version != 2 {
+		t.Errorf("expected version 2 after retry bump, got %d", wf.Version)
+	}
+	if finalCreated == nil || finalCreated.Version != 2 {
+		t.Errorf("expected final created workflow version 2, got %+v", finalCreated)
+	}
+}
+
+func TestWorkflowLogic_MaxRetriesConfig_EnvAndOptions(t *testing.T) {
+	// 1. Default value
+	t.Setenv("WORKFLOW_MAX_RETRIES", "")
+	if retries := workflow.GetMaxRetries(); retries != workflow.DefaultMaxRetries {
+		t.Errorf("expected default retries %d, got %d", workflow.DefaultMaxRetries, retries)
+	}
+
+	// 2. Read from ENV
+	t.Setenv("WORKFLOW_MAX_RETRIES", "7")
+	if retries := workflow.GetMaxRetries(); retries != 7 {
+		t.Errorf("expected 7 from ENV, got %d", retries)
+	}
+
+	// 3. Fallback when invalid ENV value
+	t.Setenv("WORKFLOW_MAX_RETRIES", "invalid_num")
+	if retries := workflow.GetMaxRetries(); retries != workflow.DefaultMaxRetries {
+		t.Errorf("expected fallback %d for invalid env, got %d", workflow.DefaultMaxRetries, retries)
+	}
+
+	// 4. Overridden via WithMaxRetries option
+	t.Setenv("WORKFLOW_MAX_RETRIES", "5")
+	repo := &mockRepository{
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			return nil, errdefs.ErrWorkflowNotFound
+		},
+		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
+			return nil, errdefs.ErrWorkflowAlreadyExists
+		},
+	}
+	v := validator.NewValidator()
+	// Pass option WithMaxRetries(2)
+	logic := workflow.NewWorkflowLogic(repo, v, workflow.WithMaxRetries(2))
+
+	validStep := step.Step{
+		ID:     "step-1",
+		Type:   step.StepTypeHTTP,
+		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+	}
+
+	_, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
+		Name:  "test-max-retries",
+		Steps: []step.Step{validStep},
+	})
+	if !errors.Is(err, errdefs.ErrWorkflowAlreadyExists) {
+		t.Fatalf("expected ErrWorkflowAlreadyExists after exhausting retries, got: %v", err)
+	}
+}
+
 
