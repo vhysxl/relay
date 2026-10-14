@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
@@ -21,7 +20,7 @@ func NewExecutionLogic(repo ExecutionRepository) ExecutionLogic {
 	}
 }
 
-func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*step.WorkflowExecution, error) {
+func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*WorkflowExecution, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errdefs.ErrInvalidWorkflowName
@@ -41,12 +40,12 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 	return l.repo.ExecuteWorkflowTx(ctx, name, ctxBytes)
 }
 
-func (l *executionLogic) ListExecutions(ctx context.Context, limit, offset int) ([]step.WorkflowExecution, error) {
+func (l *executionLogic) ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error) {
 	limit, offset = util.NormalizePagination(limit, offset, 50, 100)
 	return l.repo.ListExecutions(ctx, limit, offset)
 }
 
-func (l *executionLogic) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+func (l *executionLogic) GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error) {
 	id := strings.TrimSpace(executionID)
 	if id == "" {
 		return nil, errors.New("execution id is required")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -17,7 +18,7 @@ var (
 
 // StepExecutor defines the contract for executing a single workflow step
 type StepExecutor interface {
-	Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error)
+	Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error)
 }
 
 // Registry manages and routes step executors by StepType

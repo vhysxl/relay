@@ -6,12 +6,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
 type dummyExecutor struct{}
 
-func (d *dummyExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+func (d *dummyExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 	return json.RawMessage(`{"dummy":true}`), nil
 }
 

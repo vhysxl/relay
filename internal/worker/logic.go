@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-
 	"sync"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -19,30 +20,43 @@ var (
 )
 
 type workerLogic struct {
-	stepRepo step.StepRepository
+	execRepo     execution.ExecutionRepository
+	lockDuration time.Duration
 }
 
-// NewWorkerLogic creates a new WorkerLogic with required step repository
-func NewWorkerLogic(stepRepo step.StepRepository) WorkerLogic {
-	return &workerLogic{stepRepo: stepRepo}
+// NewWorkerLogic creates a new WorkerLogic with required execution repository and optional injected config.
+func NewWorkerLogic(execRepo execution.ExecutionRepository, cfg ...*config.Config) WorkerLogic {
+	leaseDuration := config.DefaultLeaseDuration
+	if len(cfg) > 0 && cfg[0] != nil && cfg[0].DefaultLeaseDuration > 0 {
+		leaseDuration = cfg[0].DefaultLeaseDuration
+	}
+	return &workerLogic{
+		execRepo:     execRepo,
+		lockDuration: leaseDuration,
+	}
 }
 
 // ClaimNext validates workerID and claims next ready step from repository
-func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Step, *step.StepExecution, error) {
+func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error) {
 	// validate worker id
 	trimmedWorkerID := strings.TrimSpace(workerID)
 	if trimmedWorkerID == "" {
 		return nil, nil, ErrEmptyWorkerID
 	}
 
-	// delegate claim to step repository with default 30s lease
-	if l.stepRepo == nil {
-		return nil, nil, errors.New("step repository is not configured")
+	// delegate claim to execution repository with configured lease
+	if l.execRepo == nil {
+		return nil, nil, errors.New("execution repository is not configured")
 	}
-	return l.stepRepo.ClaimNext(ctx, trimmedWorkerID, step.DefaultLockDuration)
+
+	leaseDuration := l.lockDuration
+	if leaseDuration <= 0 {
+		leaseDuration = config.DefaultLeaseDuration
+	}
+	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, leaseDuration)
 }
 
-// Heartbeat validates parameters and delegates lease extension to step repository
+// Heartbeat validates parameters and delegates lease extension to execution repository
 func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
@@ -53,11 +67,15 @@ func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, wor
 		return ErrEmptyWorkerID
 	}
 
-	if l.stepRepo == nil {
-		return errors.New("step repository is not configured")
+	if l.execRepo == nil {
+		return errors.New("execution repository is not configured")
 	}
 
-	return l.stepRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, step.DefaultLockDuration)
+	leaseDuration := l.lockDuration
+	if leaseDuration <= 0 {
+		leaseDuration = config.DefaultLeaseDuration
+	}
+	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, leaseDuration)
 }
 
 // StartHeartbeat begins a background ticker to periodically extend the step execution lease
@@ -110,7 +128,7 @@ func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string
 	return stop, errChan
 }
 
-// CompleteStep validates parameters and delegates completion to step repository
+// CompleteStep validates parameters and delegates completion to execution repository
 func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
@@ -128,14 +146,14 @@ func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, 
 		}
 	}
 
-	if l.stepRepo == nil {
-		return errors.New("step repository is not configured")
+	if l.execRepo == nil {
+		return errors.New("execution repository is not configured")
 	}
 
-	return l.stepRepo.CompleteStep(ctx, trimmedExecID, trimmedWorkerID, output)
+	return l.execRepo.CompleteStep(ctx, trimmedExecID, trimmedWorkerID, output)
 }
 
-// FailStep validates parameters and delegates step failure handling to step repository
+// FailStep validates parameters and delegates step failure handling to execution repository
 func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
@@ -151,10 +169,9 @@ func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, work
 		trimmedErr = "unknown error"
 	}
 
-	if l.stepRepo == nil {
-		return errors.New("step repository is not configured")
+	if l.execRepo == nil {
+		return errors.New("execution repository is not configured")
 	}
 
-	return l.stepRepo.FailStep(ctx, trimmedExecID, trimmedWorkerID, trimmedErr)
+	return l.execRepo.FailStep(ctx, trimmedExecID, trimmedWorkerID, trimmedErr)
 }
-

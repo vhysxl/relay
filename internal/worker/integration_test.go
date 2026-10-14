@@ -18,6 +18,7 @@ import (
 	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 func getTestDB(t *testing.T) *sql.DB {
@@ -70,7 +71,8 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// 1. CREATE WORKFLOW + STEPS
 	uniqueWorkflowName := "test-order-saga-" + uuid.NewString()[:8]
@@ -143,7 +145,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO step_executions (
 			id, workflow_execution_id, step_id, name, type, config, depends_on, status, attempt, created_at, updated_at
-		) VALUES (?, ?, ?, ?, 'http', '{"method":"POST"}', ?, 'PENDING', 0, NOW(), NOW())
+		) VALUES (?, ?, ?, ?, 'http', '{"method":"POST"}', ?, 'WAITING', 0, NOW(), NOW())
 	`, stepExecBID, wfExecID, stepBID, "Process Payment", string(dependsOnJSON))
 	if err != nil {
 		t.Fatalf("failed to insert step execution B: %v", err)
@@ -161,7 +163,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	if se1.ID != stepExecAID {
 		t.Errorf("expected worker-1 to claim step A (%s), but got %s", stepExecAID, se1.ID)
 	}
-	if se1.Status != step.StatusRunning {
+	if se1.Status != execution.StatusRunning {
 		t.Errorf("expected claimed execution status RUNNING, got %s", se1.Status)
 	}
 	if se1.Attempt != 1 {
@@ -183,11 +185,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	t.Logf("✓ Worker-2 correctly received nil task (Step A is locked and Step B depends on A)")
 
 	// 5. SIMULATE STEP A COMPLETION
-	_, err = db.ExecContext(ctx, `
-		UPDATE step_executions
-		SET status = 'COMPLETED', locked_by = NULL, locked_until = NULL, updated_at = NOW()
-		WHERE id = ?
-	`, stepExecAID)
+	err = workerLogic.CompleteStep(ctx, se1.ID, "worker-1", json.RawMessage("{}"))
 	if err != nil {
 		t.Fatalf("failed to complete step A: %v", err)
 	}
@@ -204,7 +202,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	if se3.ID != stepExecBID {
 		t.Errorf("expected worker-2 to claim Step B (%s), got %s", stepExecBID, se3.ID)
 	}
-	if se3.Status != step.StatusRunning {
+	if se3.Status != execution.StatusRunning {
 		t.Errorf("expected Step B status RUNNING, got %s", se3.Status)
 	}
 	if se3.LockedBy == nil || *se3.LockedBy != "worker-2" {
@@ -246,7 +244,8 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// 1. Create test workflow and step definition
 	uniqueWorkflowName := "test-heartbeat-wf-" + uuid.NewString()[:8]
@@ -310,8 +309,8 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	}
 	t.Logf("✓ Claimed task initial locked_until: %s", initialLockedUntil.Format(time.RFC3339))
 
-	// 4. Wait 1 second and send heartbeat from worker-1
-	time.Sleep(1 * time.Second)
+	// 4. Wait for MySQL 1-second timestamp resolution to tick and send heartbeat from worker-1
+	time.Sleep(1100 * time.Millisecond)
 	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-1")
 	if err != nil {
 		t.Fatalf("worker-1 heartbeat failed: %v", err)
@@ -332,7 +331,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 
 	// 5. Worker-2 tries to heartbeat the same execution -> should fail with ErrLockLost
 	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-2")
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost for unauthorized worker-2, got %v", err)
 	}
 	t.Logf("✓ Verified unauthorized worker cannot heartbeat")
@@ -343,7 +342,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 		t.Fatalf("failed to update status: %v", err)
 	}
 	err = workerLogic.Heartbeat(ctx, stepExecID, "worker-1")
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost for completed step, got %v", err)
 	}
 	t.Logf("✓ Verified completed step execution rejects heartbeat")
@@ -405,7 +404,8 @@ func TestIntegration_CompleteStep(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// 1. Create test workflow and execution
 	wfID := uuid.NewString()
@@ -429,7 +429,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 			id, workflow_execution_id, step_id, name, type, config, depends_on, status, max_attempts, is_compensation, created_at, updated_at
 		) VALUES 
 		(?, ?, 'step-a', 'Step A', 'http', '{}', '[]', 'PENDING', 1, FALSE, NOW(), NOW()),
-		(?, ?, 'step-b', 'Step B', 'http', '{}', '["step-a"]', 'PENDING', 1, FALSE, NOW(), NOW())
+		(?, ?, 'step-b', 'Step B', 'http', '{}', '["step-a"]', 'WAITING', 1, FALSE, NOW(), NOW())
 	`, stepExecAID, wfExecID, stepExecBID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert step_executions: %v", err)
@@ -443,7 +443,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 
 	// 4. Worker-2 tries to Complete Step A -> Should fail with ErrLockLost (unauthorized)
 	err = workerLogic.CompleteStep(ctx, stepExecAID, "worker-2", json.RawMessage(`{"res":"hacked"}`))
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost for unauthorized worker-2 completing Step A, got %v", err)
 	}
 
@@ -514,7 +514,8 @@ func TestIntegration_FailStep_Retry(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-retry-wf-"+wfID[:8])
@@ -590,7 +591,8 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-saga-"+wfID[:8])
@@ -704,7 +706,8 @@ func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *test
 	ctx := context.Background()
 
 	stepRepo := step.NewStepRepository(db)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-immediate-wf-"+wfID[:8])
@@ -765,14 +768,13 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	execLogic := execution.NewExecutionLogic(execRepo)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// 1. Create a workflow definition with 1 step
 	wfName := "e2e-wf-" + uuid.NewString()[:8]
 	wf, err := wfLogic.CreateWorkflow(ctx, &workflow.WorkflowRequest{
 		Name:    wfName,
 		Version: 1,
-		Context: json.RawMessage(`{"default_key":"default_val"}`),
 		Steps: []step.Step{
 			{
 				ID:      "step-first",
@@ -796,7 +798,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}
 
-	if wfExec.Status != step.StatusRunning {
+	if wfExec.Status != execution.StatusRunning {
 		t.Errorf("expected workflow status RUNNING, got %s", wfExec.Status)
 	}
 	if string(wfExec.Context) != string(customContext) {
@@ -835,7 +837,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 
 type integrationMockExecutor struct{}
 
-func (e *integrationMockExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+func (e *integrationMockExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 	return json.RawMessage(`{"processed":true}`), nil
 }
 
@@ -850,7 +852,8 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
 	wfName := "test-parallel-pool-wf-" + uuid.NewString()[:8]
@@ -901,7 +904,6 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	}()
 
 	// 4. Trigger workflow execution
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	execLogic := execution.NewExecutionLogic(execRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{"batch_id":"batch-123"}`),
@@ -951,7 +953,8 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// Workflow: Step A -> (Step B & Step C in parallel) -> Step D
 	// All steps have compensation defined.
@@ -1014,7 +1017,6 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	execLogic := execution.NewExecutionLogic(execRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
@@ -1129,7 +1131,8 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	// Step A -> (Step B & Step C in parallel)
 	stepAID := "step-a-" + uuid.NewString()[:8]
@@ -1179,7 +1182,6 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	execLogic := execution.NewExecutionLogic(execRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
@@ -1198,7 +1200,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	}
 
 	// Identify which is the slow step (to keep running) and which is to fail
-	var slowExec, failExec *step.StepExecution
+	var slowExec, failExec *execution.StepExecution
 	var slowWorker, failWorker string
 	if exec1.StepID == stepCID {
 		failExec = exec1
@@ -1272,7 +1274,8 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	wfID := uuid.NewString()
 	step1ID := "step-auth"
@@ -1319,7 +1322,6 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
@@ -1424,7 +1426,8 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
-	workerLogic := worker.NewWorkerLogic(stepRepo)
+	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo)
 
 	wfID := uuid.NewString()
 	step1ID := "step-charge"
@@ -1472,7 +1475,6 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/util"
@@ -130,7 +131,7 @@ func (p *WorkerPool) ProcessOne(ctx context.Context, workerID string) (bool, err
 	return true, nil
 }
 
-func (p *WorkerPool) executeTask(ctx context.Context, workerID string, s *step.Step, exec *step.StepExecution) {
+func (p *WorkerPool) executeTask(ctx context.Context, workerID string, s *step.Step, exec *execution.StepExecution) {
 	defer func() {
 		if r := recover(); r != nil {
 			cleanupCtx := ctx

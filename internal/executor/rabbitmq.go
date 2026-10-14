@@ -8,6 +8,7 @@ import (
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -31,7 +32,7 @@ func NewRabbitMQExecutor(publisher AMQPPublisher) StepExecutor {
 }
 
 // Execute publishes the message specified in the step configuration to RabbitMQ
-func (e *rabbitMQExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+func (e *rabbitMQExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 	if e.publisher == nil {
 		return nil, ErrNilRabbitMQPublisher
 	}

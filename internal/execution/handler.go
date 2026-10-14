@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
@@ -81,7 +80,7 @@ func (h *ExecutionHandler) ListExecutions(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if execs == nil {
-		execs = []step.WorkflowExecution{}
+		execs = []WorkflowExecution{}
 	}
 	util.WriteJSON(w, http.StatusOK, execs)
 }

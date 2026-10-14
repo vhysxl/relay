@@ -48,8 +48,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         fetch('/executions').catch(() => null),
       ])
 
+      let data: Workflow | null = null
       if (wfRes && wfRes.ok) {
-        const data = await wfRes.json()
+        data = await wfRes.json()
         setWorkflow(data)
       } else {
         throw new Error(`Workflow "${workflowId}" not found`)
@@ -57,7 +58,16 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
       if (execRes && execRes.ok) {
         const execs: Execution[] = await execRes.json().catch(() => [])
-        setRecentExecutions(Array.isArray(execs) ? execs.filter((e) => e.workflow_id === workflowId || e.workflow_name === workflowId || (data && e.workflow_id === data.id)) : [])
+        setRecentExecutions(
+          Array.isArray(execs)
+            ? execs.filter(
+                (e) =>
+                  e.workflow_id === workflowId ||
+                  e.workflow_name === workflowId ||
+                  (data && (e.workflow_id === data.id || e.workflow_name === data.name))
+              )
+            : []
+        )
       } else {
         setRecentExecutions([])
       }

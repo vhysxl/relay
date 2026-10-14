@@ -9,55 +9,62 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
-type mockStepRepository struct {
-	claimFunc     func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error)
+type mockExecutionRepository struct {
+	claimFunc     func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error)
 	heartbeatFunc func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
 	completeFunc  func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
 	failFunc      func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
 
-func (m *mockStepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflowID string, steps []step.Step) error {
-	return nil
-}
-
-func (m *mockStepRepository) GetStepsByWorkflowID(ctx context.Context, workflowID string) ([]step.Step, error) {
+func (m *mockExecutionRepository) ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error) {
 	return nil, nil
 }
 
-func (m *mockStepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs []string) (map[string][]step.Step, error) {
-	return make(map[string][]step.Step), nil
-}
-
-func (m *mockStepRepository) GetStepByID(ctx context.Context, workflowID string, stepID string) (*step.Step, error) {
+func (m *mockExecutionRepository) ListExecutions(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 	return nil, nil
 }
 
-func (m *mockStepRepository) ClaimNext(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+func (m *mockExecutionRepository) GetExecution(ctx context.Context, executionID string) (*execution.WorkflowExecution, error) {
+	return nil, nil
+}
+
+func (m *mockExecutionRepository) ClaimPending(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 	if m.claimFunc != nil {
 		return m.claimFunc(ctx, workerID, lockDuration)
 	}
 	return nil, nil, nil
 }
 
-func (m *mockStepRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
+func (m *mockExecutionRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockExecutionRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error {
+	return nil
+}
+
+func (m *mockExecutionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
 	if m.heartbeatFunc != nil {
 		return m.heartbeatFunc(ctx, stepExecutionID, workerID, lockDuration)
 	}
 	return nil
 }
 
-func (m *mockStepRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+func (m *mockExecutionRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
 	if m.completeFunc != nil {
 		return m.completeFunc(ctx, stepExecutionID, workerID, output)
 	}
 	return nil
 }
 
-func (m *mockStepRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+func (m *mockExecutionRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
 	if m.failFunc != nil {
 		return m.failFunc(ctx, stepExecutionID, workerID, errMsg)
 	}
@@ -65,7 +72,7 @@ func (m *mockStepRepository) FailStep(ctx context.Context, stepExecutionID strin
 }
 
 func TestWorkerLogic_ClaimNext_EmptyWorkerID(t *testing.T) {
-	logic := NewWorkerLogic(&mockStepRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{})
 
 	_, _, err := logic.ClaimNext(context.Background(), "")
 	if err != ErrEmptyWorkerID {
@@ -92,20 +99,20 @@ func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
 		ID:   "step-1",
 		Type: step.StepTypeHTTP,
 	}
-	expectedExec := &step.StepExecution{
+	expectedExec := &execution.StepExecution{
 		ID:      "exec-999",
 		StepID:  "step-1",
-		Status:  step.StatusRunning,
+		Status:  execution.StatusRunning,
 		Attempt: 1,
 	}
 
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			if workerID != "worker-1" {
 				t.Errorf("expected workerID 'worker-1', got %s", workerID)
 			}
-			if lockDuration != step.DefaultLockDuration {
-				t.Errorf("expected lockDuration %v, got %v", step.DefaultLockDuration, lockDuration)
+			if lockDuration != config.DefaultLeaseDuration {
+				t.Errorf("expected lockDuration %v, got %v", config.DefaultLeaseDuration, lockDuration)
 			}
 			return expectedStep, expectedExec, nil
 		},
@@ -119,14 +126,14 @@ func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
 	if s == nil || s.ID != "step-1" {
 		t.Errorf("expected step-1, got %+v", s)
 	}
-	if se == nil || se.ID != "exec-999" || se.Status != step.StatusRunning {
+	if se == nil || se.ID != "exec-999" || se.Status != execution.StatusRunning {
 		t.Errorf("expected exec-999 in RUNNING state, got %+v", se)
 	}
 }
 
 func TestWorkerLogic_ClaimNext_NoTaskAvailable(t *testing.T) {
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return nil, nil, nil
 		},
 	}
@@ -142,7 +149,7 @@ func TestWorkerLogic_ClaimNext_NoTaskAvailable(t *testing.T) {
 }
 
 func TestWorkerLogic_Heartbeat_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockStepRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{})
 
 	// Empty stepExecutionID
 	err := logic.Heartbeat(context.Background(), "", "worker-1")
@@ -174,7 +181,7 @@ func TestWorkerLogic_Heartbeat_Validation(t *testing.T) {
 
 func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
 	called := false
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
 			called = true
 			if stepExecutionID != "exec-123" {
@@ -183,8 +190,8 @@ func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
 			if workerID != "worker-1" {
 				t.Errorf("expected worker-1, got %s", workerID)
 			}
-			if lockDuration != step.DefaultLockDuration {
-				t.Errorf("expected lockDuration %v, got %v", step.DefaultLockDuration, lockDuration)
+			if lockDuration != config.DefaultLeaseDuration {
+				t.Errorf("expected lockDuration %v, got %v", config.DefaultLeaseDuration, lockDuration)
 			}
 			return nil
 		},
@@ -201,22 +208,22 @@ func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
 }
 
 func TestWorkerLogic_Heartbeat_LockLost(t *testing.T) {
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
-			return step.ErrLockLost
+			return errdefs.ErrLockLost
 		},
 	}
 
 	logic := NewWorkerLogic(repo)
 	err := logic.Heartbeat(context.Background(), "exec-123", "worker-1")
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
 	}
 }
 
 func TestWorkerLogic_StartHeartbeat_TicksAndStops(t *testing.T) {
 	var count int32
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
 			atomic.AddInt32(&count, 1)
 			return nil
@@ -254,9 +261,9 @@ func TestWorkerLogic_StartHeartbeat_TicksAndStops(t *testing.T) {
 }
 
 func TestWorkerLogic_StartHeartbeat_StopsOnError(t *testing.T) {
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
-			return step.ErrLockLost
+			return errdefs.ErrLockLost
 		},
 	}
 
@@ -266,8 +273,8 @@ func TestWorkerLogic_StartHeartbeat_StopsOnError(t *testing.T) {
 
 	select {
 	case err := <-errChan:
-		if !errors.Is(err, step.ErrLockLost) {
-			t.Fatalf("expected step.ErrLockLost, got %v", err)
+		if !errors.Is(err, errdefs.ErrLockLost) {
+			t.Fatalf("expected errdefs.ErrLockLost, got %v", err)
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatalf("timed out waiting for error on errChan")
@@ -275,7 +282,7 @@ func TestWorkerLogic_StartHeartbeat_StopsOnError(t *testing.T) {
 }
 
 func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
 			return nil
 		},
@@ -293,7 +300,7 @@ func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
 }
 
 func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockStepRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{})
 
 	// Empty stepExecutionID
 	err := logic.CompleteStep(context.Background(), "", "worker-1", json.RawMessage("{}"))
@@ -331,7 +338,7 @@ func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
 
 func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
 	called := false
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
 			called = true
 			if stepExecutionID != "exec-123" {
@@ -358,21 +365,21 @@ func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
 }
 
 func TestWorkerLogic_CompleteStep_LockLost(t *testing.T) {
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-			return step.ErrLockLost
+			return errdefs.ErrLockLost
 		},
 	}
 
 	logic := NewWorkerLogic(repo)
 	err := logic.CompleteStep(context.Background(), "exec-123", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
 	}
 }
 
 func TestWorkerLogic_FailStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockStepRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{})
 
 	// Empty stepExecutionID
 	err := logic.FailStep(context.Background(), "", "worker-1", "some error")
@@ -404,7 +411,7 @@ func TestWorkerLogic_FailStep_Validation(t *testing.T) {
 
 func TestWorkerLogic_FailStep_Success(t *testing.T) {
 	called := false
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
 			called = true
 			if stepExecutionID != "exec-123" {
@@ -440,24 +447,24 @@ func TestWorkerLogic_FailStep_Success(t *testing.T) {
 }
 
 func TestWorkerLogic_FailStep_LockLost(t *testing.T) {
-	repo := &mockStepRepository{
+	repo := &mockExecutionRepository{
 		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			return step.ErrLockLost
+			return errdefs.ErrLockLost
 		},
 	}
 
 	logic := NewWorkerLogic(repo)
 	err := logic.FailStep(context.Background(), "exec-123", "worker-1", "error")
-	if !errors.Is(err, step.ErrLockLost) {
+	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
 	}
 }
 
 type mockExecutor struct {
-	executeFn func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error)
+	executeFn func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error)
 }
 
-func (m *mockExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+func (m *mockExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 	if m.executeFn != nil {
 		return m.executeFn(ctx, s, exec)
 	}
@@ -466,12 +473,12 @@ func (m *mockExecutor) Execute(ctx context.Context, s *step.Step, exec *step.Ste
 
 func TestWorkerPool_ProcessOne_Success(t *testing.T) {
 	completed := false
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return &step.Step{
 					ID:   "step-1",
 					Type: step.StepTypeHTTP,
-				}, &step.StepExecution{
+				}, &execution.StepExecution{
 					ID:     "exec-1",
 					StepID: "step-1",
 					Type:   string(step.StepTypeHTTP),
@@ -494,7 +501,7 @@ func TestWorkerPool_ProcessOne_Success(t *testing.T) {
 
 	reg := executor.NewRegistry()
 	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 			return json.RawMessage(`{"result":"success"}`), nil
 		},
 	})
@@ -516,12 +523,12 @@ func TestWorkerPool_ProcessOne_Success(t *testing.T) {
 
 func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
 	failed := false
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return &step.Step{
 					ID:   "step-1",
 					Type: step.StepTypeHTTP,
-				}, &step.StepExecution{
+				}, &execution.StepExecution{
 					ID:   "exec-1",
 					Type: string(step.StepTypeHTTP),
 				}, nil
@@ -537,7 +544,7 @@ func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
 
 	reg := executor.NewRegistry()
 	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 			return nil, errors.New("network error: connection refused")
 		},
 	})
@@ -555,12 +562,12 @@ func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
 func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
 	failed := false
 	var capturedErr string
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return &step.Step{
 					ID:   "step-panic",
 					Type: step.StepTypeHTTP,
-				}, &step.StepExecution{
+				}, &execution.StepExecution{
 					ID:   "exec-panic",
 					Type: string(step.StepTypeHTTP),
 				}, nil
@@ -574,7 +581,7 @@ func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
 
 	reg := executor.NewRegistry()
 	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 			panic("unexpected nil pointer in plugin")
 		},
 	})
@@ -594,12 +601,12 @@ func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
 
 func TestWorkerPool_ProcessOne_UnsupportedType(t *testing.T) {
 	failed := false
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return &step.Step{
 					ID:   "step-kafka",
 					Type: step.StepType("kafka"),
-				}, &step.StepExecution{
+				}, &execution.StepExecution{
 					ID:   "exec-kafka",
 					Type: "kafka",
 				}, nil
@@ -630,8 +637,8 @@ func TestWorkerPool_Start_Fixed3Concurrency(t *testing.T) {
 		worker3Called int32
 	)
 
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			switch workerID {
 			case "test-fixed-1":
 				atomic.AddInt32(&worker1Called, 1)
@@ -673,8 +680,8 @@ func TestWorkerPool_Start_Fixed3Concurrency(t *testing.T) {
 }
 
 func TestWorkerPool_Start_GracefulShutdown(t *testing.T) {
-	repo := &mockStepRepository{
-		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *step.StepExecution, error) {
+	repo := &mockExecutionRepository{
+		claimFunc: func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 			return nil, nil, nil
 		},
 	}

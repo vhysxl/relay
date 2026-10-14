@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -60,7 +61,7 @@ func TestRabbitMQExecutor_Success(t *testing.T) {
 	}`)
 
 	s := &step.Step{ID: "step-rmq", Type: step.StepTypeMessage}
-	se := &step.StepExecution{ID: "exec-rmq", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-rmq", Config: configJSON}
 
 	output, err := exec.Execute(context.Background(), s, se)
 	if err != nil {
@@ -82,7 +83,7 @@ func TestRabbitMQExecutor_Success(t *testing.T) {
 func TestRabbitMQExecutor_NilPublisher(t *testing.T) {
 	exec := NewRabbitMQExecutor(nil)
 	s := &step.Step{ID: "step-nil", Type: step.StepTypeMessage}
-	se := &step.StepExecution{ID: "exec-nil", Config: []byte(`{"payload":{}}`)}
+	se := &execution.StepExecution{ID: "exec-nil", Config: []byte(`{"payload":{}}`)}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if !errors.Is(err, ErrNilRabbitMQPublisher) {
@@ -100,7 +101,7 @@ func TestRabbitMQExecutor_MissingPayload(t *testing.T) {
 	}`)
 
 	s := &step.Step{ID: "step-nopayload", Type: step.StepTypeMessage}
-	se := &step.StepExecution{ID: "exec-nopayload", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-nopayload", Config: configJSON}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if !errors.Is(err, ErrEmptyRabbitMQPayload) {
@@ -124,7 +125,7 @@ func TestRabbitMQExecutor_PublishError(t *testing.T) {
 	}`)
 
 	s := &step.Step{ID: "step-fail", Type: step.StepTypeMessage}
-	se := &step.StepExecution{ID: "exec-fail", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-fail", Config: configJSON}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if err == nil {
@@ -140,7 +141,7 @@ func TestRabbitMQExecutor_InvalidConfig(t *testing.T) {
 	exec := NewRabbitMQExecutor(mock)
 
 	s := &step.Step{ID: "step-inv", Type: step.StepTypeMessage}
-	se := &step.StepExecution{ID: "exec-inv", Config: []byte(`{invalid-json`)}
+	se := &execution.StepExecution{ID: "exec-inv", Config: []byte(`{invalid-json`)}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if !errors.Is(err, ErrInvalidStepConfig) {

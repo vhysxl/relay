@@ -3,6 +3,7 @@ package execution_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,35 +16,59 @@ import (
 )
 
 type mockRepository struct {
-	executeFn        func(ctx context.Context, name string, initialContext json.RawMessage) (*step.WorkflowExecution, error)
-	listExecutionsFn func(ctx context.Context, limit, offset int) ([]step.WorkflowExecution, error)
-	getExecutionFn   func(ctx context.Context, executionID string) (*step.WorkflowExecution, error)
+	executeFn        func(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error)
+	listExecutionsFn func(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error)
+	getExecutionFn   func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error)
 }
 
-func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
+func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error) {
 	if m.executeFn != nil {
 		return m.executeFn(ctx, name, initialContext)
 	}
-	return &step.WorkflowExecution{
+	return &execution.WorkflowExecution{
 		ID:         "exec-123",
 		WorkflowID: name,
-		Status:     step.StatusRunning,
+		Status:     execution.StatusRunning,
 		Context:    initialContext,
 	}, nil
 }
 
-func (m *mockRepository) ListExecutions(ctx context.Context, limit, offset int) ([]step.WorkflowExecution, error) {
+func (m *mockRepository) ListExecutions(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 	if m.listExecutionsFn != nil {
 		return m.listExecutionsFn(ctx, limit, offset)
 	}
-	return []step.WorkflowExecution{}, nil
+	return []execution.WorkflowExecution{}, nil
 }
 
-func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (*execution.WorkflowExecution, error) {
 	if m.getExecutionFn != nil {
 		return m.getExecutionFn(ctx, executionID)
 	}
 	return nil, errdefs.ErrExecutionNotFound
+}
+
+func (m *mockRepository) ClaimPending(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
+	return nil, nil, nil
+}
+
+func (m *mockRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error {
+	return nil
+}
+
+func (m *mockRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
+	return nil
+}
+
+func (m *mockRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
+	return nil
+}
+
+func (m *mockRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
+	return nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
@@ -59,20 +84,24 @@ func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 	// Whitespace name
 	_, err = logic.ExecuteWorkflow(context.Background(), "   ", nil)
 	if err != errdefs.ErrInvalidWorkflowName {
-		t.Fatalf("expected errdefs.ErrInvalidWorkflowName for whitespace, got %v", err)
+		t.Fatalf("expected errdefs.ErrInvalidWorkflowName, got %v", err)
 	}
 
-	// Invalid context JSON
-	_, err = logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
+	// Invalid JSON context
+	_, err = logic.ExecuteWorkflow(context.Background(), "wf-1", &execution.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{invalid-json`),
 	})
 	if err != errdefs.ErrInvalidWorkflowContext {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
 	}
+}
 
-	// Valid execution
+func TestExecutionLogic_ExecuteWorkflow_Success(t *testing.T) {
+	repo := &mockRepository{}
+	logic := execution.NewExecutionLogic(repo)
+
 	exec, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{"key":"value"}`),
+		Context: json.RawMessage(`{"user_id":100}`),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -83,18 +112,18 @@ func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 }
 
 func TestExecutionLogic_ListExecutions(t *testing.T) {
-	expectedSteps := []step.StepExecution{
-		{ID: "se-1", StepID: "s-1", Status: step.StatusCompleted},
-		{ID: "se-2", StepID: "s-2", Status: step.StatusRunning},
+	expectedSteps := []execution.StepExecution{
+		{ID: "se-1", StepID: "s-1", Status: execution.StatusCompleted},
+		{ID: "se-2", StepID: "s-2", Status: execution.StatusRunning},
 	}
 	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listExecutionsFn: func(ctx context.Context, limit, offset int) ([]step.WorkflowExecution, error) {
+		listExecutionsFn: func(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 			capturedLimit = limit
 			capturedOffset = offset
-			return []step.WorkflowExecution{
-				{ID: "exec-1", WorkflowID: "wf-1", Status: step.StatusRunning, Steps: expectedSteps},
-				{ID: "exec-2", WorkflowID: "wf-2", Status: step.StatusCompleted, Steps: []step.StepExecution{}},
+			return []execution.WorkflowExecution{
+				{ID: "exec-1", WorkflowID: "wf-1", Status: execution.StatusRunning, Steps: expectedSteps},
+				{ID: "exec-2", WorkflowID: "wf-2", Status: execution.StatusCompleted, Steps: []execution.StepExecution{}},
 			}, nil
 		},
 	}
@@ -127,9 +156,9 @@ func TestExecutionLogic_ListExecutions(t *testing.T) {
 
 func TestExecutionLogic_GetExecution(t *testing.T) {
 	repo := &mockRepository{
-		getExecutionFn: func(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+		getExecutionFn: func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error) {
 			if executionID == "exec-ok" {
-				return &step.WorkflowExecution{ID: "exec-ok", WorkflowID: "wf-1", Status: step.StatusRunning}, nil
+				return &execution.WorkflowExecution{ID: "exec-ok", WorkflowID: "wf-1", Status: execution.StatusRunning}, nil
 			}
 			return nil, errdefs.ErrExecutionNotFound
 		},
@@ -160,18 +189,18 @@ func TestExecutionLogic_GetExecution(t *testing.T) {
 
 func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	repo := &mockRepository{
-		executeFn: func(ctx context.Context, name string, initialContext json.RawMessage) (*step.WorkflowExecution, error) {
+		executeFn: func(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error) {
 			if name == "unknown-wf" {
 				return nil, errdefs.ErrWorkflowNotFound
 			}
-			return &step.WorkflowExecution{
+			return &execution.WorkflowExecution{
 				ID:         "exec-999",
 				WorkflowID: name,
-				Status:     step.StatusRunning,
+				Status:     execution.StatusRunning,
 				Context:    initialContext,
 				CreatedAt:  time.Now().UTC(),
-				Steps: []step.StepExecution{
-					{ID: "se-1", StepID: "step-1", Status: step.StatusPending},
+				Steps: []execution.StepExecution{
+					{ID: "se-1", StepID: "step-1", Status: execution.StatusPending},
 				},
 			}, nil
 		},
@@ -245,11 +274,11 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 func TestExecutionHandler_ListExecutions(t *testing.T) {
 	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listExecutionsFn: func(ctx context.Context, limit, offset int) ([]step.WorkflowExecution, error) {
+		listExecutionsFn: func(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 			capturedLimit = limit
 			capturedOffset = offset
-			return []step.WorkflowExecution{
-				{ID: "exec-1", WorkflowID: "wf-1", Status: step.StatusRunning},
+			return []execution.WorkflowExecution{
+				{ID: "exec-1", WorkflowID: "wf-1", Status: execution.StatusRunning},
 			}, nil
 		},
 	}
@@ -268,7 +297,7 @@ func TestExecutionHandler_ListExecutions(t *testing.T) {
 		t.Errorf("expected limit=25, offset=50; got limit=%d, offset=%d", capturedLimit, capturedOffset)
 	}
 
-	var execs []step.WorkflowExecution
+	var execs []execution.WorkflowExecution
 	if err := json.NewDecoder(rec.Body).Decode(&execs); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -279,9 +308,9 @@ func TestExecutionHandler_ListExecutions(t *testing.T) {
 
 func TestExecutionHandler_GetExecution(t *testing.T) {
 	repo := &mockRepository{
-		getExecutionFn: func(ctx context.Context, executionID string) (*step.WorkflowExecution, error) {
+		getExecutionFn: func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error) {
 			if executionID == "exec-found" {
-				return &step.WorkflowExecution{ID: "exec-found", WorkflowID: "wf-1", Status: step.StatusCompleted}, nil
+				return &execution.WorkflowExecution{ID: "exec-found", WorkflowID: "wf-1", Status: execution.StatusCompleted}, nil
 			}
 			return nil, errdefs.ErrExecutionNotFound
 		},

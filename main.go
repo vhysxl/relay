@@ -13,7 +13,9 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/bootstrap/server"
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
+	"github.com/vhysxl/relay/internal/reaper"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/worker"
 )
@@ -59,7 +61,8 @@ func main() {
 	// 2. Setup Worker Pool (only if database is connected)
 	if conf.DB != nil {
 		stepRepo := step.NewStepRepository(conf.DB)
-		workerLogic := worker.NewWorkerLogic(stepRepo)
+		execRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
+		workerLogic := worker.NewWorkerLogic(execRepo)
 
 		workerCount := worker.DefaultWorkerCount
 		if countStr := os.Getenv("WORKER_COUNT"); countStr != "" {
@@ -75,12 +78,18 @@ func main() {
 			worker.WithWorkerCount(workerCount),
 		)
 
-		// 3. Start Worker Pool in background goroutine
+		// 3. Start Worker Pool and Reaper in background goroutines
 		go func() {
 			log.Printf("Worker pool started with %d workers\n", workerCount)
 			if err := pool.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("Worker pool exited with error: %v\n", err)
 			}
+		}()
+
+		stepReaper := reaper.New(execRepo, conf.ReaperInterval)
+		go func() {
+			log.Println("Step reaper started")
+			stepReaper.Start(ctx)
 		}()
 	} else {
 		log.Println("Note: Database not connected. Worker pool paused (frontend dev mode active)")

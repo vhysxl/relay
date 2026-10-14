@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -35,7 +36,7 @@ func TestHTTPExecutor_Success_GET(t *testing.T) {
 	}`)
 
 	s := &step.Step{ID: "step-1", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-1", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-1", Config: configJSON}
 
 	output, err := exec.Execute(context.Background(), s, se)
 	if err != nil {
@@ -80,7 +81,7 @@ func TestHTTPExecutor_Success_POST_JSON(t *testing.T) {
 	}`)
 
 	s := &step.Step{ID: "step-2", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-2", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-2", Config: configJSON}
 
 	output, err := exec.Execute(context.Background(), s, se)
 	if err != nil {
@@ -107,7 +108,7 @@ func TestHTTPExecutor_Success_PlainText(t *testing.T) {
 	configJSON := []byte(`{"url": "` + ts.URL + `"}`)
 
 	s := &step.Step{ID: "step-text", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-text", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-text", Config: configJSON}
 
 	output, err := exec.Execute(context.Background(), s, se)
 	if err != nil {
@@ -134,7 +135,7 @@ func TestHTTPExecutor_HTTP4xxAnd5xx(t *testing.T) {
 	configJSON := []byte(`{"url": "` + ts.URL + `"}`)
 
 	s := &step.Step{ID: "step-err", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-err", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-err", Config: configJSON}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if err == nil {
@@ -150,7 +151,7 @@ func TestHTTPExecutor_EmptyURL(t *testing.T) {
 	configJSON := []byte(`{"method":"GET","url":""}`)
 
 	s := &step.Step{ID: "step-empty", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-empty", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-empty", Config: configJSON}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if !errors.Is(err, ErrEmptyHTTPURL) {
@@ -161,7 +162,7 @@ func TestHTTPExecutor_EmptyURL(t *testing.T) {
 func TestHTTPExecutor_InvalidConfig(t *testing.T) {
 	exec := NewHTTPExecutor(nil)
 	s := &step.Step{ID: "step-inv", Type: step.StepTypeHTTP}
-	se := &step.StepExecution{ID: "exec-inv", Config: []byte(`invalid-json`)}
+	se := &execution.StepExecution{ID: "exec-inv", Config: []byte(`invalid-json`)}
 
 	_, err := exec.Execute(context.Background(), s, se)
 	if !errors.Is(err, ErrInvalidStepConfig) {
@@ -184,7 +185,7 @@ func TestHTTPExecutor_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	se := &step.StepExecution{ID: "exec-to", Config: configJSON}
+	se := &execution.StepExecution{ID: "exec-to", Config: configJSON}
 
 	_, err := exec.Execute(ctx, s, se)
 	if err == nil {

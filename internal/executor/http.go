@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 )
 
@@ -38,7 +39,7 @@ func NewHTTPExecutor(client HTTPClient) StepExecutor {
 }
 
 // Execute performs the HTTP request specified in the step configuration
-func (e *httpExecutor) Execute(ctx context.Context, s *step.Step, exec *step.StepExecution) (json.RawMessage, error) {
+func (e *httpExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
 	// extract config from execution ticket, fallback to step definition
 	configRaw := exec.Config
 	if len(configRaw) == 0 && s != nil {
