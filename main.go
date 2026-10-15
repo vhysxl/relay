@@ -96,7 +96,7 @@ func main() {
 	}
 
 	// 4. Start HTTP Server (blocks until shutdown or error)
-	if err := server.Listen(ctx, conf.Port, conf.DB); err != nil {
+	if err := server.Listen(ctx, conf); err != nil {
 		log.Fatal(err)
 	}
 }

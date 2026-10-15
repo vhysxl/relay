@@ -3,6 +3,7 @@ package config
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ type Config struct {
 	DefaultLeaseDuration time.Duration
 	ReaperInterval       time.Duration
 	DefaultTimeout       time.Duration
+	MaxPayloadSize       int
 }
 
 func Init() (*Config, error) {
@@ -45,21 +47,27 @@ func Init() (*Config, error) {
 	}
 
 	// Lease
-	lease, err := getIntEnv("DEFAULT_LEASE_DURATION", 30)
-	if err != nil {
-		return nil, err
+	lease := getIntEnv("DEFAULT_LEASE_DURATION", 30)
+	if lease <= 0 {
+		lease = 30
 	}
 
 	// Reaper Interval
-	reaperInterval, err := getIntEnv("REAPER_INTERVAL", 5)
-	if err != nil {
-		return nil, err
+	reaperInterval := getIntEnv("REAPER_INTERVAL", 5)
+	if reaperInterval <= 0 {
+		reaperInterval = 5
 	}
 
 	// Timeout
-	defaultTimeout, err := getIntEnv("DEFAULT_TIMEOUT", 15)
-	if err != nil {
-		return nil, err
+	defaultTimeout := getIntEnv("DEFAULT_TIMEOUT", 15)
+	if defaultTimeout <= 0 {
+		defaultTimeout = 15
+	}
+
+	// Max payload size (MB)
+	maxPayloadSize := getIntEnv("MAX_PAYLOAD_SIZE", 5)
+	if maxPayloadSize <= 0 {
+		maxPayloadSize = 5
 	}
 
 	return &Config{
@@ -68,6 +76,7 @@ func Init() (*Config, error) {
 		DefaultLeaseDuration: time.Duration(lease) * time.Second,
 		ReaperInterval:       time.Duration(reaperInterval) * time.Second,
 		DefaultTimeout:       time.Duration(defaultTimeout) * time.Second,
+		MaxPayloadSize:       maxPayloadSize,
 	}, nil
 }
 
@@ -93,17 +102,18 @@ func getEnv(key, fallback string) string {
 	return value
 }
 
-func getIntEnv(key string, fallback int) (int, error) {
+func getIntEnv(key string, fallback int) int {
 	value := os.Getenv(key)
 	if value == "" {
-		return fallback, nil
+		return fallback
 	}
 
 	trimmed := strings.TrimSuffix(strings.TrimSpace(value), "s")
 	integerVal, err := strconv.Atoi(trimmed)
 	if err != nil {
-		return fallback, nil
+		log.Printf("Warning: Error parsing %s: %v, using default %d\n", key, err, fallback)
+		return fallback
 	}
 
-	return integerVal, nil
+	return integerVal
 }

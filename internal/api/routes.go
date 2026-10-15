@@ -1,9 +1,9 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/system"
@@ -13,15 +13,15 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-func RegisterRoutes(mux *http.ServeMux, db *sql.DB) {
-	stepRepo := step.NewStepRepository(db)
+func RegisterRoutes(mux *http.ServeMux, conf *config.Config) {
+	stepRepo := step.NewStepRepository(conf.DB)
 	v := validator.NewValidator()
 
-	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
+	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, v)
-	workflowHandler := workflow.NewWorkflowHandler(workflowLogic)
+	workflowHandler := workflow.NewWorkflowHandler(workflowLogic, conf)
 
-	executionRepo := execution.NewExecutionRepository(db, stepRepo)
+	executionRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
 	executionLogic := execution.NewExecutionLogic(executionRepo)
 	executionHandler := execution.NewExecutionHandler(executionLogic)
 

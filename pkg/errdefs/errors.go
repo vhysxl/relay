@@ -12,6 +12,7 @@ var (
 	ErrInvalidWorkflowContext = errors.New("workflow context must be a valid JSON object")
 	ErrWorkflowNotFound       = errors.New("workflow not found")
 	ErrWorkflowAlreadyExists  = errors.New("workflow with this name and version already exists")
+	ErrPayloadTooLarge        = errors.New("request payload exceeds maximum allowed size")
 
 	// Step definitions and DAG validation
 	ErrEmptyStepType               = errors.New("step type is required")

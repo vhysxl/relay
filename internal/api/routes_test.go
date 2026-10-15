@@ -5,11 +5,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/vhysxl/relay/bootstrap/config"
 )
 
 func TestRegisterRoutes_Dashboard(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil)
+	RegisterRoutes(mux, &config.Config{})
 
 	// Test GET /
 	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)

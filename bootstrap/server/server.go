@@ -2,28 +2,28 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/api"
 )
 
-func Listen(ctx context.Context, port string, db *sql.DB) error {
+func Listen(ctx context.Context, conf *config.Config) error {
 	mux := http.NewServeMux()
 
-	api.RegisterRoutes(mux, db)
+	api.RegisterRoutes(mux, conf)
 
 	srv := &http.Server{
-		Addr:    port,
+		Addr:    conf.Port,
 		Handler: mux,
 	}
 
 	serverErr := make(chan error, 1)
 	go func() {
-		fmt.Printf("Server is running and listening on port %s\n", port)
+		fmt.Printf("Server is running and listening on port %s\n", conf.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}

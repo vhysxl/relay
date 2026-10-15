@@ -7,8 +7,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -41,6 +43,8 @@ func (m *mockRepository) ListWorkflows(ctx context.Context, limit, offset int) (
 	}
 	return []workflow.Workflow{}, nil
 }
+
+var testConfig = &config.Config{MaxPayloadSize: 5}
 
 
 func TestWorkflowLogic_CreateWorkflow_Nil(t *testing.T) {
@@ -138,7 +142,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "order-saga",
@@ -179,7 +183,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "order-saga",
@@ -206,7 +210,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.T) {
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(&mockRepository{}, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
 		Name:    "irreversible-flow",
@@ -239,7 +243,7 @@ func TestWorkflowHandler_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// Test empty name
 	body, _ := json.Marshal(workflow.WorkflowRequest{
@@ -294,7 +298,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// Test found
 	req := httptest.NewRequest(http.MethodGet, "/workflows/test-uuid-1234", nil)
@@ -652,7 +656,7 @@ func TestWorkflowHandler_ListWorkflows(t *testing.T) {
 	}
 	v := validator.NewValidator()
 	logic := workflow.NewWorkflowLogic(repo, v)
-	handler := workflow.NewWorkflowHandler(logic)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// 1. With query params ?limit=25&offset=50
 	req := httptest.NewRequest(http.MethodGet, "/workflows?limit=25&offset=50", nil)
@@ -853,5 +857,61 @@ func TestWorkflowLogic_MaxRetriesConfig_EnvAndOptions(t *testing.T) {
 		t.Fatalf("expected ErrWorkflowAlreadyExists after exhausting retries, got: %v", err)
 	}
 }
+
+func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
+	repo := &mockRepository{
+		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
+			return wf, nil
+		},
+	}
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v)
+
+	// Injected config with 1MB payload limit
+	cfg := &config.Config{MaxPayloadSize: 1}
+	handler := workflow.NewWorkflowHandler(logic, cfg)
+
+	validReq := workflow.WorkflowRequest{
+		Name: "small-wf",
+		Steps: []step.Step{
+			{
+				ID:     "s1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://test.local"}`),
+			},
+		},
+	}
+	smallBody, _ := json.Marshal(validReq)
+
+	// 1. Within limit -> 201 Created
+	reqOK := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(smallBody))
+	recOK := httptest.NewRecorder()
+	handler.CreateWorkflow(recOK, reqOK)
+	if recOK.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for small payload, got %d: %s", recOK.Code, recOK.Body.String())
+	}
+
+	// 2. Exceeds limit -> 413 Payload Too Large
+	bigReq := workflow.WorkflowRequest{
+		Name:    "big-wf",
+		Context: json.RawMessage(`{"payload":"` + strings.Repeat("x", 1024*1024+100) + `"}`),
+		Steps: []step.Step{
+			{
+				ID:     "s1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://test.local"}`),
+			},
+		},
+	}
+	bigBody, _ := json.Marshal(bigReq)
+
+	reqTooLarge := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(bigBody))
+	recTooLarge := httptest.NewRecorder()
+	handler.CreateWorkflow(recTooLarge, reqTooLarge)
+	if recTooLarge.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 StatusRequestEntityTooLarge for oversized payload, got %d: %s", recTooLarge.Code, recTooLarge.Body.String())
+	}
+}
+
 
 
