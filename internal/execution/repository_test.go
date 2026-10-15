@@ -200,3 +200,110 @@ func TestRepository_WakeUpDependents_And_ClaimPending(t *testing.T) {
 		t.Errorf("expected status RUNNING, got %s", claimedExec.Status)
 	}
 }
+
+func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
+	db := getExecutionTestDB(t)
+	stepRepo := step.NewStepRepository(db)
+	repo := execution.NewExecutionRepository(db, stepRepo)
+	ctx := context.Background()
+
+	wfDefID := uuid.NewString()
+	wfExecID := uuid.NewString()
+	stepExec1 := uuid.NewString()
+	stepExec2 := uuid.NewString()
+
+	_, err := db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, context) VALUES (?, ?, 1, '{}')", wfDefID, "test-exhaust-"+wfDefID[:8])
+	if err != nil {
+		t.Fatalf("failed to insert workflow definition: %v", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(ctx, "DELETE FROM step_executions WHERE workflow_execution_id = ?", wfExecID)
+		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_executions WHERE id = ?", wfExecID)
+		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_definitions WHERE id = ?", wfDefID)
+	}()
+
+	_, err = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, context) VALUES (?, ?, 'RUNNING', '{}')", wfExecID, wfDefID)
+	if err != nil {
+		t.Fatalf("failed to insert workflow execution: %v", err)
+	}
+
+	expiredTime := time.Now().UTC().Add(-10 * time.Minute)
+	// Step 1: RUNNING, attempt = 1, max_attempts = 1, expired
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+			attempt, max_attempts, locked_by, locked_until, is_compensation, created_at, updated_at
+		) VALUES (
+			?, ?, 'step-1', 'Step 1', 'http', '{}', '[]', 'RUNNING',
+			1, 1, 'crashed-worker-1', ?, FALSE, NOW(), NOW()
+		)
+	`, stepExec1, wfExecID, expiredTime)
+	if err != nil {
+		t.Fatalf("failed to insert step 1: %v", err)
+	}
+
+	// Step 2: PENDING downstream step
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO step_executions (
+			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+			attempt, max_attempts, is_compensation, created_at, updated_at
+		) VALUES (
+			?, ?, 'step-2', 'Step 2', 'http', '{}', '["step-1"]', 'PENDING',
+			0, 1, FALSE, NOW(), NOW()
+		)
+	`, stepExec2, wfExecID)
+	if err != nil {
+		t.Fatalf("failed to insert step 2: %v", err)
+	}
+
+	// Execute ReapExpiredSteps
+	reaped, err := repo.ReapExpiredSteps(ctx)
+	if err != nil {
+		t.Fatalf("ReapExpiredSteps error: %v", err)
+	}
+	if reaped < 1 {
+		t.Errorf("expected at least 1 reaped step, got %d", reaped)
+	}
+
+	// Verify Step 1 is FAILED with error message and locks cleared
+	var (
+		status1      string
+		errMsg1      sql.NullString
+		lockedBy1    sql.NullString
+		lockedUntil1 sql.NullTime
+	)
+	err = db.QueryRowContext(ctx, "SELECT status, error_message, locked_by, locked_until FROM step_executions WHERE id = ?", stepExec1).Scan(&status1, &errMsg1, &lockedBy1, &lockedUntil1)
+	if err != nil {
+		t.Fatalf("failed to query step 1: %v", err)
+	}
+	if status1 != string(execution.StatusFailed) {
+		t.Errorf("expected step 1 to be FAILED, got %s", status1)
+	}
+	if !errMsg1.Valid || errMsg1.String != "lease expired: max attempts reached" {
+		t.Errorf("expected error message 'lease expired: max attempts reached', got %v", errMsg1)
+	}
+	if lockedBy1.Valid || lockedUntil1.Valid {
+		t.Errorf("expected locks to be cleared on step 1")
+	}
+
+	// Verify Step 2 is CANCELLED
+	var status2 string
+	err = db.QueryRowContext(ctx, "SELECT status FROM step_executions WHERE id = ?", stepExec2).Scan(&status2)
+	if err != nil {
+		t.Fatalf("failed to query step 2: %v", err)
+	}
+	if status2 != string(execution.StatusCancelled) {
+		t.Errorf("expected step 2 to be CANCELLED, got %s", status2)
+	}
+
+	// Verify workflow execution is FAILED
+	var wfStatus string
+	err = db.QueryRowContext(ctx, "SELECT status FROM workflow_executions WHERE id = ?", wfExecID).Scan(&wfStatus)
+	if err != nil {
+		t.Fatalf("failed to query workflow status: %v", err)
+	}
+	if wfStatus != string(execution.StatusFailed) {
+		t.Errorf("expected workflow status FAILED, got %s", wfStatus)
+	}
+}
+

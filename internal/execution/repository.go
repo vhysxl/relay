@@ -776,6 +776,21 @@ func (r *executionRepository) FailStep(ctx context.Context, stepExecutionID stri
 	}
 
 	// 3. Retries exhausted -> Permanently failed
+	if err := r.failStepPermanentlyTx(ctx, tx, stepExecutionID, workflowExecID, isCompensation, errMsg); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *executionRepository) failStepPermanentlyTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	stepExecutionID string,
+	workflowExecID string,
+	isCompensation bool,
+	errMsg string,
+) error {
 	if isCompensation {
 		failCompQuery := `
 			UPDATE step_executions
@@ -801,7 +816,7 @@ func (r *executionRepository) FailStep(ctx context.Context, stepExecutionID stri
 			return fmt.Errorf("failed to mark workflow as COMPENSATION_FAILED: %w", err)
 		}
 
-		return tx.Commit()
+		return nil
 	}
 
 	// Regular step permanently failed
@@ -892,7 +907,7 @@ func (r *executionRepository) FailStep(ctx context.Context, stepExecutionID stri
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // WakeUpDependentsTx checks all WAITING steps in workflowExecID (matching isCompensation),
@@ -1001,9 +1016,59 @@ func (r *executionRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
-// ReapExpiredSteps resets locks for running steps whose leases have expired and attempts remain.
+// ReapExpiredSteps resets locks for running steps whose leases have expired and attempts remain,
+// and fails steps (cascading cancellations / triggering saga compensation) whose attempts have exhausted max_attempts.
 func (r *executionRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
-	query := `
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return 0, fmt.Errorf("failed to begin transaction for reaping: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Find expired steps whose attempts have exhausted max_attempts
+	type exhaustedStep struct {
+		id             string
+		workflowExecID string
+		isCompensation bool
+	}
+
+	selectExhaustedQuery := `
+		SELECT id, workflow_execution_id, is_compensation
+		FROM step_executions
+		WHERE status = 'RUNNING'
+		  AND locked_until < NOW()
+		  AND attempt >= max_attempts
+		FOR UPDATE
+	`
+	rows, err := tx.QueryContext(ctx, selectExhaustedQuery)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query exhausted expired steps: %w", err)
+	}
+
+	var exhaustedSteps []exhaustedStep
+	for rows.Next() {
+		var s exhaustedStep
+		if err := rows.Scan(&s.id, &s.workflowExecID, &s.isCompensation); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("failed to scan exhausted expired step: %w", err)
+		}
+		exhaustedSteps = append(exhaustedSteps, s)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("error iterating exhausted expired steps: %w", err)
+	}
+	rows.Close()
+
+	// 2. Permanently fail exhausted steps and cascade cancellations / compensations
+	for _, s := range exhaustedSteps {
+		if err := r.failStepPermanentlyTx(ctx, tx, s.id, s.workflowExecID, s.isCompensation, "lease expired: max attempts reached"); err != nil {
+			return 0, fmt.Errorf("failed to permanently fail exhausted step %s: %w", s.id, err)
+		}
+	}
+
+	// 3. Reset expired steps that still have attempts remaining back to PENDING
+	resetQuery := `
 		UPDATE step_executions
 		SET status = 'PENDING',
 		    locked_by = NULL,
@@ -1013,11 +1078,20 @@ func (r *executionRepository) ReapExpiredSteps(ctx context.Context) (int64, erro
 		  AND locked_until < NOW()
 		  AND attempt < max_attempts
 	`
-	res, err := r.db.ExecContext(ctx, query)
+	res, err := tx.ExecContext(ctx, resetQuery)
 	if err != nil {
-		return 0, fmt.Errorf("failed to reap expired steps: %w", err)
+		return 0, fmt.Errorf("failed to reset retryable expired steps: %w", err)
 	}
-	return res.RowsAffected()
+	resetCount, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read affected rows from reap reset: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("failed to commit reap transaction: %w", err)
+	}
+
+	return int64(len(exhaustedSteps)) + resetCount, nil
 }
 
 // ClaimPending atomically selects, locks, and returns the next eligible PENDING step execution ticket.

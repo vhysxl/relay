@@ -25,7 +25,7 @@ type Step struct {
 	Retry        *RetryPolicy    `json:"retry,omitempty" db:"retry"`
 	Compensation *Compensation   `json:"compensation,omitempty" db:"compensation"`
 	Irreversible bool            `json:"irreversible,omitempty" db:"irreversible"`
-	CreatedAt    time.Time       `json:"created_at,omitempty" db:"created_at"`
+	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at" db:"updated_at"`
 }
 
@@ -64,4 +64,3 @@ type StepRepository interface {
 	GetStepsByWorkflowIDs(ctx context.Context, workflowIDs []string) (map[string][]Step, error)
 	GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error)
 }
-

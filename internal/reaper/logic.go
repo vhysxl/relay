@@ -3,6 +3,7 @@ package reaper
 import (
 	"context"
 	"log"
+	"runtime/debug"
 	"time"
 )
 
@@ -19,7 +20,7 @@ func New(repo Repository, interval time.Duration) Reaper {
 // NewReaper creates a new Reaper instance with explicit naming.
 func NewReaper(repo Repository, interval time.Duration) Reaper {
 	if interval <= 0 {
-		panic("reaper: interval must be positive and injected via DI / config")
+		panic("reaper: interval must be positive")
 	}
 	return &reaper{
 		repo:     repo,
@@ -37,12 +38,19 @@ func (r *reaper) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			count, err := r.ReapOnce(ctx)
-			if err != nil && ctx.Err() == nil {
-				log.Printf("[reaper] error reaping expired step locks: %v", err)
-			} else if count > 0 {
-				log.Printf("[reaper] successfully reaped %d expired step locks back to PENDING", count)
-			}
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("[reaper] panic recovered in reap loop: %v\n%s", rec, debug.Stack())
+					}
+				}()
+				count, err := r.ReapOnce(ctx)
+				if err != nil && ctx.Err() == nil {
+					log.Printf("[reaper] error reaping expired step locks: %v", err)
+				} else if count > 0 {
+					log.Printf("[reaper] successfully reaped %d expired step locks", count)
+				}
+			}()
 		}
 	}
 }

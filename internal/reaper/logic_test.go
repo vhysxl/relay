@@ -92,3 +92,41 @@ func TestReaper_StartGracefulShutdown(t *testing.T) {
 		t.Error("expected at least one reap call before shutdown")
 	}
 }
+
+type panicMockRepository struct {
+	calls int
+}
+
+func (m *panicMockRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
+	m.calls++
+	if m.calls == 1 {
+		panic("simulated transient database panic")
+	}
+	return 1, nil
+}
+
+func TestReaper_Start_RecoversFromPanic(t *testing.T) {
+	mockRepo := &panicMockRepository{}
+	r := reaper.New(mockRepo, 10*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		r.Start(ctx)
+		close(done)
+	}()
+
+	time.Sleep(35 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// success: reaper exited cleanly without dying on panic
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("reaper did not stop cleanly within timeout")
+	}
+
+	if mockRepo.calls < 2 {
+		t.Errorf("expected at least 2 reap calls (recovering from first panic), got %d", mockRepo.calls)
+	}
+}
