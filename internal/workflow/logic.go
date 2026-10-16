@@ -8,10 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
+
+type workflowLogic struct {
+	repo                 WorkflowRepository
+	validator            Validator
+	concurrentRetryLimit int
+}
 
 var (
 	// DefaultMaxRetries defines the fallback maximum retry attempts for concurrent workflow creation.
@@ -21,7 +28,7 @@ var (
 // GetMaxRetries returns the configured max retries from the WORKFLOW_MAX_RETRIES environment variable,
 // falling back to DefaultMaxRetries if unset or invalid.
 func GetMaxRetries() int {
-	if val := os.Getenv("WORKFLOW_MAX_RETRIES"); val != "" {
+	if val := strings.TrimSpace(os.Getenv("WORKFLOW_MAX_RETRIES")); val != "" {
 		if n, err := strconv.Atoi(val); err == nil && n > 0 {
 			return n
 		}
@@ -34,26 +41,33 @@ type WorkflowLogicOption func(*workflowLogic)
 func WithMaxRetries(maxRetries int) WorkflowLogicOption {
 	return func(l *workflowLogic) {
 		if maxRetries > 0 {
-			l.maxRetries = maxRetries
+			l.concurrentRetryLimit = maxRetries
 		}
 	}
 }
 
-type workflowLogic struct {
-	repo       WorkflowRepository
-	validator  Validator
-	maxRetries int
-}
-
-func NewWorkflowLogic(repo WorkflowRepository, v Validator, opts ...WorkflowLogicOption) WorkflowLogic {
+func NewWorkflowLogic(repo WorkflowRepository, v Validator, opts ...any) WorkflowLogic {
 	l := &workflowLogic{
-		repo:       repo,
-		validator:  v,
-		maxRetries: GetMaxRetries(),
+		repo:                 repo,
+		validator:            v,
+		concurrentRetryLimit: 3,
 	}
+
 	for _, opt := range opts {
-		opt(l)
+		switch o := opt.(type) {
+		case config.Config:
+			if o.ConcurrentRetryLimit > 0 {
+				l.concurrentRetryLimit = o.ConcurrentRetryLimit
+			}
+		case *config.Config:
+			if o != nil && o.ConcurrentRetryLimit > 0 {
+				l.concurrentRetryLimit = o.ConcurrentRetryLimit
+			}
+		case WorkflowLogicOption:
+			o(l)
+		}
 	}
+
 	return l
 }
 
@@ -62,10 +76,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		return nil, err
 	}
 
-	maxRetries := l.maxRetries
-	if maxRetries <= 0 {
-		maxRetries = GetMaxRetries()
-	}
+	maxRetries := l.concurrentRetryLimit
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {

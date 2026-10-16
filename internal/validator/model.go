@@ -12,4 +12,3 @@ type Validator interface {
 	ValidateSteps(steps []step.Step) error
 	IsWorkflowEqual(existingSteps []step.Step, existingContext json.RawMessage, req *workflow.WorkflowRequest) bool
 }
-

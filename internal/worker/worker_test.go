@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
@@ -85,15 +84,6 @@ func TestWorkerLogic_ClaimNext_EmptyWorkerID(t *testing.T) {
 	}
 }
 
-func TestWorkerLogic_ClaimNext_NilRepo(t *testing.T) {
-	logic := NewWorkerLogic(nil)
-
-	_, _, err := logic.ClaimNext(context.Background(), "worker-1")
-	if err == nil {
-		t.Fatalf("expected error when repo is nil, got nil")
-	}
-}
-
 func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
 	expectedStep := &step.Step{
 		ID:   "step-1",
@@ -111,8 +101,8 @@ func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
 			if workerID != "worker-1" {
 				t.Errorf("expected workerID 'worker-1', got %s", workerID)
 			}
-			if lockDuration != config.DefaultLeaseDuration {
-				t.Errorf("expected lockDuration %v, got %v", config.DefaultLeaseDuration, lockDuration)
+			if lockDuration != 30*time.Second {
+				t.Errorf("expected lockDuration %v, got %v", 30*time.Second, lockDuration)
 			}
 			return expectedStep, expectedExec, nil
 		},
@@ -170,13 +160,6 @@ func TestWorkerLogic_Heartbeat_Validation(t *testing.T) {
 	if !errors.Is(err, ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
 	}
-
-	// Nil repo
-	nilLogic := NewWorkerLogic(nil)
-	err = nilLogic.Heartbeat(context.Background(), "exec-1", "worker-1")
-	if err == nil {
-		t.Fatalf("expected error when repo is nil, got nil")
-	}
 }
 
 func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
@@ -190,8 +173,8 @@ func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
 			if workerID != "worker-1" {
 				t.Errorf("expected worker-1, got %s", workerID)
 			}
-			if lockDuration != config.DefaultLeaseDuration {
-				t.Errorf("expected lockDuration %v, got %v", config.DefaultLeaseDuration, lockDuration)
+			if lockDuration != 30*time.Second {
+				t.Errorf("expected lockDuration %v, got %v", 30*time.Second, lockDuration)
 			}
 			return nil
 		},
@@ -327,13 +310,6 @@ func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
 	if !errors.Is(err, ErrInvalidStepOutput) {
 		t.Fatalf("expected ErrInvalidStepOutput, got %v", err)
 	}
-
-	// Nil repository
-	nilLogic := NewWorkerLogic(nil)
-	err = nilLogic.CompleteStep(context.Background(), "exec-1", "worker-1", json.RawMessage("{}"))
-	if err == nil {
-		t.Fatalf("expected error for nil repository, got nil")
-	}
 }
 
 func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
@@ -399,13 +375,6 @@ func TestWorkerLogic_FailStep_Validation(t *testing.T) {
 	err = logic.FailStep(context.Background(), "exec-1", "   ", "some error")
 	if !errors.Is(err, ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
-	}
-
-	// Nil repository
-	nilLogic := NewWorkerLogic(nil)
-	err = nilLogic.FailStep(context.Background(), "exec-1", "worker-1", "some error")
-	if err == nil {
-		t.Fatalf("expected error for nil repository, got nil")
 	}
 }
 

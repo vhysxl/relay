@@ -1547,9 +1547,3 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}
 	t.Logf("✓ Rollback Payload Passing (Original Step Output Access) verified end-to-end!")
 }
-
-
-
-
-
-

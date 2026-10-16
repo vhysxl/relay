@@ -26,7 +26,7 @@ type workerLogic struct {
 
 // NewWorkerLogic creates a new WorkerLogic with required execution repository and optional injected config.
 func NewWorkerLogic(execRepo execution.ExecutionRepository, cfg ...*config.Config) WorkerLogic {
-	leaseDuration := config.DefaultLeaseDuration
+	leaseDuration := 30 * time.Second
 	if len(cfg) > 0 && cfg[0] != nil && cfg[0].DefaultLeaseDuration > 0 {
 		leaseDuration = cfg[0].DefaultLeaseDuration
 	}
@@ -44,16 +44,7 @@ func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Ste
 		return nil, nil, ErrEmptyWorkerID
 	}
 
-	// delegate claim to execution repository with configured lease
-	if l.execRepo == nil {
-		return nil, nil, errors.New("execution repository is not configured")
-	}
-
-	leaseDuration := l.lockDuration
-	if leaseDuration <= 0 {
-		leaseDuration = config.DefaultLeaseDuration
-	}
-	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, leaseDuration)
+	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, l.lockDuration)
 }
 
 // Heartbeat validates parameters and delegates lease extension to execution repository
@@ -67,15 +58,7 @@ func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, wor
 		return ErrEmptyWorkerID
 	}
 
-	if l.execRepo == nil {
-		return errors.New("execution repository is not configured")
-	}
-
-	leaseDuration := l.lockDuration
-	if leaseDuration <= 0 {
-		leaseDuration = config.DefaultLeaseDuration
-	}
-	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, leaseDuration)
+	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, l.lockDuration)
 }
 
 // StartHeartbeat begins a background ticker to periodically extend the step execution lease
@@ -146,10 +129,6 @@ func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, 
 		}
 	}
 
-	if l.execRepo == nil {
-		return errors.New("execution repository is not configured")
-	}
-
 	return l.execRepo.CompleteStep(ctx, trimmedExecID, trimmedWorkerID, output)
 }
 
@@ -167,10 +146,6 @@ func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, work
 	trimmedErr := strings.TrimSpace(errMsg)
 	if trimmedErr == "" {
 		trimmedErr = "unknown error"
-	}
-
-	if l.execRepo == nil {
-		return errors.New("execution repository is not configured")
 	}
 
 	return l.execRepo.FailStep(ctx, trimmedExecID, trimmedWorkerID, trimmedErr)

@@ -35,4 +35,7 @@ var (
 
 	// Workflow Execution
 	ErrExecutionNotFound = errors.New("execution not found")
+
+	// Config / startup
+	ErrInvalidEnvValue = errors.New("invalid environment variable value")
 )

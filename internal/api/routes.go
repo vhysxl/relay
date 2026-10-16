@@ -3,27 +3,18 @@ package api
 import (
 	"net/http"
 
-	"github.com/vhysxl/relay/bootstrap/config"
+	"github.com/vhysxl/relay/bootstrap/app"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/system"
-	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/web"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-func RegisterRoutes(mux *http.ServeMux, conf *config.Config) {
-	stepRepo := step.NewStepRepository(conf.DB)
-	v := validator.NewValidator()
+func RegisterRoutes(mux *http.ServeMux, app *app.Application) {
 
-	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, v)
-	workflowHandler := workflow.NewWorkflowHandler(workflowLogic, conf)
-
-	executionRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
-	executionLogic := execution.NewExecutionLogic(executionRepo)
-	executionHandler := execution.NewExecutionHandler(executionLogic)
+	workflowHandler := workflow.NewWorkflowHandler(app.WorkflowLogic, app.Config)
+	executionHandler := execution.NewExecutionHandler(app.ExecutionLogic)
 
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())

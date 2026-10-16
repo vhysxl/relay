@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vhysxl/relay/bootstrap/app"
 	"github.com/vhysxl/relay/bootstrap/config"
 )
 
 func TestRegisterRoutes_Dashboard(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, &config.Config{})
+	RegisterRoutes(mux, &app.Application{Config: &config.Config{}})
 
 	// Test GET /
 	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)

@@ -23,7 +23,7 @@ type executionRepository struct {
 }
 
 func NewExecutionRepository(db *sql.DB, stepRepo step.StepRepository, cfg ...*config.Config) ExecutionRepository {
-	leaseDuration := config.DefaultLeaseDuration
+	leaseDuration := 30 * time.Second
 	if len(cfg) > 0 && cfg[0] != nil && cfg[0].DefaultLeaseDuration > 0 {
 		leaseDuration = cfg[0].DefaultLeaseDuration
 	}
@@ -441,7 +441,7 @@ func (r *executionRepository) Heartbeat(ctx context.Context, stepExecutionID str
 		lockDuration = r.defaultLockDuration
 	}
 	if lockDuration <= 0 {
-		lockDuration = config.DefaultLeaseDuration
+		lockDuration = 30 * time.Second
 	}
 
 	query := `
@@ -1100,7 +1100,7 @@ func (r *executionRepository) ClaimPending(ctx context.Context, workerID string,
 		lockDuration = r.defaultLockDuration
 	}
 	if lockDuration <= 0 {
-		lockDuration = config.DefaultLeaseDuration
+		lockDuration = 30 * time.Second
 	}
 
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})

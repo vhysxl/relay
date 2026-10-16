@@ -7,23 +7,23 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
+	"github.com/vhysxl/relay/bootstrap/app"
 	"github.com/vhysxl/relay/internal/api"
 )
 
-func Listen(ctx context.Context, conf *config.Config) error {
+func Listen(ctx context.Context, app *app.Application) error {
 	mux := http.NewServeMux()
 
-	api.RegisterRoutes(mux, conf)
+	api.RegisterRoutes(mux, app)
 
 	srv := &http.Server{
-		Addr:    conf.Port,
+		Addr:    app.Config.Port,
 		Handler: mux,
 	}
 
 	serverErr := make(chan error, 1)
 	go func() {
-		fmt.Printf("Server is running and listening on port %s\n", conf.Port)
+		fmt.Printf("Server is running and listening on port %s\n", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}
