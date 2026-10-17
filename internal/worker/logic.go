@@ -1,22 +1,16 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
-)
-
-var (
-	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")
-	ErrEmptyStepExecutionID = errors.New("step execution id is required for heartbeat")
-	ErrInvalidStepOutput    = errors.New("step output must be valid JSON")
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 type workerLogic struct {
@@ -24,15 +18,11 @@ type workerLogic struct {
 	lockDuration time.Duration
 }
 
-// NewWorkerLogic creates a new WorkerLogic with required execution repository and optional injected config.
-func NewWorkerLogic(execRepo execution.ExecutionRepository, cfg ...*config.Config) WorkerLogic {
-	leaseDuration := 30 * time.Second
-	if len(cfg) > 0 && cfg[0] != nil && cfg[0].DefaultLeaseDuration > 0 {
-		leaseDuration = cfg[0].DefaultLeaseDuration
-	}
+// NewWorkerLogic creates a new WorkerLogic with required execution repository and lease duration.
+func NewWorkerLogic(execRepo execution.ExecutionRepository, lockDuration time.Duration) WorkerLogic {
 	return &workerLogic{
 		execRepo:     execRepo,
-		lockDuration: leaseDuration,
+		lockDuration: lockDuration,
 	}
 }
 
@@ -41,7 +31,7 @@ func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Ste
 	// validate worker id
 	trimmedWorkerID := strings.TrimSpace(workerID)
 	if trimmedWorkerID == "" {
-		return nil, nil, ErrEmptyWorkerID
+		return nil, nil, errdefs.ErrEmptyWorkerID
 	}
 
 	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, l.lockDuration)
@@ -51,11 +41,11 @@ func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Ste
 func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
-		return ErrEmptyStepExecutionID
+		return errdefs.ErrEmptyStepExecutionID
 	}
 	trimmedWorkerID := strings.TrimSpace(workerID)
 	if trimmedWorkerID == "" {
-		return ErrEmptyWorkerID
+		return errdefs.ErrEmptyWorkerID
 	}
 
 	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, l.lockDuration)
@@ -89,14 +79,6 @@ func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				select {
-				case <-stopChan:
-					return
-				case <-ctx.Done():
-					return
-				default:
-				}
-
 				if err := l.Heartbeat(ctx, stepExecutionID, workerID); err != nil {
 					select {
 					case errChan <- err:
@@ -115,17 +97,17 @@ func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string
 func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
-		return ErrEmptyStepExecutionID
+		return errdefs.ErrEmptyStepExecutionID
 	}
 	trimmedWorkerID := strings.TrimSpace(workerID)
 	if trimmedWorkerID == "" {
-		return ErrEmptyWorkerID
+		return errdefs.ErrEmptyWorkerID
 	}
 
 	if len(output) > 0 {
-		trimmedOutput := strings.TrimSpace(string(output))
-		if trimmedOutput != "" && trimmedOutput != "null" && !json.Valid(output) {
-			return ErrInvalidStepOutput
+		trimmedOutput := bytes.TrimSpace(output)
+		if len(trimmedOutput) > 0 && !bytes.Equal(trimmedOutput, []byte("null")) && !json.Valid(output) {
+			return errdefs.ErrInvalidStepOutput
 		}
 	}
 
@@ -136,11 +118,11 @@ func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, 
 func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
 	trimmedExecID := strings.TrimSpace(stepExecutionID)
 	if trimmedExecID == "" {
-		return ErrEmptyStepExecutionID
+		return errdefs.ErrEmptyStepExecutionID
 	}
 	trimmedWorkerID := strings.TrimSpace(workerID)
 	if trimmedWorkerID == "" {
-		return ErrEmptyWorkerID
+		return errdefs.ErrEmptyWorkerID
 	}
 
 	trimmedErr := strings.TrimSpace(errMsg)

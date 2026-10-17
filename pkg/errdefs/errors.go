@@ -36,6 +36,11 @@ var (
 	// Workflow Execution
 	ErrExecutionNotFound = errors.New("execution not found")
 
+	// Worker & task claiming
+	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")
+	ErrEmptyStepExecutionID = errors.New("step execution id is required for heartbeat")
+	ErrInvalidStepOutput    = errors.New("step output must be valid JSON")
+
 	// Config / startup
 	ErrInvalidEnvValue = errors.New("invalid environment variable value")
 )

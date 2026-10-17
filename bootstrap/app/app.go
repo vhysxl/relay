@@ -65,15 +65,17 @@ func InitApp() (*Application, error) {
 	executionRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
 	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
 
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, *conf)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, conf.ConcurrentRetryLimit)
 	executionLogic := execution.NewExecutionLogic(executionRepo)
-	workerLogic := worker.NewWorkerLogic(executionRepo, conf)
+	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration)
 
 	pool := worker.NewWorkerPool(
 		workerLogic,
 		reg,
 		worker.WithBaseID("server-worker"),
 		worker.WithWorkerCount(conf.WorkerCount),
+		worker.WithPollInterval(conf.DefaultPoolInterval),
+		worker.WithHeartbeatInterval(conf.DefaultHeartBeatInterval),
 	)
 	reaperSvc := reaper.New(executionRepo, conf.ReaperInterval)
 

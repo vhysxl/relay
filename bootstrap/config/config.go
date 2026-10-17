@@ -13,14 +13,16 @@ import (
 )
 
 type Config struct {
-	Port                 string
-	DB                   *sql.DB
-	DefaultLeaseDuration time.Duration
-	ReaperInterval       time.Duration
-	DefaultTimeout       time.Duration
-	MaxPayloadSize       int
-	ConcurrentRetryLimit int
-	WorkerCount          int
+	Port                     string
+	DB                       *sql.DB
+	DefaultLeaseDuration     time.Duration
+	DefaultHeartBeatInterval time.Duration
+	DefaultPoolInterval      time.Duration
+	ReaperInterval           time.Duration
+	DefaultTimeout           time.Duration
+	MaxPayloadSize           int
+	ConcurrentRetryLimit     int
+	WorkerCount              int
 }
 
 func Init() (*Config, error) {
@@ -30,6 +32,16 @@ func Init() (*Config, error) {
 	}
 
 	lease, err := parseDuration("DEFAULT_LEASE_DURATION", 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	heartbeat, err := parseDuration("DEFAULT_HEARTBEAT_INTERVAL", 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	poolInterval, err := parseDuration("DEFAULT_POOL_INTERVAL", 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +86,16 @@ func Init() (*Config, error) {
 	fmt.Println("Database connected successfully")
 
 	return &Config{
-		Port:                 port,
-		DB:                   DB,
-		DefaultLeaseDuration: lease,
-		ReaperInterval:       reaperInterval,
-		DefaultTimeout:       defaultTimeout,
-		MaxPayloadSize:       maxPayloadSize,
-		ConcurrentRetryLimit: concurrentRetryLimit,
-		WorkerCount:          workerCount,
+		Port:                     port,
+		DB:                       DB,
+		DefaultLeaseDuration:     lease,
+		DefaultHeartBeatInterval: heartbeat,
+		DefaultPoolInterval:      poolInterval,
+		ReaperInterval:           reaperInterval,
+		DefaultTimeout:           defaultTimeout,
+		MaxPayloadSize:           maxPayloadSize,
+		ConcurrentRetryLimit:     concurrentRetryLimit,
+		WorkerCount:              workerCount,
 	}, nil
 }
 

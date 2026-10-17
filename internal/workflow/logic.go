@@ -3,12 +3,9 @@ package workflow
 import (
 	"context"
 	"errors"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
@@ -20,55 +17,12 @@ type workflowLogic struct {
 	concurrentRetryLimit int
 }
 
-var (
-	// DefaultMaxRetries defines the fallback maximum retry attempts for concurrent workflow creation.
-	DefaultMaxRetries = 3
-)
-
-// GetMaxRetries returns the configured max retries from the WORKFLOW_MAX_RETRIES environment variable,
-// falling back to DefaultMaxRetries if unset or invalid.
-func GetMaxRetries() int {
-	if val := strings.TrimSpace(os.Getenv("WORKFLOW_MAX_RETRIES")); val != "" {
-		if n, err := strconv.Atoi(val); err == nil && n > 0 {
-			return n
-		}
-	}
-	return DefaultMaxRetries
-}
-
-type WorkflowLogicOption func(*workflowLogic)
-
-func WithMaxRetries(maxRetries int) WorkflowLogicOption {
-	return func(l *workflowLogic) {
-		if maxRetries > 0 {
-			l.concurrentRetryLimit = maxRetries
-		}
-	}
-}
-
-func NewWorkflowLogic(repo WorkflowRepository, v Validator, opts ...any) WorkflowLogic {
-	l := &workflowLogic{
+func NewWorkflowLogic(repo WorkflowRepository, v Validator, concurrentRetryLimit int) WorkflowLogic {
+	return &workflowLogic{
 		repo:                 repo,
 		validator:            v,
-		concurrentRetryLimit: 3,
+		concurrentRetryLimit: concurrentRetryLimit,
 	}
-
-	for _, opt := range opts {
-		switch o := opt.(type) {
-		case config.Config:
-			if o.ConcurrentRetryLimit > 0 {
-				l.concurrentRetryLimit = o.ConcurrentRetryLimit
-			}
-		case *config.Config:
-			if o != nil && o.ConcurrentRetryLimit > 0 {
-				l.concurrentRetryLimit = o.ConcurrentRetryLimit
-			}
-		case WorkflowLogicOption:
-			o(l)
-		}
-	}
-
-	return l
 }
 
 func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest) (*Workflow, error) {
@@ -76,9 +30,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		return nil, err
 	}
 
-	maxRetries := l.concurrentRetryLimit
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < l.concurrentRetryLimit; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

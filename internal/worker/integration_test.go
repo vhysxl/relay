@@ -70,9 +70,9 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. CREATE WORKFLOW + STEPS
 	uniqueWorkflowName := "test-order-saga-" + uuid.NewString()[:8]
@@ -243,9 +243,9 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator)
+	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create test workflow and step definition
 	uniqueWorkflowName := "test-heartbeat-wf-" + uuid.NewString()[:8]
@@ -405,7 +405,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 
 	stepRepo := step.NewStepRepository(db)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create test workflow and execution
 	wfID := uuid.NewString()
@@ -515,7 +515,7 @@ func TestIntegration_FailStep_Retry(t *testing.T) {
 
 	stepRepo := step.NewStepRepository(db)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-retry-wf-"+wfID[:8])
@@ -592,7 +592,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 
 	stepRepo := step.NewStepRepository(db)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-saga-"+wfID[:8])
@@ -707,7 +707,7 @@ func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *test
 
 	stepRepo := step.NewStepRepository(db)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_definitions (id, name, version, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())", wfID, "test-fail-immediate-wf-"+wfID[:8])
@@ -765,10 +765,10 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
 	execLogic := execution.NewExecutionLogic(execRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create a workflow definition with 1 step
 	wfName := "e2e-wf-" + uuid.NewString()[:8]
@@ -851,9 +851,9 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
 	wfName := "test-parallel-pool-wf-" + uuid.NewString()[:8]
@@ -952,9 +952,9 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// Workflow: Step A -> (Step B & Step C in parallel) -> Step D
 	// All steps have compensation defined.
@@ -1130,9 +1130,9 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// Step A -> (Step B & Step C in parallel)
 	stepAID := "step-a-" + uuid.NewString()[:8]
@@ -1273,9 +1273,9 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
 	step1ID := "step-auth"
@@ -1425,9 +1425,9 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	stepRepo := step.NewStepRepository(db)
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
-	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator)
+	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	workerLogic := worker.NewWorkerLogic(execRepo)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
 	step1ID := "step-charge"

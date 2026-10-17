@@ -49,7 +49,7 @@ var testConfig = &config.Config{MaxPayloadSize: 5}
 
 func TestWorkflowLogic_CreateWorkflow_Nil(t *testing.T) {
 	repo := &mockRepository{}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Test nil request
 	_, err := logic.CreateWorkflow(context.Background(), nil)
@@ -60,7 +60,7 @@ func TestWorkflowLogic_CreateWorkflow_Nil(t *testing.T) {
 
 func TestWorkflowLogic_CreateWorkflow_Success(t *testing.T) {
 	repo := &mockRepository{}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	validStep := step.Step{
 		ID:     "step-1",
@@ -89,7 +89,7 @@ func TestWorkflowLogic_CreateWorkflow_Success(t *testing.T) {
 
 func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 	repo := &mockRepository{}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Valid steps
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -126,7 +126,7 @@ func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 
 func TestWorkflowLogic_GetWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	_, err := logic.GetWorkflow(context.Background(), "")
 	if err != errdefs.ErrInvalidWorkflowName {
@@ -141,7 +141,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 		},
 	}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
@@ -182,7 +182,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
@@ -209,7 +209,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 }
 func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.T) {
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(&mockRepository{}, v)
+	logic := workflow.NewWorkflowLogic(&mockRepository{}, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	body, _ := json.Marshal(workflow.WorkflowRequest{
@@ -242,7 +242,7 @@ func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.
 func TestWorkflowHandler_CreateWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// Test empty name
@@ -297,7 +297,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		},
 	}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// Test found
@@ -376,7 +376,7 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 		},
 	}
 
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Send identical request
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -440,7 +440,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 		},
 	}
 
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Different context
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -497,7 +497,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 		},
 	}
 
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Added step-2
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -556,7 +556,7 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 		},
 	}
 
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
 		Name: "order-saga",
@@ -596,7 +596,7 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 	wfs, err := logic.ListWorkflows(context.Background(), 20, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -621,7 +621,7 @@ func TestWorkflowLogic_ListWorkflows_PaginationNormalization(t *testing.T) {
 			return []workflow.Workflow{}, nil
 		},
 	}
-	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator())
+	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	// Test default when <= 0
 	_, err := logic.ListWorkflows(context.Background(), 0, -5)
@@ -655,7 +655,7 @@ func TestWorkflowHandler_ListWorkflows(t *testing.T) {
 		},
 	}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 	handler := workflow.NewWorkflowHandler(logic, testConfig)
 
 	// 1. With query params ?limit=25&offset=50
@@ -727,7 +727,7 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryIdempotent(t *testing.T
 	}
 
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
 		Name:    "order-race",
@@ -792,7 +792,7 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryAutoIncrement(t *testin
 	}
 
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
 		Name:  "order-race-diff",
@@ -810,38 +810,20 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryAutoIncrement(t *testin
 	}
 }
 
-func TestWorkflowLogic_MaxRetriesConfig_EnvAndOptions(t *testing.T) {
-	// 1. Default value
-	t.Setenv("WORKFLOW_MAX_RETRIES", "")
-	if retries := workflow.GetMaxRetries(); retries != workflow.DefaultMaxRetries {
-		t.Errorf("expected default retries %d, got %d", workflow.DefaultMaxRetries, retries)
-	}
-
-	// 2. Read from ENV
-	t.Setenv("WORKFLOW_MAX_RETRIES", "7")
-	if retries := workflow.GetMaxRetries(); retries != 7 {
-		t.Errorf("expected 7 from ENV, got %d", retries)
-	}
-
-	// 3. Fallback when invalid ENV value
-	t.Setenv("WORKFLOW_MAX_RETRIES", "invalid_num")
-	if retries := workflow.GetMaxRetries(); retries != workflow.DefaultMaxRetries {
-		t.Errorf("expected fallback %d for invalid env, got %d", workflow.DefaultMaxRetries, retries)
-	}
-
-	// 4. Overridden via WithMaxRetries option
-	t.Setenv("WORKFLOW_MAX_RETRIES", "5")
+func TestWorkflowLogic_ConcurrentRetryLimit(t *testing.T) {
+	attempts := 0
 	repo := &mockRepository{
 		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
 			return nil, errdefs.ErrWorkflowNotFound
 		},
 		createFn: func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
+			attempts++
 			return nil, errdefs.ErrWorkflowAlreadyExists
 		},
 	}
 	v := validator.NewValidator()
-	// Pass option WithMaxRetries(2)
-	logic := workflow.NewWorkflowLogic(repo, v, workflow.WithMaxRetries(2))
+	retryLimit := 2
+	logic := workflow.NewWorkflowLogic(repo, v, retryLimit)
 
 	validStep := step.Step{
 		ID:     "step-1",
@@ -856,6 +838,9 @@ func TestWorkflowLogic_MaxRetriesConfig_EnvAndOptions(t *testing.T) {
 	if !errors.Is(err, errdefs.ErrWorkflowAlreadyExists) {
 		t.Fatalf("expected ErrWorkflowAlreadyExists after exhausting retries, got: %v", err)
 	}
+	if attempts != retryLimit {
+		t.Fatalf("expected %d retry attempts, got %d", retryLimit, attempts)
+	}
 }
 
 func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
@@ -865,7 +850,7 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 		},
 	}
 	v := validator.NewValidator()
-	logic := workflow.NewWorkflowLogic(repo, v)
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
 
 	// Injected config with 1MB payload limit
 	cfg := &config.Config{MaxPayloadSize: 1}

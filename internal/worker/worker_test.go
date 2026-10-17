@@ -15,6 +15,8 @@ import (
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
+const testLockDuration = 30 * time.Second
+
 type mockExecutionRepository struct {
 	claimFunc     func(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error)
 	heartbeatFunc func(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
@@ -71,15 +73,15 @@ func (m *mockExecutionRepository) FailStep(ctx context.Context, stepExecutionID 
 }
 
 func TestWorkerLogic_ClaimNext_EmptyWorkerID(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{}, testLockDuration)
 
 	_, _, err := logic.ClaimNext(context.Background(), "")
-	if err != ErrEmptyWorkerID {
+	if err != errdefs.ErrEmptyWorkerID {
 		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
 	}
 
 	_, _, err = logic.ClaimNext(context.Background(), "   ")
-	if err != ErrEmptyWorkerID {
+	if err != errdefs.ErrEmptyWorkerID {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
 	}
 }
@@ -108,7 +110,7 @@ func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	s, se, err := logic.ClaimNext(context.Background(), "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -128,7 +130,7 @@ func TestWorkerLogic_ClaimNext_NoTaskAvailable(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	s, se, err := logic.ClaimNext(context.Background(), "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -139,25 +141,25 @@ func TestWorkerLogic_ClaimNext_NoTaskAvailable(t *testing.T) {
 }
 
 func TestWorkerLogic_Heartbeat_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{}, testLockDuration)
 
 	// Empty stepExecutionID
 	err := logic.Heartbeat(context.Background(), "", "worker-1")
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
 	}
 	err = logic.Heartbeat(context.Background(), "   ", "worker-1")
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
 	}
 
 	// Empty workerID
 	err = logic.Heartbeat(context.Background(), "exec-1", "")
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
 	}
 	err = logic.Heartbeat(context.Background(), "exec-1", "   ")
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
 	}
 }
@@ -180,7 +182,7 @@ func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.Heartbeat(context.Background(), "  exec-123  ", "  worker-1  ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -197,7 +199,7 @@ func TestWorkerLogic_Heartbeat_LockLost(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.Heartbeat(context.Background(), "exec-123", "worker-1")
 	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
@@ -213,7 +215,7 @@ func TestWorkerLogic_StartHeartbeat_TicksAndStops(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	// Start with fast 15ms interval
 	stop, errChan := logic.StartHeartbeat(context.Background(), "exec-1", "worker-1", 15*time.Millisecond)
 
@@ -250,7 +252,7 @@ func TestWorkerLogic_StartHeartbeat_StopsOnError(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	stop, errChan := logic.StartHeartbeat(context.Background(), "exec-1", "worker-1", 10*time.Millisecond)
 	defer stop()
 
@@ -271,7 +273,7 @@ func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	stop, _ := logic.StartHeartbeat(ctx, "exec-1", "worker-1", 10*time.Millisecond)
@@ -283,31 +285,31 @@ func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
 }
 
 func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{}, testLockDuration)
 
 	// Empty stepExecutionID
 	err := logic.CompleteStep(context.Background(), "", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
 	}
 	err = logic.CompleteStep(context.Background(), "   ", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
 	}
 
 	// Empty workerID
 	err = logic.CompleteStep(context.Background(), "exec-1", "", json.RawMessage("{}"))
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
 	}
 	err = logic.CompleteStep(context.Background(), "exec-1", "   ", json.RawMessage("{}"))
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
 	}
 
 	// Invalid JSON output
 	err = logic.CompleteStep(context.Background(), "exec-1", "worker-1", json.RawMessage("{invalid-json"))
-	if !errors.Is(err, ErrInvalidStepOutput) {
+	if !errors.Is(err, errdefs.ErrInvalidStepOutput) {
 		t.Fatalf("expected ErrInvalidStepOutput, got %v", err)
 	}
 }
@@ -330,7 +332,7 @@ func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.CompleteStep(context.Background(), "  exec-123  ", "  worker-1  ", json.RawMessage(`{"status":"ok"}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -347,7 +349,7 @@ func TestWorkerLogic_CompleteStep_LockLost(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.CompleteStep(context.Background(), "exec-123", "worker-1", json.RawMessage("{}"))
 	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
@@ -355,25 +357,25 @@ func TestWorkerLogic_CompleteStep_LockLost(t *testing.T) {
 }
 
 func TestWorkerLogic_FailStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{})
+	logic := NewWorkerLogic(&mockExecutionRepository{}, testLockDuration)
 
 	// Empty stepExecutionID
 	err := logic.FailStep(context.Background(), "", "worker-1", "some error")
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
 	}
 	err = logic.FailStep(context.Background(), "   ", "worker-1", "some error")
-	if !errors.Is(err, ErrEmptyStepExecutionID) {
+	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
 		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
 	}
 
 	// Empty workerID
 	err = logic.FailStep(context.Background(), "exec-1", "", "some error")
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
 	}
 	err = logic.FailStep(context.Background(), "exec-1", "   ", "some error")
-	if !errors.Is(err, ErrEmptyWorkerID) {
+	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
 	}
 }
@@ -396,7 +398,7 @@ func TestWorkerLogic_FailStep_Success(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.FailStep(context.Background(), "  exec-123  ", "  worker-1  ", "step timed out")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -422,7 +424,7 @@ func TestWorkerLogic_FailStep_LockLost(t *testing.T) {
 		},
 	}
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	err := logic.FailStep(context.Background(), "exec-123", "worker-1", "error")
 	if !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatalf("expected ErrLockLost, got %v", err)
@@ -475,7 +477,7 @@ func TestWorkerPool_ProcessOne_Success(t *testing.T) {
 		},
 	})
 
-	logic := NewWorkerLogic(repo)
+	logic := NewWorkerLogic(repo, testLockDuration)
 	pool := NewWorkerPool(logic, reg, WithBaseID("test-worker"))
 
 	processed, err := pool.ProcessOne(context.Background(), "test-worker-1")
@@ -518,7 +520,7 @@ func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
 		},
 	})
 
-	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+	pool := NewWorkerPool(NewWorkerLogic(repo, testLockDuration), reg)
 	processed, err := pool.ProcessOne(context.Background(), "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -555,7 +557,7 @@ func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
 		},
 	})
 
-	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+	pool := NewWorkerPool(NewWorkerLogic(repo, testLockDuration), reg)
 	processed, err := pool.ProcessOne(context.Background(), "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -588,7 +590,7 @@ func TestWorkerPool_ProcessOne_UnsupportedType(t *testing.T) {
 
 	// Registry is empty (kafka is not registered)
 	reg := executor.NewRegistry()
-	pool := NewWorkerPool(NewWorkerLogic(repo), reg)
+	pool := NewWorkerPool(NewWorkerLogic(repo, testLockDuration), reg)
 
 	processed, err := pool.ProcessOne(context.Background(), "worker-1")
 	if err != nil {
@@ -622,7 +624,7 @@ func TestWorkerPool_Start_Fixed3Concurrency(t *testing.T) {
 
 	reg := executor.NewRegistry()
 	pool := NewWorkerPool(
-		NewWorkerLogic(repo),
+		NewWorkerLogic(repo, testLockDuration),
 		reg,
 		WithBaseID("test-fixed"),
 		WithWorkerCount(3),
@@ -656,7 +658,7 @@ func TestWorkerPool_Start_GracefulShutdown(t *testing.T) {
 	}
 
 	pool := NewWorkerPool(
-		NewWorkerLogic(repo),
+		NewWorkerLogic(repo, testLockDuration),
 		executor.NewRegistry(),
 		WithWorkerCount(3),
 		WithPollInterval(10*time.Millisecond),
