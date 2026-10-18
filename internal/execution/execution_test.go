@@ -47,7 +47,7 @@ func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (
 	return nil, errdefs.ErrExecutionNotFound
 }
 
-func (m *mockRepository) ClaimPending(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
+func (m *mockRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 	return nil, nil, nil
 }
 
@@ -59,7 +59,7 @@ func (m *mockRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, wor
 	return nil
 }
 
-func (m *mockRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
+func (m *mockRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
 	return nil
 }
 

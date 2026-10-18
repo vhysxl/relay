@@ -893,9 +893,10 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	pool := worker.NewWorkerPool(
 		workerLogic,
 		reg,
-		worker.WithBaseID("pool-worker"),
-		worker.WithWorkerCount(3),
-		worker.WithPollInterval(20*time.Millisecond),
+		"pool-worker",
+		3,
+		20*time.Millisecond,
+		10*time.Second,
 	)
 
 	poolDone := make(chan error, 1)

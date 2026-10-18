@@ -17,9 +17,9 @@ import (
 )
 
 type executionRepository struct {
-	db                  *sql.DB
-	stepRepo            step.StepRepository
-	defaultLockDuration time.Duration
+	db                   *sql.DB
+	stepRepo             step.StepRepository
+	defaultLeaseDuration time.Duration
 }
 
 func NewExecutionRepository(db *sql.DB, stepRepo step.StepRepository, cfg ...*config.Config) ExecutionRepository {
@@ -28,9 +28,9 @@ func NewExecutionRepository(db *sql.DB, stepRepo step.StepRepository, cfg ...*co
 		leaseDuration = cfg[0].DefaultLeaseDuration
 	}
 	return &executionRepository{
-		db:                  db,
-		stepRepo:            stepRepo,
-		defaultLockDuration: leaseDuration,
+		db:                   db,
+		stepRepo:             stepRepo,
+		defaultLeaseDuration: leaseDuration,
 	}
 }
 
@@ -436,12 +436,12 @@ func (r *executionRepository) GetExecution(ctx context.Context, executionID stri
 }
 
 // Heartbeat extends the lock lease (locked_until) for a step execution currently running and owned by workerID
-func (r *executionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error {
-	if lockDuration <= 0 {
-		lockDuration = r.defaultLockDuration
+func (r *executionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
+	if leaseDuration <= 0 {
+		leaseDuration = r.defaultLeaseDuration
 	}
-	if lockDuration <= 0 {
-		lockDuration = 30 * time.Second
+	if leaseDuration <= 0 {
+		leaseDuration = 30 * time.Second
 	}
 
 	query := `
@@ -452,8 +452,8 @@ func (r *executionRepository) Heartbeat(ctx context.Context, stepExecutionID str
 		  AND locked_by = ?
 		  AND status = 'RUNNING'
 	`
-	lockSeconds := int(lockDuration.Seconds())
-	res, err := r.db.ExecContext(ctx, query, lockSeconds, stepExecutionID, workerID)
+	leaseSeconds := int(leaseDuration.Seconds())
+	res, err := r.db.ExecContext(ctx, query, leaseSeconds, stepExecutionID, workerID)
 	if err != nil {
 		return fmt.Errorf("failed to update heartbeat: %w", err)
 	}
@@ -1095,12 +1095,12 @@ func (r *executionRepository) ReapExpiredSteps(ctx context.Context) (int64, erro
 }
 
 // ClaimPending atomically selects, locks, and returns the next eligible PENDING step execution ticket.
-func (r *executionRepository) ClaimPending(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *StepExecution, error) {
-	if lockDuration <= 0 {
-		lockDuration = r.defaultLockDuration
+func (r *executionRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error) {
+	if leaseDuration <= 0 {
+		leaseDuration = r.defaultLeaseDuration
 	}
-	if lockDuration <= 0 {
-		lockDuration = 30 * time.Second
+	if leaseDuration <= 0 {
+		leaseDuration = 30 * time.Second
 	}
 
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -1278,8 +1278,8 @@ func (r *executionRepository) ClaimPending(ctx context.Context, workerID string,
 		    updated_at = NOW()
 		WHERE id = ?
 	`
-	lockSeconds := int(lockDuration.Seconds())
-	_, err = tx.ExecContext(ctx, updateQuery, workerID, lockSeconds, string(resolvedConfigBytes), se.ID)
+	leaseSeconds := int(leaseDuration.Seconds())
+	_, err = tx.ExecContext(ctx, updateQuery, workerID, leaseSeconds, string(resolvedConfigBytes), se.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to update locked step execution: %w", err)
 	}
@@ -1289,7 +1289,7 @@ func (r *executionRepository) ClaimPending(ctx context.Context, workerID string,
 	}
 
 	se.LockedBy = &workerID
-	lockedUntilTime := time.Now().UTC().Add(lockDuration)
+	lockedUntilTime := time.Now().UTC().Add(leaseDuration)
 	se.LockedUntil = &lockedUntilTime
 	se.Status = StatusRunning
 	se.Attempt++

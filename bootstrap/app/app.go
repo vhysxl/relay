@@ -15,6 +15,7 @@ import (
 	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 type Application struct {
@@ -26,7 +27,7 @@ type Application struct {
 	WorkerLogic    worker.WorkerLogic
 
 	// Background services (started by main.go via g.Go)
-	Pool   *worker.WorkerPool
+	Pool   worker.WorkerPool
 	Reaper reaper.Reaper
 
 	// Validator
@@ -69,13 +70,19 @@ func InitApp() (*Application, error) {
 	executionLogic := execution.NewExecutionLogic(executionRepo)
 	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration)
 
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		hostname = "worker"
+	}
+	workerBaseID := fmt.Sprintf("server-%s-%s", hostname, util.GenerateUUID()[:8])
+
 	pool := worker.NewWorkerPool(
 		workerLogic,
 		reg,
-		worker.WithBaseID("server-worker"),
-		worker.WithWorkerCount(conf.WorkerCount),
-		worker.WithPollInterval(conf.DefaultPoolInterval),
-		worker.WithHeartbeatInterval(conf.DefaultHeartBeatInterval),
+		workerBaseID,
+		conf.WorkerCount,
+		conf.DefaultPoolInterval,
+		conf.DefaultHeartBeatInterval,
 	)
 	reaperSvc := reaper.New(executionRepo, conf.ReaperInterval)
 

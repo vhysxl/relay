@@ -14,15 +14,15 @@ import (
 )
 
 type workerLogic struct {
-	execRepo     execution.ExecutionRepository
-	lockDuration time.Duration
+	execRepo      execution.ExecutionRepository
+	leaseDuration time.Duration
 }
 
 // NewWorkerLogic creates a new WorkerLogic with required execution repository and lease duration.
-func NewWorkerLogic(execRepo execution.ExecutionRepository, lockDuration time.Duration) WorkerLogic {
+func NewWorkerLogic(execRepo execution.ExecutionRepository, leaseDuration time.Duration) WorkerLogic {
 	return &workerLogic{
-		execRepo:     execRepo,
-		lockDuration: lockDuration,
+		execRepo:      execRepo,
+		leaseDuration: leaseDuration,
 	}
 }
 
@@ -34,7 +34,7 @@ func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Ste
 		return nil, nil, errdefs.ErrEmptyWorkerID
 	}
 
-	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, l.lockDuration)
+	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, l.leaseDuration)
 }
 
 // Heartbeat validates parameters and delegates lease extension to execution repository
@@ -48,16 +48,12 @@ func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, wor
 		return errdefs.ErrEmptyWorkerID
 	}
 
-	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, l.lockDuration)
+	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, l.leaseDuration)
 }
 
 // StartHeartbeat begins a background ticker to periodically extend the step execution lease
 // until stop() is called, context is cancelled, or a heartbeat error occurs.
 func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string, workerID string, interval time.Duration) (func(), <-chan error) {
-	if interval <= 0 {
-		interval = DefaultHeartbeatInterval
-	}
-
 	stopChan := make(chan struct{})
 	errChan := make(chan error, 1)
 	var once sync.Once

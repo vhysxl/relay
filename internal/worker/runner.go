@@ -3,23 +3,17 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
-	"github.com/vhysxl/relay/pkg/util"
 )
 
-const (
-	DefaultWorkerCount = 3
-	DefaultPollInterval = 1 * time.Second
-)
-
-type WorkerOption func(*WorkerPool)
-
-type WorkerPool struct {
+type workerPool struct {
 	baseID            string
 	workerCount       int
 	pollInterval      time.Duration
@@ -28,56 +22,27 @@ type WorkerPool struct {
 	registry          executor.Registry
 }
 
-// NewWorkerPool creates a worker pool with a fixed number of workers (default: 3)
-func NewWorkerPool(logic WorkerLogic, registry executor.Registry, opts ...WorkerOption) *WorkerPool {
-	p := &WorkerPool{
-		baseID:            "worker-" + util.GenerateUUID()[:8],
-		workerCount:       DefaultWorkerCount,
-		pollInterval:      DefaultPollInterval,
-		heartbeatInterval: DefaultHeartbeatInterval,
+// NewWorkerPool creates a new WorkerPool with the provided dependencies and configuration.
+func NewWorkerPool(
+	logic WorkerLogic,
+	registry executor.Registry,
+	baseID string,
+	workerCount int,
+	pollInterval time.Duration,
+	heartbeatInterval time.Duration,
+) WorkerPool {
+	return &workerPool{
+		baseID:            baseID,
+		workerCount:       workerCount,
+		pollInterval:      pollInterval,
+		heartbeatInterval: heartbeatInterval,
 		logic:             logic,
 		registry:          registry,
 	}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
 }
 
-func WithWorkerCount(count int) WorkerOption {
-	return func(p *WorkerPool) {
-		if count > 0 {
-			p.workerCount = count
-		}
-	}
-}
-
-func WithBaseID(baseID string) WorkerOption {
-	return func(p *WorkerPool) {
-		if baseID != "" {
-			p.baseID = baseID
-		}
-	}
-}
-
-func WithPollInterval(d time.Duration) WorkerOption {
-	return func(p *WorkerPool) {
-		if d > 0 {
-			p.pollInterval = d
-		}
-	}
-}
-
-func WithHeartbeatInterval(d time.Duration) WorkerOption {
-	return func(p *WorkerPool) {
-		if d > 0 {
-			p.heartbeatInterval = d
-		}
-	}
-}
-
-// Start launches fixed worker goroutines and blocks until ctx is cancelled
-func (p *WorkerPool) Start(ctx context.Context) error {
+// Start launches worker goroutines and blocks until ctx is cancelled.
+func (p *workerPool) Start(ctx context.Context) error {
 	var wg sync.WaitGroup
 
 	for i := 1; i <= p.workerCount; i++ {
@@ -94,31 +59,42 @@ func (p *WorkerPool) Start(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (p *WorkerPool) runWorker(ctx context.Context, workerID string) {
+func (p *workerPool) runWorker(ctx context.Context, workerID string) {
+	timer := time.NewTimer(p.pollInterval)
+	defer timer.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			processed, err := p.ProcessOne(ctx, workerID)
-			if err != nil || !processed {
+		}
+
+		processed, err := p.ProcessOne(ctx, workerID)
+		if err != nil && ctx.Err() == nil {
+			log.Printf("[worker %s] error processing step: %v", workerID, err)
+		}
+
+		if !processed || err != nil {
+			if !timer.Stop() {
 				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(p.pollInterval):
-					continue
+				case <-timer.C:
+				default:
 				}
+			}
+			timer.Reset(p.pollInterval)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
 			}
 		}
 	}
 }
 
-// ProcessOne claims and executes a single task for the given workerID (useful for deterministic tests)
-func (p *WorkerPool) ProcessOne(ctx context.Context, workerID string) (bool, error) {
-	if p.logic == nil {
-		return false, fmt.Errorf("worker logic is not configured")
-	}
-
+// ProcessOne claims and executes a single task for the given workerID.
+func (p *workerPool) ProcessOne(ctx context.Context, workerID string) (bool, error) {
 	s, exec, err := p.logic.ClaimNext(ctx, workerID)
 	if err != nil {
 		return false, err
@@ -131,51 +107,95 @@ func (p *WorkerPool) ProcessOne(ctx context.Context, workerID string) (bool, err
 	return true, nil
 }
 
-func (p *WorkerPool) executeTask(ctx context.Context, workerID string, s *step.Step, exec *execution.StepExecution) {
+func (p *workerPool) executeTask(ctx context.Context, workerID string, s *step.Step, exec *execution.StepExecution) {
 	defer func() {
 		if r := recover(); r != nil {
-			cleanupCtx := ctx
-			if ctx.Err() != nil {
-				var cancel context.CancelFunc
-				cleanupCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-			}
+			log.Printf("[worker %s] panic during step execution %s: %v\n%s", workerID, exec.ID, r, debug.Stack())
+			cleanupCtx, cancel := cleanupContext(ctx, 5*time.Second)
+			defer cancel()
 			_ = p.logic.FailStep(cleanupCtx, exec.ID, workerID, fmt.Sprintf("panic in step execution: %v", r))
 		}
 	}()
 
-	stopHB, _ := p.logic.StartHeartbeat(ctx, exec.ID, workerID, p.heartbeatInterval)
+	// Determine timeout if configured on ticket or step definition
+	timeoutSeconds := exec.TimeoutSeconds
+	if timeoutSeconds <= 0 && s != nil && s.Timeout > 0 {
+		timeoutSeconds = s.Timeout
+	}
+
+	var (
+		taskCtx    context.Context
+		taskCancel context.CancelFunc
+	)
+	if timeoutSeconds > 0 {
+		taskCtx, taskCancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	} else {
+		taskCtx, taskCancel = context.WithCancel(ctx)
+	}
+	defer taskCancel()
+
+	// Start background lease renewal heartbeat
+	stopHB, hbErrChan := p.logic.StartHeartbeat(ctx, exec.ID, workerID, p.heartbeatInterval)
 	defer stopHB()
+
+	var (
+		lockLostMu sync.Mutex
+		lockLost   bool
+	)
+
+	// Monitor heartbeat failures (e.g. lease expired or lost to reaper/another worker)
+	go func() {
+		select {
+		case err, ok := <-hbErrChan:
+			if ok && err != nil {
+				lockLostMu.Lock()
+				lockLost = true
+				lockLostMu.Unlock()
+				taskCancel()
+			}
+		case <-taskCtx.Done():
+		}
+	}()
 
 	stepType := step.StepType(exec.Type)
 	if stepType == "" && s != nil {
 		stepType = s.Type
 	}
 
-	if p.registry == nil {
-		_ = p.logic.FailStep(ctx, exec.ID, workerID, "executor registry is not configured")
-		return
-	}
-
 	execHandler, err := p.registry.Get(stepType)
 	if err != nil {
-		_ = p.logic.FailStep(ctx, exec.ID, workerID, fmt.Sprintf("unsupported step type: %v", err))
+		cleanupCtx, cancel := cleanupContext(ctx, 5*time.Second)
+		defer cancel()
+		_ = p.logic.FailStep(cleanupCtx, exec.ID, workerID, fmt.Sprintf("unsupported step type: %v", err))
 		return
 	}
 
-	output, err := execHandler.Execute(ctx, s, exec)
+	output, err := execHandler.Execute(taskCtx, s, exec)
 	stopHB()
 
-	cleanupCtx := ctx
-	if ctx.Err() != nil {
-		var cancel context.CancelFunc
-		cleanupCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	lockLostMu.Lock()
+	isLockLost := lockLost
+	lockLostMu.Unlock()
+
+	// If lock was lost during execution, do not attempt to complete or overwrite step state
+	if isLockLost {
+		log.Printf("[worker %s] step %s execution cancelled or completed after lock was lost", workerID, exec.ID)
+		return
 	}
+
+	cleanupCtx, cancel := cleanupContext(ctx, 5*time.Second)
+	defer cancel()
 
 	if err != nil {
 		_ = p.logic.FailStep(cleanupCtx, exec.ID, workerID, err.Error())
 	} else {
 		_ = p.logic.CompleteStep(cleanupCtx, exec.ID, workerID, output)
 	}
+}
+
+func cleanupContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if ctx.Err() != nil {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	return context.WithTimeout(ctx, timeout)
 }

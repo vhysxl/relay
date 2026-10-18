@@ -9,10 +9,7 @@ import (
 	"github.com/vhysxl/relay/internal/step"
 )
 
-const (
-	DefaultHeartbeatInterval = 10 * time.Second
-)
-
+// WorkerLogic defines business logic operations for task claiming, heartbeat renewal, and completion.
 type WorkerLogic interface {
 	ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error)
 	Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error
@@ -21,4 +18,8 @@ type WorkerLogic interface {
 	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
 
-
+// WorkerPool defines the contract for running background worker pools and processing individual tasks.
+type WorkerPool interface {
+	Start(ctx context.Context) error
+	ProcessOne(ctx context.Context, workerID string) (bool, error)
+}

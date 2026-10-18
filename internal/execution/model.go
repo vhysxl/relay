@@ -94,10 +94,10 @@ type ExecutionRepository interface {
 	ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*WorkflowExecution, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
-	ClaimPending(ctx context.Context, workerID string, lockDuration time.Duration) (*step.Step, *StepExecution, error)
+	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error)
 	ReapExpiredSteps(ctx context.Context) (int64, error)
 	WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, lockDuration time.Duration) error
+	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
 	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
 	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
