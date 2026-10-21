@@ -10,6 +10,7 @@ import {
   Workflow as WorkflowIcon,
   ListOrdered,
   FileCode,
+  GitBranch,
 } from 'lucide-react'
 import type { Workflow, Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
@@ -277,6 +278,15 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                         <span className="px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
                           {step.type}
                         </span>
+                        {step.when && (
+                          <span
+                            className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-indigo-950/50 text-indigo-400 border border-indigo-800/60 flex items-center gap-1"
+                            title="Conditional step (when)"
+                          >
+                            <GitBranch className="w-3 h-3 text-indigo-400" />
+                            <span>when</span>
+                          </span>
+                        )}
                         {step.compensation && (
                           <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-950/50 text-amber-400 border border-amber-800/60">
                             Rollback
@@ -306,6 +316,18 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                             <span className="font-mono text-neutral-200">
                               {step.depends_on.join(', ')}
                             </span>
+                          </div>
+                        )}
+
+                        {step.when && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-indigo-400 font-medium">
+                              <GitBranch className="w-3.5 h-3.5" />
+                              <span>Condition (When):</span>
+                            </div>
+                            <pre className="p-3 bg-[#0c0c0c] border border-indigo-950/60 text-indigo-300 rounded-md font-mono text-[11px] overflow-x-auto">
+                              {formatJSON(step.when)}
+                            </pre>
                           </div>
                         )}
 

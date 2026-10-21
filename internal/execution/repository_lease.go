@@ -1,12 +1,15 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/vhysxl/relay/internal/condition"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
@@ -105,13 +108,82 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 			return nil, nil, tx.Commit()
 		}
 	}
+
+	var condEvalRaw []byte
+	if !s.IsCompensation && len(bytes.TrimSpace(s.When)) > 0 && !bytes.Equal(bytes.TrimSpace(s.When), []byte("null")) {
+		if len(bytes.TrimSpace(s.ConditionEvaluation)) > 0 {
+			// Reuse previously saved true decision (e.g. retry or lease recovery)
+			condEvalRaw = s.ConditionEvaluation
+		} else {
+			cond, err := condition.ParseCondition(s.When)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			rows, err := tx.QueryContext(ctx, `SELECT step_id, output FROM step_executions
+				WHERE workflow_execution_id = ? AND is_compensation = FALSE AND status = 'COMPLETED'`, execID)
+			if err != nil {
+				return nil, nil, err
+			}
+			stepOutputs := make(map[string]json.RawMessage)
+			for rows.Next() {
+				var sid string
+				var out sql.NullString
+				if err := rows.Scan(&sid, &out); err == nil && out.Valid {
+					stepOutputs[sid] = json.RawMessage(out.String)
+				}
+			}
+			rows.Close()
+
+			pass, audit, evalErr := condition.Evaluate(cond, json.RawMessage(raw.String), stepOutputs)
+			auditBytes, _ := json.Marshal(audit)
+			condEvalRaw = auditBytes
+
+			if evalErr != nil {
+				errMsg := fmt.Sprintf("condition evaluation error: %v", evalErr)
+				_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'FAILED', condition_evaluation = ?,
+					error_message = ?, updated_at = NOW() WHERE id = ?`, string(auditBytes), errMsg, id)
+				if err != nil {
+					return nil, nil, err
+				}
+				_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET error_message = ?, updated_at = NOW()
+					WHERE id = ? AND status NOT IN ('COMPENSATION_FAILED', 'COMPLETED', 'COMPENSATED')`,
+					fmt.Sprintf("step %s failed: %s", id, errMsg), execID)
+				if err != nil {
+					return nil, nil, err
+				}
+				if err := reconcileTx(ctx, tx, execID, status); err != nil {
+					return nil, nil, err
+				}
+				return nil, nil, tx.Commit()
+			}
+
+			if !pass {
+				_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'SKIPPED', condition_evaluation = ?,
+					updated_at = NOW() WHERE id = ?`, string(auditBytes), id)
+				if err != nil {
+					return nil, nil, err
+				}
+				if err := reconcileTx(ctx, tx, execID, status); err != nil {
+					return nil, nil, err
+				}
+				return nil, nil, tx.Commit()
+			}
+		}
+	}
+
 	resolved, err := resolveConfig(s.Config, json.RawMessage(raw.String), json.RawMessage(original.String), s.IsCompensation)
 	if err != nil {
 		return nil, nil, err
 	}
+	var condEvalVal any
+	if len(condEvalRaw) > 0 {
+		condEvalVal = string(condEvalRaw)
+	}
 	_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'RUNNING', attempt = attempt + 1,
 		locked_by = ?, locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND), config = ?,
-		executed_at = NOW(), next_retry_at = NULL, updated_at = NOW() WHERE id = ?`, worker, r.leaseSeconds(duration), string(resolved), id)
+		condition_evaluation = ?, executed_at = NOW(), next_retry_at = NULL, updated_at = NOW() WHERE id = ?`,
+		worker, r.leaseSeconds(duration), string(resolved), condEvalVal, id)
 	if err != nil {
 		return nil, nil, err
 	}

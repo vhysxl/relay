@@ -23,7 +23,12 @@ func IsValidationError(err error) bool {
 		errors.Is(err, ErrInvalidCompensation),
 		errors.Is(err, ErrIrreversibleCompensation),
 		errors.Is(err, ErrStepTimeoutNegative),
-		errors.Is(err, ErrCompensationTimeoutNegative):
+		errors.Is(err, ErrCompensationTimeoutNegative),
+		errors.Is(err, ErrInvalidCondition),
+		errors.Is(err, ErrConditionMaxDepth),
+		errors.Is(err, ErrConditionMaxNodes),
+		errors.Is(err, ErrConditionNonAncestor),
+		errors.Is(err, ErrConditionAmbiguousAnchor):
 		return true
 	default:
 		return false

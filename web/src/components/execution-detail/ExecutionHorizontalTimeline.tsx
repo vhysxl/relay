@@ -9,6 +9,8 @@ import {
   Copy,
   Check,
   ShieldAlert,
+  SkipForward,
+  GitBranch,
 } from 'lucide-react'
 import type { StepExecution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
@@ -43,6 +45,8 @@ export const ExecutionHorizontalTimeline: React.FC<ExecutionHorizontalTimelinePr
     switch (status) {
       case 'COMPLETED':
         return <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+      case 'SKIPPED':
+        return <SkipForward className="w-4 h-4 text-slate-400 flex-shrink-0" />
       case 'FAILED':
       case 'COMPENSATION_FAILED':
         return <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
@@ -61,6 +65,8 @@ export const ExecutionHorizontalTimeline: React.FC<ExecutionHorizontalTimelinePr
     switch (status) {
       case 'COMPLETED':
         return 'bg-emerald-500'
+      case 'SKIPPED':
+        return 'bg-slate-500'
       case 'FAILED':
       case 'COMPENSATION_FAILED':
         return 'bg-rose-500'
@@ -160,7 +166,7 @@ export const ExecutionHorizontalTimeline: React.FC<ExecutionHorizontalTimelinePr
                   {/* Bottom Row: Attempt & Rollback badge */}
                   <div className="flex items-center justify-between pl-1 pt-1 border-t border-neutral-800/80 text-[10px] font-mono text-neutral-500">
                     <span>
-                      Attempt {step.attempt || 1}/{step.max_attempts || 1}
+                      Attempt {step.attempt ?? 0}/{step.max_attempts || 1}
                     </span>
                     {step.is_compensation && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-950/50 text-amber-400 border border-amber-800/60 flex items-center gap-0.5">
@@ -211,7 +217,7 @@ export const ExecutionHorizontalTimeline: React.FC<ExecutionHorizontalTimelinePr
                 </span>
               )}
               <span className="px-2 py-0.5 rounded-md bg-neutral-800/80 border border-neutral-700/60 font-medium text-neutral-300">
-                Attempt: {selectedStep.attempt || 1}/{selectedStep.max_attempts || 1}
+                Attempt: {selectedStep.attempt ?? 0}/{selectedStep.max_attempts || 1}
               </span>
               {selectedStep.timeout_seconds && (
                 <span className="px-2 py-0.5 rounded-md bg-neutral-800/80 border border-neutral-700/60 font-medium text-neutral-300">
@@ -225,6 +231,102 @@ export const ExecutionHorizontalTimeline: React.FC<ExecutionHorizontalTimelinePr
               )}
             </div>
           </div>
+
+          {/* Condition Evaluation (if evaluated or condition defined) */}
+          {(selectedStep.condition_evaluation || selectedStep.when) && (
+            <div className="bg-[#121212] border border-neutral-800 rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                <div className="flex items-center space-x-2 text-xs font-bold text-neutral-200">
+                  <GitBranch className="w-4 h-4 text-indigo-400" />
+                  <span>Condition & Evaluation Audit</span>
+                </div>
+                {selectedStep.condition_evaluation && (
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                      selectedStep.condition_evaluation.error
+                        ? 'bg-rose-950/50 text-rose-400 border border-rose-800/60'
+                        : selectedStep.condition_evaluation.result
+                        ? 'bg-emerald-950/50 text-emerald-400 border border-emerald-800/60'
+                        : 'bg-slate-900/80 text-slate-400 border border-slate-700/60'
+                    }`}
+                  >
+                    {selectedStep.condition_evaluation.error
+                      ? 'Evaluation Error'
+                      : selectedStep.condition_evaluation.result
+                      ? 'Condition Met (True)'
+                      : 'Condition False (Skipped)'}
+                  </span>
+                )}
+              </div>
+
+              {selectedStep.condition_evaluation?.error && (
+                <div className="bg-rose-950/30 border border-rose-900/60 p-2.5 rounded text-xs font-mono text-rose-300">
+                  {selectedStep.condition_evaluation.error}
+                </div>
+              )}
+
+              {selectedStep.condition_evaluation?.checks && selectedStep.condition_evaluation.checks.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+                    Evaluated Checks
+                  </span>
+                  <div className="overflow-x-auto rounded border border-neutral-800 bg-[#0c0c0c]">
+                    <table className="w-full text-left font-mono text-xs divide-y divide-neutral-800">
+                      <thead className="bg-[#161616] text-[10px] uppercase text-neutral-400 font-semibold">
+                        <tr>
+                          <th className="py-2 px-3">Anchor Ref</th>
+                          <th className="py-2 px-3">Op</th>
+                          <th className="py-2 px-3">Expected</th>
+                          <th className="py-2 px-3">Actual Value</th>
+                          <th className="py-2 px-3 text-right">Result</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-800/80 text-[11px]">
+                        {selectedStep.condition_evaluation.checks.map((c: any, i: number) => (
+                          <tr key={i} className="hover:bg-neutral-800/20">
+                            <td className="py-2 px-3 font-semibold text-indigo-300">{c.ref || c.anchor}</td>
+                            <td className="py-2 px-3 font-bold text-neutral-200">{c.op}</td>
+                            <td className="py-2 px-3 text-neutral-400">
+                              {c.expected !== undefined ? JSON.stringify(c.expected) : '—'}
+                            </td>
+                            <td className="py-2 px-3">
+                              {c.missing ? (
+                                <span className="text-amber-400 italic">[path missing]</span>
+                              ) : (
+                                <span className="text-neutral-200">{JSON.stringify(c.actual)}</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {c.result ? (
+                                <span className="text-emerald-400 font-bold inline-flex items-center gap-1">
+                                  <Check className="w-3.5 h-3.5 inline" /> pass
+                                </span>
+                              ) : (
+                                <span className="text-rose-400 font-bold inline-flex items-center gap-1">
+                                  <AlertCircle className="w-3.5 h-3.5 inline" /> fail
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {selectedStep.when && (
+                <details className="text-xs group pt-1">
+                  <summary className="cursor-pointer text-neutral-400 hover:text-neutral-200 select-none flex items-center gap-1.5 font-medium">
+                    <span>When Condition Definition (JSON)</span>
+                  </summary>
+                  <pre className="mt-2 bg-[#0c0c0c] border border-neutral-800 text-indigo-300 p-3 rounded text-[11px] font-mono overflow-x-auto">
+                    {formatJSON(selectedStep.when)}
+                  </pre>
+                </details>
+              )}
+            </div>
+          )}
 
           {/* Failure Alert (if this step failed) */}
           {selectedStep.error_message && (

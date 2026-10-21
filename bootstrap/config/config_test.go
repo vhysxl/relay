@@ -242,3 +242,43 @@ func TestGetIntEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestConditionLimitsConfig(t *testing.T) {
+	t.Run("default values when unset", func(t *testing.T) {
+		depth, err := getIntEnv("CONDITION_MAX_DEPTH", 8)
+		if err != nil || depth != 8 {
+			t.Fatalf("expected depth 8, got %d, err %v", depth, err)
+		}
+		nodes, err := getIntEnv("CONDITION_MAX_NODES", 64)
+		if err != nil || nodes != 64 {
+			t.Fatalf("expected nodes 64, got %d, err %v", nodes, err)
+		}
+	})
+
+	t.Run("override values when set", func(t *testing.T) {
+		t.Setenv("CONDITION_MAX_DEPTH", "12")
+		t.Setenv("CONDITION_MAX_NODES", "128")
+		depth, err := getIntEnv("CONDITION_MAX_DEPTH", 8)
+		if err != nil || depth != 12 {
+			t.Fatalf("expected depth 12, got %d, err %v", depth, err)
+		}
+		nodes, err := getIntEnv("CONDITION_MAX_NODES", 64)
+		if err != nil || nodes != 128 {
+			t.Fatalf("expected nodes 128, got %d, err %v", nodes, err)
+		}
+	})
+
+	t.Run("invalid non-positive values fail with ErrInvalidEnvValue", func(t *testing.T) {
+		t.Setenv("CONDITION_MAX_DEPTH", "0")
+		_, err := getIntEnv("CONDITION_MAX_DEPTH", 8)
+		if !errors.Is(err, errdefs.ErrInvalidEnvValue) {
+			t.Fatalf("expected ErrInvalidEnvValue for 0, got %v", err)
+		}
+
+		t.Setenv("CONDITION_MAX_NODES", "-5")
+		_, err = getIntEnv("CONDITION_MAX_NODES", 64)
+		if !errors.Is(err, errdefs.ErrInvalidEnvValue) {
+			t.Fatalf("expected ErrInvalidEnvValue for negative, got %v", err)
+		}
+	})
+}

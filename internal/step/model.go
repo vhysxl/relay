@@ -25,6 +25,7 @@ type Step struct {
 	Retry        *RetryPolicy    `json:"retry,omitempty" db:"retry"`
 	Compensation *Compensation   `json:"compensation,omitempty" db:"compensation"`
 	Irreversible bool            `json:"irreversible,omitempty" db:"irreversible"`
+	When         json.RawMessage `json:"when,omitempty" db:"condition"`
 	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at" db:"updated_at"`
 }

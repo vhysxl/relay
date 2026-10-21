@@ -82,6 +82,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
       (Boolean(s.error_message) && s.error_message!.trim() !== '')
   )
   const completedStepsCount = steps.filter((s) => s.status === 'COMPLETED').length
+  const skippedStepsCount = steps.filter((s) => s.status === 'SKIPPED').length
   const contextFormatted = formatJSON(execution.context)
 
   return (
@@ -135,7 +136,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
               {execution.status}
             </span>
             <span className="text-xs font-mono text-neutral-400">
-              {completedStepsCount}/{steps.length} steps
+              {completedStepsCount} ok{skippedStepsCount > 0 ? `, ${skippedStepsCount} skip` : ''} / {steps.length}
             </span>
           </div>
         </div>
@@ -193,7 +194,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
                   Step: <strong className="font-mono">{fs.name || fs.step_id}</strong> ({fs.step_id})
                 </span>
                 <span className="font-mono text-neutral-400">
-                  Attempt {fs.attempt || 1}/{fs.max_attempts || 1}
+                  Attempt {fs.attempt ?? 0}/{fs.max_attempts || 1}
                 </span>
               </div>
               <pre className="bg-[#0c0c0c] border border-rose-900/30 rounded p-2 text-xs font-mono text-rose-300 whitespace-pre-wrap break-words">
@@ -229,7 +230,7 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         <div className="flex items-center space-x-2 pt-1">
           <h3 className="text-sm font-bold text-neutral-100">Steps</h3>
           <span className="text-xs font-mono font-medium text-neutral-300 bg-neutral-800/80 px-2 py-0.5 rounded border border-neutral-700/60">
-            {completedStepsCount}/{steps.length}
+            {completedStepsCount} ok{skippedStepsCount > 0 ? `, ${skippedStepsCount} skipped` : ''} / {steps.length}
           </span>
         </div>
 

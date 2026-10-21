@@ -10,22 +10,28 @@ import (
 const stepColumns = `id, workflow_execution_id, step_id, name, type, config, depends_on,
 	status, output, error_message, attempt, max_attempts, timeout_seconds, backoff_seconds,
 	multiplier, max_backoff_seconds, locked_by, locked_until, is_compensation,
-	executed_at, next_retry_at, created_at, updated_at`
+	` + "`condition`" + `, condition_evaluation, executed_at, next_retry_at, created_at, updated_at`
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanStep(row rowScanner) (StepExecution, error) {
 	var s StepExecution
-	var name, deps, output, message, owner sql.NullString
+	var name, deps, output, message, owner, condStr, condEvalStr sql.NullString
 	var config string
 	var until, executed, retry sql.NullTime
 	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &deps,
 		&s.Status, &output, &message, &s.Attempt, &s.MaxAttempts, &s.TimeoutSeconds, &s.BackoffSeconds,
-		&s.Multiplier, &s.MaxBackoffSeconds, &owner, &until, &s.IsCompensation, &executed, &retry, &s.CreatedAt, &s.UpdatedAt)
+		&s.Multiplier, &s.MaxBackoffSeconds, &owner, &until, &s.IsCompensation, &condStr, &condEvalStr, &executed, &retry, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
 	s.Name, s.Config = name.String, json.RawMessage(config)
+	if condStr.Valid && len(condStr.String) > 0 {
+		s.When = json.RawMessage(condStr.String)
+	}
+	if condEvalStr.Valid && len(condEvalStr.String) > 0 {
+		s.ConditionEvaluation = json.RawMessage(condEvalStr.String)
+	}
 	if deps.Valid && len(deps.String) > 0 {
 		if err := json.Unmarshal([]byte(deps.String), &s.DependsOn); err != nil {
 			return s, fmt.Errorf("decode dependencies for %s: %w", s.ID, err)

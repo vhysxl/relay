@@ -69,9 +69,16 @@ func reconcile(status WorkflowStatus, steps []StepExecution) (WorkflowStatus, []
 			if s.IsCompensation {
 				continue
 			}
-			allComplete = allComplete && s.Status == StatusCompleted
+			allComplete = allComplete && (s.Status == StatusCompleted || s.Status == StatusSkipped)
 			if s.Status == StatusWaiting && dependenciesComplete(s.DependsOn, normal) {
 				result[i].Status = StatusPending
+			}
+		}
+		// Compensation for SKIPPED steps must be cancelled
+		for i, s := range result {
+			if s.IsCompensation && normal[s.StepID].Status == StatusSkipped && active(s.Status) {
+				result[i].Status = StatusCancelled
+				comp[s.StepID] = result[i]
 			}
 		}
 		if allComplete {
@@ -100,7 +107,7 @@ func reconcile(status WorkflowStatus, steps []StepExecution) (WorkflowStatus, []
 			continue
 		}
 		original, exists := normal[s.StepID]
-		if !exists || original.Status == StatusFailed || original.Status == StatusCancelled {
+		if !exists || original.Status == StatusFailed || original.Status == StatusCancelled || original.Status == StatusSkipped {
 			result[i].Status = StatusCancelled
 		} else {
 			// Re-evaluate legacy PENDING tickets too: a running original is unsafe.
@@ -139,7 +146,8 @@ func reconcile(status WorkflowStatus, steps []StepExecution) (WorkflowStatus, []
 
 func dependenciesComplete(deps []string, normal map[string]StepExecution) bool {
 	for _, id := range deps {
-		if normal[id].Status != StatusCompleted {
+		st := normal[id].Status
+		if st != StatusCompleted && st != StatusSkipped {
 			return false
 		}
 	}

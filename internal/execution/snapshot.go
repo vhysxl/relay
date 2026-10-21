@@ -18,6 +18,9 @@ func snapshotSteps(execID string, definitions []step.Step, context json.RawMessa
 	result := make([]StepExecution, 0, len(definitions)*2)
 	for _, s := range definitions {
 		normal := snapshotStep(execID, s.ID, s.Name, s.Type, s.Config, s.DependsOn, s.Timeout, s.Retry, context, now)
+		if len(s.When) > 0 {
+			normal.When = append(json.RawMessage(nil), s.When...)
+		}
 		if len(s.DependsOn) == 0 {
 			normal.Status = StatusPending
 		}

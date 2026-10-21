@@ -33,6 +33,7 @@ const (
 	StatusWaiting   ExecutionStatus = "WAITING"
 	StatusPending   ExecutionStatus = "PENDING"
 	StatusCancelled ExecutionStatus = "CANCELLED"
+	StatusSkipped   ExecutionStatus = "SKIPPED"
 )
 
 type WorkflowExecution struct {
@@ -71,9 +72,11 @@ type StepExecution struct {
 	LockedBy    *string    `json:"locked_by,omitempty" db:"locked_by"`
 	LockedUntil *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 
-	IsCompensation bool       `json:"is_compensation" db:"is_compensation"`
-	ExecutedAt     *time.Time `json:"executed_at,omitempty" db:"executed_at"`
-	NextRetryAt    *time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	IsCompensation      bool            `json:"is_compensation" db:"is_compensation"`
+	When                json.RawMessage `json:"when,omitempty" db:"condition"`
+	ConditionEvaluation json.RawMessage `json:"condition_evaluation,omitempty" db:"condition_evaluation"`
+	ExecutedAt          *time.Time      `json:"executed_at,omitempty" db:"executed_at"`
+	NextRetryAt         *time.Time      `json:"next_retry_at,omitempty" db:"next_retry_at"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`

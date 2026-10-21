@@ -28,6 +28,11 @@ var (
 	ErrIrreversibleCompensation    = errors.New("irreversible step cannot define compensation")
 	ErrStepTimeoutNegative         = errors.New("step timeout cannot be negative")
 	ErrCompensationTimeoutNegative = errors.New("compensation timeout cannot be negative")
+	ErrInvalidCondition            = errors.New("invalid step condition")
+	ErrConditionMaxDepth           = errors.New("condition exceeds maximum depth")
+	ErrConditionMaxNodes           = errors.New("condition exceeds maximum nodes")
+	ErrConditionNonAncestor        = errors.New("condition references non-ancestor step output")
+	ErrConditionAmbiguousAnchor    = errors.New("condition context anchor collides with step id")
 
 	// Step execution & runtime
 	ErrStepNotFound = errors.New("step not found")

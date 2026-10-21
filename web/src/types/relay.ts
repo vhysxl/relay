@@ -4,6 +4,7 @@ export type ExecutionStatus =
   | 'PENDING'
   | 'RUNNING'
   | 'COMPLETED'
+  | 'SKIPPED'
   | 'FAILED'
   | 'COMPENSATING'
   | 'COMPENSATED'
@@ -17,12 +18,31 @@ export interface RetryPolicy {
   backoff_coefficient?: number
 }
 
+export interface ConditionCheckDetail {
+  ref: string
+  anchor?: string
+  op: string
+  expected?: any
+  actual?: any
+  missing?: boolean
+  result?: boolean
+  error?: string
+}
+
+export interface ConditionEvaluationAudit {
+  evaluated_at: string
+  result?: boolean
+  error?: string
+  checks?: ConditionCheckDetail[]
+}
+
 export interface Step {
   id: string
   name: string
   type: StepType
   depends_on?: string[]
   config?: any
+  when?: any
   compensation?: Step
   retry?: RetryPolicy
   timeout?: number
@@ -55,6 +75,8 @@ export interface StepExecution {
   timeout_seconds?: number
   depends_on?: string[]
   config?: any
+  when?: any
+  condition_evaluation?: ConditionEvaluationAudit | any
   output?: any
   error_message?: string
   is_compensation?: boolean

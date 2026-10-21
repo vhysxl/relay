@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -149,14 +150,66 @@ func AreJSONEqual(a, b json.RawMessage) bool {
 	if aEmpty || bEmpty {
 		return false
 	}
-	var valA, valB any
-	if err := json.Unmarshal(trimmedA, &valA); err != nil {
+
+	decA := json.NewDecoder(bytes.NewReader(trimmedA))
+	decA.UseNumber()
+	var valA any
+	if err := decA.Decode(&valA); err != nil {
 		return false
 	}
-	if err := json.Unmarshal(trimmedB, &valB); err != nil {
+
+	decB := json.NewDecoder(bytes.NewReader(trimmedB))
+	decB.UseNumber()
+	var valB any
+	if err := decB.Decode(&valB); err != nil {
 		return false
 	}
-	return reflect.DeepEqual(valA, valB)
+
+	normA := normalizeJSONValue(valA)
+	normB := normalizeJSONValue(valB)
+	return reflect.DeepEqual(normA, normB)
+}
+
+type normalizedNumber string
+
+func normalizeJSONValue(v any) any {
+	switch val := v.(type) {
+	case json.Number:
+		if r, ok := new(big.Rat).SetString(string(val)); ok {
+			return normalizedNumber(r.String())
+		}
+		return normalizedNumber(string(val))
+	case float64:
+		r := new(big.Rat).SetFloat64(val)
+		if r != nil {
+			return normalizedNumber(r.String())
+		}
+		return normalizedNumber(fmt.Sprintf("%v", val))
+	case float32:
+		r := new(big.Rat).SetFloat64(float64(val))
+		if r != nil {
+			return normalizedNumber(r.String())
+		}
+		return normalizedNumber(fmt.Sprintf("%v", val))
+	case int:
+		return normalizedNumber(strconv.Itoa(val))
+	case int64:
+		return normalizedNumber(strconv.FormatInt(val, 10))
+	case map[string]any:
+		res := make(map[string]any, len(val))
+		for k, child := range val {
+			res[k] = normalizeJSONValue(child)
+		}
+		return res
+	case []any:
+		res := make([]any, len(val))
+		for i, child := range val {
+			res[i] = normalizeJSONValue(child)
+		}
+		return res
+	default:
+		return val
+	}
 }
 
 // AreStringSlicesEqualUnordered checks whether two string slices contain the same elements

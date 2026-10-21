@@ -120,3 +120,62 @@ func TestContextPreservesNumbersAndAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestReconcileSkippedSteps(t *testing.T) {
+	// a -> b (skipped) -> c (waiting)
+	steps := []StepExecution{
+		ticket("a", StatusCompleted, false),
+		ticket("b", StatusSkipped, false, "a"),
+		ticket("c", StatusWaiting, false, "b"),
+		ticket("a", StatusWaiting, true),
+		ticket("b", StatusWaiting, true),
+	}
+
+	status, next := reconcile(StatusRunning, steps)
+	if status != StatusRunning {
+		t.Fatalf("expected StatusRunning, got %s", status)
+	}
+	// Step c must be PENDING since b is SKIPPED
+	if next[2].Status != StatusPending {
+		t.Fatalf("expected step c to be PENDING, got %s", next[2].Status)
+	}
+	// Step b compensation must be CANCELLED
+	if next[4].Status != StatusCancelled {
+		t.Fatalf("expected step b compensation to be CANCELLED, got %s", next[4].Status)
+	}
+
+	// Complete step c
+	next[2].Status = StatusCompleted
+	status, finalSteps := reconcile(status, next)
+	// Workflow must be COMPLETED because all normal steps are COMPLETED or SKIPPED
+	if status != StatusCompleted {
+		t.Fatalf("expected workflow StatusCompleted, got %s", status)
+	}
+	// Step a compensation must also be CANCELLED
+	if finalSteps[3].Status != StatusCancelled {
+		t.Fatalf("expected step a compensation to be CANCELLED upon completion, got %s", finalSteps[3].Status)
+	}
+
+	// Test rollback through skipped step:
+	// a (completed) -> b (skipped) -> c (failed)
+	// Rollback should cancel b's comp, and compensate a
+	rollbackSteps := []StepExecution{
+		ticket("a", StatusCompleted, false),
+		ticket("b", StatusSkipped, false, "a"),
+		ticket("c", StatusFailed, false, "b"),
+		ticket("a", StatusWaiting, true, "b"),
+		ticket("b", StatusWaiting, true),
+	}
+	status, rollNext := reconcile(StatusRunning, rollbackSteps)
+	if status != StatusCompensating {
+		t.Fatalf("expected StatusCompensating, got %s", status)
+	}
+	if rollNext[4].Status != StatusCancelled {
+		t.Fatalf("expected step b compensation to be CANCELLED, got %s", rollNext[4].Status)
+	}
+	// Step a compensation should be PENDING (since b's compensation is CANCELLED and passed through)
+	if rollNext[3].Status != StatusPending {
+		t.Fatalf("expected step a compensation to be PENDING, got %s", rollNext[3].Status)
+	}
+}
+

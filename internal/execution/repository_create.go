@@ -23,13 +23,17 @@ func (r *executionRepository) CreateExecution(ctx context.Context, exec *Workflo
 		if err != nil {
 			return nil, err
 		}
+		var condVal any
+		if len(s.When) > 0 {
+			condVal = string(s.When)
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO step_executions (
 			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
 			attempt, max_attempts, timeout_seconds, backoff_seconds, multiplier, max_backoff_seconds,
-			is_compensation, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			is_compensation, `+"`condition`"+`, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			s.ID, exec.ID, s.StepID, s.Name, s.Type, string(s.Config), string(deps), s.Status,
 			s.Attempt, s.MaxAttempts, s.TimeoutSeconds, s.BackoffSeconds, s.Multiplier, s.MaxBackoffSeconds,
-			s.IsCompensation, s.CreatedAt, s.UpdatedAt)
+			s.IsCompensation, condVal, s.CreatedAt, s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("insert step %s: %w", s.StepID, err)
 		}

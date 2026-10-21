@@ -61,7 +61,7 @@ func InitApp() (*Application, error) {
 		return nil, fmt.Errorf("rabbitmq: %w", err)
 	}
 
-	validation := validator.NewValidator()
+	validation := validator.NewValidatorWithLimits(conf.ConditionMaxDepth, conf.ConditionMaxNodes)
 	stepRepo := step.NewStepRepository(conf.DB)
 	executionRepo := execution.NewExecutionRepository(conf.DB, conf)
 	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
