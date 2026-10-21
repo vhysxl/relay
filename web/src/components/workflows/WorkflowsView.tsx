@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react'
 import { Search, RotateCw } from 'lucide-react'
-import type { Workflow } from '../../types/relay'
+import type { WorkflowSummary } from '../../types/relay'
 
 interface WorkflowsViewProps {
-  workflows: Workflow[]
+  workflows: WorkflowSummary[]
   isLoading: boolean
   onRefresh: () => void
   onSelectWorkflow: (id: string) => void
@@ -98,7 +98,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                 </tr>
               ) : (
                 filteredWorkflows.map((wf) => {
-                  const stepCount = wf.steps?.length || 0
+                  const stepCount = wf.step_count
 
                   return (
                     <tr

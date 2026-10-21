@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Cpu, HardDrive } from 'lucide-react'
-import type { Workflow, Execution, ViewMode, SystemMetrics } from './types/relay'
+import type { WorkflowSummary, Execution, ViewMode, SystemMetrics } from './types/relay'
 import { Sidebar } from './components/layout/Sidebar'
 import { DashboardView } from './components/dashboard/DashboardView'
 import { WorkflowsView } from './components/workflows/WorkflowsView'
@@ -21,7 +21,7 @@ const initialSystemMetrics: SystemMetrics = {
 }
 
 export const App: React.FC = () => {
-  const [workflows, setWorkflows] = useState<Workflow[]>([])
+  const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
   const [executions, setExecutions] = useState<Execution[]>([])
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics>(initialSystemMetrics)
   const [isLoading, setIsLoading] = useState<boolean>(false)

@@ -96,7 +96,7 @@ func (l *workflowLogic) GetWorkflow(ctx context.Context, name string) (*Workflow
 	return l.repo.GetWorkflow(ctx, name)
 }
 
-func (l *workflowLogic) ListWorkflows(ctx context.Context, limit, offset int) ([]Workflow, error) {
+func (l *workflowLogic) ListWorkflows(ctx context.Context, limit, offset int) ([]WorkflowSummary, error) {
 	limit, offset = util.NormalizePagination(limit, offset, 50, 100)
 	return l.repo.ListWorkflows(ctx, limit, offset)
 }

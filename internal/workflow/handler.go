@@ -90,8 +90,7 @@ func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if wfs == nil {
-		wfs = []Workflow{}
+		wfs = []WorkflowSummary{}
 	}
 	util.WriteJSON(w, http.StatusOK, wfs)
 }
-

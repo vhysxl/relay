@@ -20,7 +20,7 @@ import (
 type mockRepository struct {
 	createFn        func(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error)
 	getFn           func(ctx context.Context, name string) (*workflow.Workflow, error)
-	listWorkflowsFn func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error)
+	listWorkflowsFn func(ctx context.Context, limit, offset int) ([]workflow.WorkflowSummary, error)
 }
 
 func (m *mockRepository) CreateWorkflow(ctx context.Context, wf *workflow.Workflow) (*workflow.Workflow, error) {
@@ -37,15 +37,14 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, name string) (*workflo
 	return nil, errdefs.ErrWorkflowNotFound
 }
 
-func (m *mockRepository) ListWorkflows(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+func (m *mockRepository) ListWorkflows(ctx context.Context, limit, offset int) ([]workflow.WorkflowSummary, error) {
 	if m.listWorkflowsFn != nil {
 		return m.listWorkflowsFn(ctx, limit, offset)
 	}
-	return []workflow.Workflow{}, nil
+	return []workflow.WorkflowSummary{}, nil
 }
 
 var testConfig = &config.Config{MaxPayloadSize: 5}
-
 
 func TestWorkflowLogic_CreateWorkflow_Nil(t *testing.T) {
 	repo := &mockRepository{}
@@ -278,12 +277,13 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		ID:      "test-uuid-1234",
 		Name:    "order-saga",
 		Version: 1,
+		Context: json.RawMessage(`{"currency":"IDR"}`),
 		Steps: []step.Step{
 			{
 				ID:         "step-1",
 				WorkflowID: "test-uuid-1234",
 				Type:       step.StepTypeHTTP,
-				Config:     json.RawMessage(`{}`),
+				Config:     json.RawMessage(`{"url":"https://example.test","body":{"amount":100}}`),
 			},
 		},
 	}
@@ -318,6 +318,9 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	if len(fetched.Steps) != 1 || fetched.Steps[0].ID != "step-1" {
 		t.Errorf("expected 1 step with id step-1, got %+v", fetched.Steps)
 	}
+	if !bytes.Equal(fetched.Context, testWf.Context) || len(fetched.Steps) != 1 || !bytes.Equal(fetched.Steps[0].Config, testWf.Steps[0].Config) {
+		t.Error("detail response must preserve workflow context and step config")
+	}
 
 	// Test not found
 	reqNotFound := httptest.NewRequest(http.MethodGet, "/workflows/unknown-id", nil)
@@ -338,8 +341,6 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		t.Fatalf("expected status 400 for empty name, got %d", recEmpty.Code)
 	}
 }
-
-
 
 func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 	existingWf := &workflow.Workflow{
@@ -580,19 +581,15 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 	}
 }
 
-func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
-	expectedSteps := []step.Step{
-		{ID: "s-1", Name: "Step 1", Type: step.StepTypeHTTP},
-		{ID: "s-2", Name: "Step 2", Type: step.StepTypeMessage},
-	}
+func TestWorkflowLogic_ListWorkflows_Summaries(t *testing.T) {
 	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.WorkflowSummary, error) {
 			capturedLimit = limit
 			capturedOffset = offset
-			return []workflow.Workflow{
-				{ID: "wf-1", Name: "Order Flow", Steps: expectedSteps},
-				{ID: "wf-2", Name: "Invoice Flow", Steps: []step.Step{}},
+			return []workflow.WorkflowSummary{
+				{ID: "wf-1", Name: "Order Flow", StepCount: 2},
+				{ID: "wf-2", Name: "Invoice Flow", StepCount: 0},
 			}, nil
 		},
 	}
@@ -604,8 +601,8 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 	if len(wfs) != 2 {
 		t.Fatalf("expected 2 workflows, got %d", len(wfs))
 	}
-	if len(wfs[0].Steps) != 2 {
-		t.Errorf("expected 2 steps in wf-1, got %d", len(wfs[0].Steps))
+	if wfs[0].StepCount != 2 || wfs[1].StepCount != 0 {
+		t.Errorf("unexpected step counts: %+v", wfs)
 	}
 	if capturedLimit != 20 || capturedOffset != 10 {
 		t.Errorf("expected limit=20, offset=10, got limit=%d, offset=%d", capturedLimit, capturedOffset)
@@ -615,10 +612,10 @@ func TestWorkflowLogic_ListWorkflows_Batch(t *testing.T) {
 func TestWorkflowLogic_ListWorkflows_PaginationNormalization(t *testing.T) {
 	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.WorkflowSummary, error) {
 			capturedLimit = limit
 			capturedOffset = offset
-			return []workflow.Workflow{}, nil
+			return []workflow.WorkflowSummary{}, nil
 		},
 	}
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
@@ -642,15 +639,15 @@ func TestWorkflowLogic_ListWorkflows_PaginationNormalization(t *testing.T) {
 	}
 }
 
-
 func TestWorkflowHandler_ListWorkflows(t *testing.T) {
 	var capturedLimit, capturedOffset int
 	repo := &mockRepository{
-		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.Workflow, error) {
+		listWorkflowsFn: func(ctx context.Context, limit, offset int) ([]workflow.WorkflowSummary, error) {
 			capturedLimit = limit
 			capturedOffset = offset
-			return []workflow.Workflow{
-				{ID: "wf-1", Name: "Order Flow", Version: 1},
+			return []workflow.WorkflowSummary{
+				{ID: "wf-1", Name: "Order Flow", Version: 1, StepCount: 3},
+				{ID: "wf-2", Name: "Empty Flow", Version: 2, StepCount: 0},
 			}, nil
 		},
 	}
@@ -670,12 +667,26 @@ func TestWorkflowHandler_ListWorkflows(t *testing.T) {
 		t.Errorf("expected limit=25, offset=50; got limit=%d, offset=%d", capturedLimit, capturedOffset)
 	}
 
-	var wfs []workflow.Workflow
-	if err := json.NewDecoder(rec.Body).Decode(&wfs); err != nil {
+	var wfs []workflow.WorkflowSummary
+	if err := json.Unmarshal(rec.Body.Bytes(), &wfs); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if len(wfs) != 1 || wfs[0].Name != "Order Flow" {
+	if len(wfs) != 2 || wfs[0].Name != "Order Flow" || wfs[0].StepCount != 3 || wfs[1].StepCount != 0 {
 		t.Errorf("unexpected workflows response: %+v", wfs)
+	}
+	var payload []map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range payload {
+		for _, field := range []string{"context", "steps", "config"} {
+			if _, ok := summary[field]; ok {
+				t.Errorf("list response must not include %q", field)
+			}
+		}
+		if _, ok := summary["step_count"]; !ok {
+			t.Error("list response must include step_count, including for zero steps")
+		}
 	}
 
 	// 2. Default without query params
@@ -688,6 +699,34 @@ func TestWorkflowHandler_ListWorkflows(t *testing.T) {
 	}
 	if capturedLimit != 50 || capturedOffset != 0 {
 		t.Errorf("expected default limit=50, offset=0; got limit=%d, offset=%d", capturedLimit, capturedOffset)
+	}
+}
+
+func TestWorkflowHandler_ListWorkflows_EmptyAndError(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "empty", status: http.StatusOK},
+		{name: "database error", err: errors.New("query failed"), status: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockRepository{
+				listWorkflowsFn: func(context.Context, int, int) ([]workflow.WorkflowSummary, error) {
+					return nil, tc.err
+				},
+			}
+			h := workflow.NewWorkflowHandler(workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3), testConfig)
+			rec := httptest.NewRecorder()
+			h.ListWorkflows(rec, httptest.NewRequest(http.MethodGet, "/workflows", nil))
+			if rec.Code != tc.status {
+				t.Fatalf("expected status %d, got %d", tc.status, rec.Code)
+			}
+			if tc.err == nil && strings.TrimSpace(rec.Body.String()) != "[]" {
+				t.Fatalf("expected empty JSON array, got %s", rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -952,6 +991,3 @@ func TestWorkflowHandler_GetWorkflow_InternalServerError(t *testing.T) {
 		t.Fatalf("expected status 500 for database error, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
-
-
-

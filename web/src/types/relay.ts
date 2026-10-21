@@ -28,11 +28,19 @@ export interface Step {
   timeout?: number
 }
 
-export interface Workflow {
+interface WorkflowMetadata {
   id: string
   name: string
   version: number
   created_at: string
+  updated_at?: string
+}
+
+export interface WorkflowSummary extends WorkflowMetadata {
+  step_count: number
+}
+
+export interface Workflow extends WorkflowMetadata {
   steps?: Step[]
 }
 

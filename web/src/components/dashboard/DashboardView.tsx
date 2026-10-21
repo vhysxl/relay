@@ -12,12 +12,12 @@ import {
   HardDrive,
   Boxes,
 } from 'lucide-react'
-import type { Workflow, Execution, ViewMode, SystemMetrics } from '../../types/relay'
+import type { WorkflowSummary, Execution, ViewMode, SystemMetrics } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
 import { formatTimestamp, formatUptime } from '../../utils/format'
 
 interface DashboardViewProps {
-  workflows: Workflow[]
+  workflows: WorkflowSummary[]
   executions: Execution[]
   systemMetrics?: SystemMetrics | null
   isLoading?: boolean
@@ -345,7 +345,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             ) : (
               workflows.slice(0, 5).map((wf) => {
-                const stepCount = wf.steps?.length || 0
+                const stepCount = wf.step_count
                 return (
                   <div
                     key={wf.id}

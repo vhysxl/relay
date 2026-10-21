@@ -318,13 +318,30 @@ Relay mengekspos REST API standar untuk mendaftarkan definisi alur kerja, men-tr
 | Method | Endpoint | Deskripsi |
 | :--- | :--- | :--- |
 | `POST` | `/workflows` | Mendaftarkan workflow definition baru beserta steps DAG. |
-| `GET` | `/workflows` | Mengambil seluruh workflow definitions yang terdaftar. |
+| `GET` | `/workflows` | Mengambil ringkasan versi terbaru setiap workflow: metadata dan `step_count`, tanpa context atau steps/config. Mendukung `limit` (default 50, maksimum 100) dan `offset`. |
 | `GET` | `/workflows/{id}` | Mengambil detail workflow definition spesifik berdasarkan ID. |
 | `POST` | `/workflows/{id}/execute` | Memulai/men-trigger instance eksekusi baru dari workflow definition. |
 | `GET` | `/executions` | Mengambil seluruh riwayat tiket eksekusi beserta detail step-nya. |
 | `GET` | `/executions/{id}` | Mengambil data status dan output dari sebuah tiket eksekusi spesifik. |
 | `GET` | `/dashboard` / `GET /` | Mengakses Web Observability Dashboard interaktif. |
 | `GET` | `/history` | Mengakses halaman tabular riwayat Execution History. |
+
+Contoh response `GET /workflows?limit=50&offset=0`:
+
+```json
+[
+  {
+    "id": "710d3e9f-0e4f-4f1e-9189-02c731e0672c",
+    "name": "ecommerce.checkout_saga",
+    "version": 1,
+    "created_at": "2026-09-23T23:30:00Z",
+    "updated_at": "2026-09-23T23:30:00Z",
+    "step_count": 4
+  }
+]
+```
+
+Untuk mengambil context, konfigurasi, dan seluruh step DAG, panggil endpoint detail `GET /workflows/{name}`. List kosong tetap dikembalikan sebagai `[]`; `step_count` tetap tersedia ketika nilainya nol.
 
 ---
 

@@ -104,20 +104,26 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, name string) (*Wor
 	return &wf, nil
 }
 
-func (r *workflowRepository) ListWorkflows(ctx context.Context, limit, offset int) ([]Workflow, error) {
+func (r *workflowRepository) ListWorkflows(ctx context.Context, limit, offset int) ([]WorkflowSummary, error) {
 	if r.db == nil {
-		return []Workflow{}, nil
+		return []WorkflowSummary{}, nil
 	}
+	// Paginate metadata first so step counts are evaluated only for this page.
 	query := `
-		SELECT wd.id, wd.name, wd.version, wd.context, wd.created_at, wd.updated_at
-		FROM workflow_definitions wd
-		INNER JOIN (
-			SELECT name, MAX(version) AS max_version
-			FROM workflow_definitions
-			GROUP BY name
-		) latest ON wd.name = latest.name AND wd.version = latest.max_version
-		ORDER BY wd.created_at DESC
-		LIMIT ? OFFSET ?
+		SELECT page.id, page.name, page.version, page.created_at, page.updated_at,
+		       (SELECT COUNT(*) FROM step_definitions sd WHERE sd.workflow_id = page.id) AS step_count
+		FROM (
+			SELECT wd.id, wd.name, wd.version, wd.created_at, wd.updated_at
+			FROM workflow_definitions wd
+			INNER JOIN (
+				SELECT name, MAX(version) AS max_version
+				FROM workflow_definitions
+				GROUP BY name
+			) latest ON wd.name = latest.name AND wd.version = latest.max_version
+			ORDER BY wd.created_at DESC, wd.id DESC
+			LIMIT ? OFFSET ?
+		) page
+		ORDER BY page.created_at DESC, page.id DESC
 	`
 	rows, err := r.db.QueryContext(ctx, query, limit, offset)
 	if err != nil {
@@ -125,49 +131,23 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context, limit, offset in
 	}
 	defer rows.Close()
 
-	var wfs []Workflow
+	var wfs []WorkflowSummary
 	for rows.Next() {
-		var (
-			wf      Workflow
-			ctxData sql.NullString
-		)
+		var wf WorkflowSummary
 		if err := rows.Scan(
 			&wf.ID,
 			&wf.Name,
 			&wf.Version,
-			&ctxData,
 			&wf.CreatedAt,
 			&wf.UpdatedAt,
+			&wf.StepCount,
 		); err != nil {
 			return nil, err
-		}
-		if ctxData.Valid && len(ctxData.String) > 0 {
-			wf.Context = json.RawMessage(ctxData.String)
 		}
 		wfs = append(wfs, wf)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-
-	if r.stepRepo != nil && len(wfs) > 0 {
-		wfIDs := make([]string, len(wfs))
-		for i, wf := range wfs {
-			wfIDs[i] = wf.ID
-		}
-
-		stepsMap, err := r.stepRepo.GetStepsByWorkflowIDs(ctx, wfIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		for i := range wfs {
-			if steps, ok := stepsMap[wfs[i].ID]; ok {
-				wfs[i].Steps = steps
-			} else {
-				wfs[i].Steps = []step.Step{}
-			}
-		}
 	}
 
 	return wfs, nil
