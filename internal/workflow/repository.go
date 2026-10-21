@@ -155,14 +155,17 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context, limit, offset in
 		for i, wf := range wfs {
 			wfIDs[i] = wf.ID
 		}
+
 		stepsMap, err := r.stepRepo.GetStepsByWorkflowIDs(ctx, wfIDs)
-		if err == nil {
-			for i := range wfs {
-				if steps, ok := stepsMap[wfs[i].ID]; ok {
-					wfs[i].Steps = steps
-				} else {
-					wfs[i].Steps = []step.Step{}
-				}
+		if err != nil {
+			return nil, err
+		}
+
+		for i := range wfs {
+			if steps, ok := stepsMap[wfs[i].ID]; ok {
+				wfs[i].Steps = steps
+			} else {
+				wfs[i].Steps = []step.Step{}
 			}
 		}
 	}

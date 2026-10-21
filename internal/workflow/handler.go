@@ -48,8 +48,10 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 		switch {
 		case errors.Is(err, errdefs.ErrWorkflowAlreadyExists):
 			util.WriteJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
-		default:
+		case errdefs.IsValidationError(err):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		}
 		return
 	}
@@ -69,8 +71,10 @@ func (h *WorkflowHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, errdefs.ErrWorkflowNotFound):
 			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
-		default:
+		case errors.Is(err, errdefs.ErrInvalidWorkflowName):
 			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		}
 		return
 	}
@@ -90,3 +94,4 @@ func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) 
 	}
 	util.WriteJSON(w, http.StatusOK, wfs)
 }
+

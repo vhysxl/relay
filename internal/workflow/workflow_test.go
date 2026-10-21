@@ -898,5 +898,60 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 	}
 }
 
+func TestWorkflowHandler_CreateWorkflow_InternalServerError(t *testing.T) {
+	dbErr := errors.New("database connection refused")
+	repo := &mockRepository{
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			return nil, dbErr
+		},
+	}
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
+
+	body, _ := json.Marshal(workflow.WorkflowRequest{
+		Name:    "test-db-err",
+		Version: 1,
+		Steps: []step.Step{
+			{
+				ID:     "s1",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{"url":"https://test.local"}`),
+			},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.CreateWorkflow(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500 for database error, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWorkflowHandler_GetWorkflow_InternalServerError(t *testing.T) {
+	dbErr := errors.New("database disk full")
+	repo := &mockRepository{
+		getFn: func(ctx context.Context, name string) (*workflow.Workflow, error) {
+			return nil, dbErr
+		},
+	}
+	v := validator.NewValidator()
+	logic := workflow.NewWorkflowLogic(repo, v, 3)
+	handler := workflow.NewWorkflowHandler(logic, testConfig)
+
+	req := httptest.NewRequest(http.MethodGet, "/workflows/test-db-err", nil)
+	req.SetPathValue("name", "test-db-err")
+	rec := httptest.NewRecorder()
+
+	handler.GetWorkflow(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500 for database error, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 
 
