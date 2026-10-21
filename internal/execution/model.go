@@ -11,23 +11,35 @@ import (
 
 type ExecutionStatus string
 
+type WorkflowStatus = ExecutionStatus
+type StepStatus = ExecutionStatus
+
+// Shared statuses (Workflow & Step)
 const (
-	StatusPending            ExecutionStatus = "PENDING"
-	StatusWaiting            ExecutionStatus = "WAITING"
 	StatusRunning            ExecutionStatus = "RUNNING"
 	StatusCompleted          ExecutionStatus = "COMPLETED"
 	StatusFailed             ExecutionStatus = "FAILED"
-	StatusCompensating       ExecutionStatus = "COMPENSATING"
 	StatusCompensated        ExecutionStatus = "COMPENSATED"
 	StatusCompensationFailed ExecutionStatus = "COMPENSATION_FAILED"
-	StatusCancelled          ExecutionStatus = "CANCELLED"
+)
+
+// Workflow-only status
+const (
+	StatusCompensating ExecutionStatus = "COMPENSATING"
+)
+
+// Step-only statuses
+const (
+	StatusWaiting   ExecutionStatus = "WAITING"
+	StatusPending   ExecutionStatus = "PENDING"
+	StatusCancelled ExecutionStatus = "CANCELLED"
 )
 
 type WorkflowExecution struct {
 	ID           string          `json:"id" db:"id"`
 	WorkflowID   string          `json:"workflow_id" db:"workflow_id"`
 	WorkflowName string          `json:"workflow_name,omitempty" db:"-"`
-	Status       ExecutionStatus `json:"status" db:"status"`
+	Status       WorkflowStatus  `json:"status" db:"status"`
 	Context      json.RawMessage `json:"context,omitempty" db:"context"`
 	ErrorMessage *string         `json:"error_message,omitempty" db:"error_message"`
 	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
@@ -44,7 +56,7 @@ type StepExecution struct {
 	Type                string          `json:"type" db:"type"`
 	Config              json.RawMessage `json:"config" db:"config"`
 	DependsOn           []string        `json:"depends_on,omitempty" db:"depends_on"`
-	Status              ExecutionStatus `json:"status" db:"status"`
+	Status              StepStatus      `json:"status" db:"status"`
 
 	Output       json.RawMessage `json:"output,omitempty" db:"output"`
 	ErrorMessage *string         `json:"error_message,omitempty" db:"error_message"`
