@@ -474,10 +474,18 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
 
 > **Tips:** Parameter `{id}` di URL dapat berupa **UUID** ataupun **Nama Workflow** secara langsung (misal: `ecommerce.checkout_saga`), sehingga aplikasi client tidak perlu menghafal atau me-lookup UUID acak.
 
+#### Ketentuan Idempotency-Key
+- Header `Idempotency-Key` bersifat **wajib** (`1–128` byte ASCII printable tanpa whitespace).
+- Key berlaku dalam scope **nama workflow logis** lintas versi.
+- Response mengembalikan status `201 Created` dengan header `Idempotency-Replayed: false` untuk eksekusi baru dan `Idempotency-Replayed: true` untuk replay permintaan yang identik.
+- Jika key yang sama dikirimkan dengan input berbeda atau ID versi eksplisit yang berbeda, endpoint mengembalikan `409 Conflict`.
+- Request body `raw-context` maupun `wrapped-context` (`{"context": {...}}`) yang menghasilkan context sama dianggap setara. Context kosong, `null`, dan body kosong dinormalisasi menjadi `{}`.
+
 - **Request (Memanggil langsung dengan Nama Workflow):**
   ```http
   POST http://localhost:8000/workflows/ecommerce.checkout_saga/execute
   Content-Type: application/json
+  Idempotency-Key: checkout:ORD-20260923-001
 
   {
     "context": {
@@ -488,8 +496,12 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
   }
   ```
 
-- **Response:** `202 Accepted`
-  ```json
+- **Response:** `201 Created`
+  ```http
+  HTTP/1.1 201 Created
+  Content-Type: application/json
+  Idempotency-Replayed: false
+
   {
     "id": "afd70011-56d5-45f6-a590-bf514bf2091d",
     "workflow_id": "710d3e9f-0e4f-4f1e-9189-02c731e0672c",
@@ -555,9 +567,10 @@ Dipanggil untuk polling atau mendapatkan status akhir tiket eksekusi.
 
 #### A. Menggunakan cURL
 ```bash
-# 1. Trigger eksekusi workflow
-EXECUTION_ID=$(curl -s -X POST http://localhost:8000/workflows/710d3e9f-0e4f-4f1e-9189-02c731e0672c/execute \
+# 1. Trigger eksekusi workflow dengan Idempotency-Key wajib
+EXECUTION_ID=$(curl -s -X POST http://localhost:8000/workflows/ecommerce.checkout_saga/execute \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: checkout:ORD-1001" \
   -d '{"context":{"order_id":"ORD-1001"}}' | jq -r '.id')
 
 # 2. Cek status eksekusi
@@ -571,10 +584,16 @@ import axios from 'axios';
 export class RelayClient {
   private readonly baseUrl = 'http://localhost:8000';
 
-  async triggerWorkflow(workflowId: string, context: Record<string, any>) {
-    const response = await axios.post(`${this.baseUrl}/workflows/${workflowId}/execute`, {
-      context,
-    });
+  async triggerWorkflow(workflowId: string, idempotencyKey: string, context: Record<string, any>) {
+    const response = await axios.post(
+      `${this.baseUrl}/workflows/${workflowId}/execute`,
+      { context },
+      {
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      }
+    );
     return response.data; // { id: "execution-uuid", status: "RUNNING", ... }
   }
 
@@ -596,17 +615,28 @@ import (
 	"net/http"
 )
 
-func TriggerWorkflow(workflowID string, payload map[string]interface{}) (string, error) {
+func TriggerWorkflow(workflowID string, idempotencyKey string, payload map[string]interface{}) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{"context": payload})
-	resp, err := http.Post(
+	req, err := http.NewRequest(
+		http.MethodPost,
 		fmt.Sprintf("http://localhost:8000/workflows/%s/execute", workflowID),
-		"application/json",
 		bytes.NewBuffer(body),
 	)
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	var result struct {
 		ID     string `json:"id"`

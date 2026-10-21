@@ -28,7 +28,9 @@ func IsValidationError(err error) bool {
 		errors.Is(err, ErrConditionMaxDepth),
 		errors.Is(err, ErrConditionMaxNodes),
 		errors.Is(err, ErrConditionNonAncestor),
-		errors.Is(err, ErrConditionAmbiguousAnchor):
+		errors.Is(err, ErrConditionAmbiguousAnchor),
+		errors.Is(err, ErrIdempotencyKeyRequired),
+		errors.Is(err, ErrInvalidIdempotencyKey):
 		return true
 	default:
 		return false

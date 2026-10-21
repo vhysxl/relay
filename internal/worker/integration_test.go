@@ -756,11 +756,16 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 
 	// 2. Trigger workflow with custom initial context
 	customContext := json.RawMessage(`{"order_id":"ORD-456","amount":75000}`)
-	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
-		Context: customContext,
+	wfResp, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+		Context:        customContext,
 	})
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
+	}
+	wfExec, err := execRepo.GetExecution(ctx, wfResp.ID)
+	if err != nil {
+		t.Fatalf("failed to get execution: %v", err)
 	}
 
 	if wfExec.Status != execution.StatusRunning {
@@ -871,8 +876,9 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 
 	// 4. Trigger workflow execution
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{"batch_id":"batch-123"}`),
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+		Context:        json.RawMessage(`{"batch_id":"batch-123"}`),
 	})
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
@@ -984,7 +990,9 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	}
 
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+	})
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
@@ -1149,7 +1157,9 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	}
 
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+	})
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
@@ -1288,7 +1298,9 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	wfExec, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, nil)
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+	})
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}
@@ -1449,7 +1461,9 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	wfExec, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, nil)
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+	})
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}

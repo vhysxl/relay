@@ -17,9 +17,41 @@ import (
 )
 
 type mockRepository struct {
-	executeFn        func(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error)
-	listExecutionsFn func(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error)
-	getExecutionFn   func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error)
+	executeFn               func(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error)
+	createWithIdempotencyFn func(ctx context.Context, exec *execution.WorkflowExecution, record *execution.ExecutionRequestRecord, targetIsExplicitID bool, targetID string) (*execution.ExecuteWorkflowResponse, bool, error)
+	getExecutionRequestFn   func(ctx context.Context, workflowName string, idempotencyKey string) (*execution.ExecutionRequestRecord, error)
+	listExecutionsFn        func(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error)
+	getExecutionFn          func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error)
+}
+
+func (m *mockRepository) CreateExecutionWithIdempotency(ctx context.Context, exec *execution.WorkflowExecution, record *execution.ExecutionRequestRecord, targetIsExplicitID bool, targetID string) (*execution.ExecuteWorkflowResponse, bool, error) {
+	if m.createWithIdempotencyFn != nil {
+		return m.createWithIdempotencyFn(ctx, exec, record, targetIsExplicitID, targetID)
+	}
+	if m.executeFn != nil {
+		wExec, err := m.executeFn(ctx, exec.WorkflowID, exec.Context)
+		if err != nil {
+			return nil, false, err
+		}
+		return &execution.ExecuteWorkflowResponse{
+			ID:         wExec.ID,
+			WorkflowID: wExec.WorkflowID,
+			Status:     string(wExec.Status),
+			Context:    wExec.Context,
+			TotalSteps: len(wExec.Steps),
+			CreatedAt:  wExec.CreatedAt,
+		}, false, nil
+	}
+	var receipt execution.ExecuteWorkflowResponse
+	_ = json.Unmarshal(record.ResponseReceipt, &receipt)
+	return &receipt, false, nil
+}
+
+func (m *mockRepository) GetExecutionRequest(ctx context.Context, workflowName string, idempotencyKey string) (*execution.ExecutionRequestRecord, error) {
+	if m.getExecutionRequestFn != nil {
+		return m.getExecutionRequestFn(ctx, workflowName, idempotencyKey)
+	}
+	return nil, errdefs.ErrExecutionRequestNotFound
 }
 
 func (m *mockRepository) CreateExecution(ctx context.Context, exec *execution.WorkflowExecution) (*execution.WorkflowExecution, error) {
@@ -61,21 +93,40 @@ func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
 	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
+	// Missing / empty IdempotencyKey
+	_, _, err := logic.ExecuteWorkflow(context.Background(), "wf-1", nil)
+	if err != errdefs.ErrIdempotencyKeyRequired {
+		t.Fatalf("expected errdefs.ErrIdempotencyKeyRequired, got %v", err)
+	}
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "wf-1", &execution.ExecuteWorkflowRequest{})
+	if err != errdefs.ErrIdempotencyKeyRequired {
+		t.Fatalf("expected errdefs.ErrIdempotencyKeyRequired, got %v", err)
+	}
+
+	// Invalid IdempotencyKey
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "wf-1", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: "invalid key with spaces",
+	})
+	if err != errdefs.ErrInvalidIdempotencyKey {
+		t.Fatalf("expected errdefs.ErrInvalidIdempotencyKey, got %v", err)
+	}
+
 	// Empty name
-	_, err := logic.ExecuteWorkflow(context.Background(), "", nil)
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "", &execution.ExecuteWorkflowRequest{IdempotencyKey: "key-1"})
 	if err != errdefs.ErrInvalidWorkflowName {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowName, got %v", err)
 	}
 
 	// Whitespace name
-	_, err = logic.ExecuteWorkflow(context.Background(), "   ", nil)
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "   ", &execution.ExecuteWorkflowRequest{IdempotencyKey: "key-1"})
 	if err != errdefs.ErrInvalidWorkflowName {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowName, got %v", err)
 	}
 
 	// Invalid JSON context
-	_, err = logic.ExecuteWorkflow(context.Background(), "wf-1", &execution.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{invalid-json`),
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "wf-1", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: "key-1",
+		Context:        json.RawMessage(`{invalid-json`),
 	})
 	if err != errdefs.ErrInvalidWorkflowContext {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
@@ -86,14 +137,15 @@ func TestExecutionLogic_ExecuteWorkflow_Success(t *testing.T) {
 	repo := &mockRepository{}
 	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
-	exec, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
-		Context: json.RawMessage(`{"user_id":100}`),
+	resp, replayed, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: "key-success-1",
+		Context:        json.RawMessage(`{"user_id":100}`),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if exec == nil || exec.WorkflowID != "wf-123" {
-		t.Fatalf("expected valid execution, got %+v", exec)
+	if resp == nil || resp.WorkflowID != "wf-123" || replayed {
+		t.Fatalf("expected valid non-replayed execution, got %+v, replayed=%v", resp, replayed)
 	}
 }
 
@@ -198,11 +250,15 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	body := bytes.NewBufferString(`{"context":{"amount":50000}}`)
 	req := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", body)
 	req.SetPathValue("name", "wf-1")
+	req.Header.Set("Idempotency-Key", "key-handler-1")
 	rec := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Idempotency-Replayed") != "false" {
+		t.Errorf("expected Idempotency-Replayed: false, got %s", rec.Header().Get("Idempotency-Replayed"))
 	}
 
 	var resp execution.ExecuteWorkflowResponse
@@ -220,6 +276,7 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	rawBody := bytes.NewBufferString(`{"amount":99000}`)
 	reqRaw := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", rawBody)
 	reqRaw.SetPathValue("name", "wf-1")
+	reqRaw.Header.Set("Idempotency-Key", "key-handler-2")
 	recRaw := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recRaw, reqRaw)
@@ -230,6 +287,7 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	// 3. Trigger with empty body
 	reqEmpty := httptest.NewRequest(http.MethodPost, "/workflows/wf-1/execute", nil)
 	reqEmpty.SetPathValue("name", "wf-1")
+	reqEmpty.Header.Set("Idempotency-Key", "key-handler-3")
 	recEmpty := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recEmpty, reqEmpty)
@@ -240,6 +298,7 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	// 4. Unknown workflow -> 404
 	reqUnknown := httptest.NewRequest(http.MethodPost, "/workflows/unknown-wf/execute", nil)
 	reqUnknown.SetPathValue("name", "unknown-wf")
+	reqUnknown.Header.Set("Idempotency-Key", "key-handler-4")
 	recUnknown := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recUnknown, reqUnknown)
@@ -249,6 +308,7 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 
 	// 5. Empty workflow name -> 400
 	reqEmptyName := httptest.NewRequest(http.MethodPost, "/workflows//execute", nil)
+	reqEmptyName.Header.Set("Idempotency-Key", "key-handler-5")
 	recEmptyName := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recEmptyName, reqEmptyName)

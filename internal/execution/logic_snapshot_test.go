@@ -20,6 +20,21 @@ func (r snapshotRepository) CreateExecution(_ context.Context, s *WorkflowExecut
 	return s, r.create(s)
 }
 
+func (r snapshotRepository) CreateExecutionWithIdempotency(_ context.Context, s *WorkflowExecution, record *ExecutionRequestRecord, _ bool, _ string) (*ExecuteWorkflowResponse, bool, error) {
+	if r.create != nil {
+		if err := r.create(s); err != nil {
+			return nil, false, err
+		}
+	}
+	var receipt ExecuteWorkflowResponse
+	_ = json.Unmarshal(record.ResponseReceipt, &receipt)
+	return &receipt, false, nil
+}
+
+func (r snapshotRepository) GetExecutionRequest(_ context.Context, _ string, _ string) (*ExecutionRequestRecord, error) {
+	return nil, errdefs.ErrExecutionRequestNotFound
+}
+
 type snapshotReader struct {
 	read func(string) (*workflow.Workflow, error)
 }
@@ -68,7 +83,10 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 		}
 		return wf, nil
 	}})
-	_, err := logic.ExecuteWorkflow(context.Background(), " checkout ", &ExecuteWorkflowRequest{Context: json.RawMessage(`{"nested":{"override":true}}`)})
+	_, _, err := logic.ExecuteWorkflow(context.Background(), " checkout ", &ExecuteWorkflowRequest{
+		IdempotencyKey: "key-snapshot-1",
+		Context:        json.RawMessage(`{"nested":{"override":true}}`),
+	})
 	if err != nil || !called {
 		t.Fatalf("execute: %v", err)
 	}
@@ -88,7 +106,7 @@ func TestLogicExecutionFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			created := false
 			logic := NewExecutionLogic(snapshotRepository{create: func(*WorkflowExecution) error { created = true; return tc.writeErr }}, snapshotReader{read: func(string) (*workflow.Workflow, error) { return &workflow.Workflow{ID: "wf"}, tc.readErr }})
-			_, err := logic.ExecuteWorkflow(context.Background(), "wf", nil)
+			_, _, err := logic.ExecuteWorkflow(context.Background(), "wf", &ExecuteWorkflowRequest{IdempotencyKey: "key-failure-1"})
 			want := tc.readErr
 			if want == nil {
 				want = tc.writeErr

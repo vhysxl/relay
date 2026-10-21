@@ -36,6 +36,35 @@ func mergeContext(base, override json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(obj)
 }
 
+func normalizeInputContext(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return json.RawMessage("{}"), nil
+	}
+	obj, err := contextObject(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	if len(obj) == 0 {
+		return json.RawMessage("{}"), nil
+	}
+	return json.RawMessage(trimmed), nil
+}
+
+func evaluateReplay(record *ExecutionRequestRecord, normalizedInput json.RawMessage, targetIsExplicitID bool, targetID string) (*ExecuteWorkflowResponse, error) {
+	if !util.AreJSONEqual(record.InputContext, normalizedInput) {
+		return nil, errdefs.ErrIdempotencyConflict
+	}
+	var receipt ExecuteWorkflowResponse
+	if err := json.Unmarshal(record.ResponseReceipt, &receipt); err != nil {
+		return nil, fmt.Errorf("unmarshal stored receipt: %w", err)
+	}
+	if targetIsExplicitID && targetID != receipt.WorkflowID {
+		return nil, errdefs.ErrIdempotencyConflict
+	}
+	return &receipt, nil
+}
+
 // RawMessage keeps identifiers and monetary values exact while updating context.
 func accumulateOutput(raw json.RawMessage, s StepExecution, output json.RawMessage) (json.RawMessage, error) {
 	obj, err := contextObject(raw)

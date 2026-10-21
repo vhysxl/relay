@@ -39,8 +39,12 @@ var (
 	ErrLockLost     = errors.New("heartbeat failed: step execution lock lost or not running")
 
 	// Workflow Execution
-	ErrExecutionNotFound = errors.New("execution not found")
-	ErrEmptyExecutionID  = errors.New("execution id is required")
+	ErrExecutionNotFound        = errors.New("execution not found")
+	ErrEmptyExecutionID         = errors.New("execution id is required")
+	ErrIdempotencyKeyRequired   = errors.New("idempotency key is required")
+	ErrInvalidIdempotencyKey    = errors.New("idempotency key is invalid")
+	ErrIdempotencyConflict      = errors.New("idempotency key conflict: request payload or version mismatch")
+	ErrExecutionRequestNotFound = errors.New("execution request not found")
 
 	// Worker & task claiming
 	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")

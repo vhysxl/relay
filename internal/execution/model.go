@@ -7,6 +7,7 @@ import (
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 type ExecutionStatus string
@@ -83,7 +84,17 @@ type StepExecution struct {
 }
 
 type ExecuteWorkflowRequest struct {
-	Context json.RawMessage `json:"context,omitempty"`
+	Context        json.RawMessage `json:"context,omitempty"`
+	IdempotencyKey string          `json:"-"`
+}
+
+type ExecutionRequestRecord struct {
+	WorkflowName        string          `db:"workflow_name"`
+	IdempotencyKey      string          `db:"idempotency_key"`
+	WorkflowExecutionID string          `db:"workflow_execution_id"`
+	InputContext        json.RawMessage `db:"input_context"`
+	ResponseReceipt     json.RawMessage `db:"response_receipt"`
+	CreatedAt           time.Time       `db:"created_at"`
 }
 
 type ExecuteWorkflowResponse struct {
@@ -100,15 +111,30 @@ type ErrorResponse struct {
 }
 
 type ExecutionLogic interface {
-	ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*WorkflowExecution, error)
+	ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*ExecuteWorkflowResponse, bool, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
 }
 
 type ExecutionRepository interface {
+	CreateExecutionWithIdempotency(ctx context.Context, exec *WorkflowExecution, record *ExecutionRequestRecord, targetIsExplicitID bool, targetID string) (*ExecuteWorkflowResponse, bool, error)
+	GetExecutionRequest(ctx context.Context, workflowName string, idempotencyKey string) (*ExecutionRequestRecord, error)
 	CreateExecution(ctx context.Context, execution *WorkflowExecution) (*WorkflowExecution, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
+}
+
+func ValidateIdempotencyKey(key string) error {
+	if len(key) < 1 || len(key) > 128 {
+		return errdefs.ErrInvalidIdempotencyKey
+	}
+	for i := 0; i < len(key); i++ {
+		b := key[i]
+		if b < 33 || b > 126 {
+			return errdefs.ErrInvalidIdempotencyKey
+		}
+	}
+	return nil
 }
 
 type WorkflowReader interface {

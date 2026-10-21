@@ -35,7 +35,13 @@ func conditionalRuntimeDB(t *testing.T, steps []step.Step, contextJSON json.RawM
 	}
 	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
 	logic := execution.NewExecutionLogic(repo, wfRepo)
-	exec, err := logic.ExecuteWorkflow(ctx, wf.ID, nil)
+	resp, _, err := logic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+		IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := repo.GetExecution(ctx, resp.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,24 @@ func (h *ExecutionHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	keyHeaders := r.Header.Values("Idempotency-Key")
+	if len(keyHeaders) == 0 {
+		h.writeError(w, errdefs.ErrIdempotencyKeyRequired)
+		return
+	}
+	if len(keyHeaders) > 1 {
+		h.writeError(w, errdefs.ErrInvalidIdempotencyKey)
+		return
+	}
+	idempotencyKey := keyHeaders[0]
+	if err := ValidateIdempotencyKey(idempotencyKey); err != nil {
+		h.writeError(w, err)
+		return
+	}
+
 	var req ExecuteWorkflowRequest
+	req.IdempotencyKey = idempotencyKey
+
 	if r.Body != nil {
 		if h.maxPayloadSize > 0 {
 			if r.ContentLength > h.maxPayloadSize {
@@ -76,19 +93,16 @@ func (h *ExecutionHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	exec, err := h.logic.ExecuteWorkflow(r.Context(), name, &req)
+	resp, replayed, err := h.logic.ExecuteWorkflow(r.Context(), name, &req)
 	if err != nil {
 		h.writeError(w, err)
 		return
 	}
 
-	resp := ExecuteWorkflowResponse{
-		ID:         exec.ID,
-		WorkflowID: exec.WorkflowID,
-		Status:     string(exec.Status),
-		Context:    exec.Context,
-		TotalSteps: len(exec.Steps),
-		CreatedAt:  exec.CreatedAt,
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	} else {
+		w.Header().Set("Idempotency-Replayed", "false")
 	}
 
 	util.WriteJSON(w, http.StatusCreated, resp)
@@ -128,8 +142,11 @@ func (h *ExecutionHandler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errdefs.ErrWorkflowNotFound), errors.Is(err, errdefs.ErrExecutionNotFound):
 		status, message = http.StatusNotFound, err.Error()
-	case errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID):
+	case errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID),
+		errors.Is(err, errdefs.ErrIdempotencyKeyRequired), errors.Is(err, errdefs.ErrInvalidIdempotencyKey):
 		status, message = http.StatusBadRequest, err.Error()
+	case errors.Is(err, errdefs.ErrIdempotencyConflict):
+		status, message = http.StatusConflict, err.Error()
 	case errors.Is(err, errdefs.ErrPayloadTooLarge):
 		status, message = http.StatusRequestEntityTooLarge, err.Error()
 	default:
