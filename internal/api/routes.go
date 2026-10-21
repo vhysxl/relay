@@ -14,7 +14,7 @@ import (
 func RegisterRoutes(mux *http.ServeMux, app *app.Application) {
 
 	workflowHandler := workflow.NewWorkflowHandler(app.WorkflowLogic, app.Config)
-	executionHandler := execution.NewExecutionHandler(app.ExecutionLogic)
+	executionHandler := execution.NewExecutionHandler(app.ExecutionLogic, app.Config)
 
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())

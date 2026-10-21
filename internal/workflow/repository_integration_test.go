@@ -2,34 +2,20 @@ package workflow_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/testutil"
 	"github.com/vhysxl/relay/internal/workflow"
 )
 
 func TestWorkflowRepository_ListWorkflows_MySQL(t *testing.T) {
-	dsn := os.Getenv("TEST_DB_DSN")
-	if dsn == "" {
-		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true&clientFoundRows=true"
-	}
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := db.PingContext(pingCtx); err != nil {
-		t.Skipf("skipping integration test, cannot ping db: %v", err)
-	}
+	db := testutil.OpenMySQL(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	repo := workflow.NewWorkflowRepository(db, step.NewStepRepository(db))

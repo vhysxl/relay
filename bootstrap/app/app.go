@@ -63,11 +63,11 @@ func InitApp() (*Application, error) {
 
 	validation := validator.NewValidator()
 	stepRepo := step.NewStepRepository(conf.DB)
-	executionRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
+	executionRepo := execution.NewExecutionRepository(conf.DB, conf)
 	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
 
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, conf.ConcurrentRetryLimit)
-	executionLogic := execution.NewExecutionLogic(executionRepo)
+	executionLogic := execution.NewExecutionLogic(executionRepo, workflowRepo)
 	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration)
 
 	hostname, err := os.Hostname()

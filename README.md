@@ -6,7 +6,19 @@ Relay adalah distributed workflow engine dan task orchestrator berkinerja tinggi
 
 ---
 
+## Pengujian backend
+
+Jalankan `go vet ./...` dan `go test -race -timeout 5m ./...`.
+Untuk menyertakan tes integrasi, set `TEST_DB_DSN` ke server **MySQL 8.4 khusus tes**
+(contoh `root:test_password@tcp(127.0.0.1:3306)/?parseTime=true&clientFoundRows=true`).
+Akun tersebut memerlukan izin CREATE/DROP DATABASE. Setiap tes membuat schema
+`relay_test_<uuid>`, menerapkan seluruh migrasi `.up.sql` secara berurutan, lalu
+menghapus hanya schema tersebut. Tanpa DSN tes integrasi dilewati; jika DSN sudah
+diatur, koneksi atau migrasi yang gagal membuat tes gagal. Job CI `integration`
+menyediakan server tersebut dan menjalankan tes dengan race detector.
+
 ## Daftar Isi
+
 1. [Workflow & Step Definition Guide](#1-workflow--step-definition-guide)
    - [1.1 Struktur Workflow Definition](#11-struktur-workflow-definition)
    - [1.2 Struktur Step Definition](#12-struktur-step-definition)

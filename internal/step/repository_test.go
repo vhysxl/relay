@@ -4,35 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"testing"
-	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/testutil"
 )
 
-func getStepTestDB(t *testing.T) *sql.DB {
-	dsn := os.Getenv("TEST_DB_DSN")
-	if dsn == "" {
-		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true&clientFoundRows=true"
-	}
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Skipf("skipping integration test, cannot open db: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		t.Skipf("skipping integration test, cannot ping db: %v", err)
-	}
-
-	return db
-}
+func getStepTestDB(t *testing.T) *sql.DB { return testutil.OpenMySQL(t) }
 
 func TestStepRepository_CreateAndGetSteps(t *testing.T) {
 	db := getStepTestDB(t)

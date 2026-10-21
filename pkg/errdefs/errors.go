@@ -35,6 +35,7 @@ var (
 
 	// Workflow Execution
 	ErrExecutionNotFound = errors.New("execution not found")
+	ErrEmptyExecutionID  = errors.New("execution id is required")
 
 	// Worker & task claiming
 	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")

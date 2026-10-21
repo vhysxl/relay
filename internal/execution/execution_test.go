@@ -3,15 +3,16 @@ package execution_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
@@ -21,15 +22,15 @@ type mockRepository struct {
 	getExecutionFn   func(ctx context.Context, executionID string) (*execution.WorkflowExecution, error)
 }
 
-func (m *mockRepository) ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error) {
+func (m *mockRepository) CreateExecution(ctx context.Context, exec *execution.WorkflowExecution) (*execution.WorkflowExecution, error) {
 	if m.executeFn != nil {
-		return m.executeFn(ctx, name, initialContext)
+		return m.executeFn(ctx, exec.WorkflowID, exec.Context)
 	}
 	return &execution.WorkflowExecution{
 		ID:         "exec-123",
-		WorkflowID: name,
+		WorkflowID: exec.WorkflowID,
 		Status:     execution.StatusRunning,
-		Context:    initialContext,
+		Context:    exec.Context,
 	}, nil
 }
 
@@ -47,33 +48,18 @@ func (m *mockRepository) GetExecution(ctx context.Context, executionID string) (
 	return nil, errdefs.ErrExecutionNotFound
 }
 
-func (m *mockRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-	return nil, nil, nil
-}
+type workflowReader struct{}
 
-func (m *mockRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
-	return 0, nil
-}
-
-func (m *mockRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error {
-	return nil
-}
-
-func (m *mockRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-	return nil
-}
-
-func (m *mockRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-	return nil
-}
-
-func (m *mockRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-	return nil
+func (workflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.Workflow, error) {
+	if name == "unknown-wf" {
+		return nil, errdefs.ErrWorkflowNotFound
+	}
+	return &workflow.Workflow{ID: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := execution.NewExecutionLogic(repo)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
 	// Empty name
 	_, err := logic.ExecuteWorkflow(context.Background(), "", nil)
@@ -98,7 +84,7 @@ func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 
 func TestExecutionLogic_ExecuteWorkflow_Success(t *testing.T) {
 	repo := &mockRepository{}
-	logic := execution.NewExecutionLogic(repo)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
 	exec, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{"user_id":100}`),
@@ -127,7 +113,7 @@ func TestExecutionLogic_ListExecutions(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
 	// Test pagination normalization
 	execs, err := logic.ListExecutions(context.Background(), 20, 10)
@@ -163,7 +149,7 @@ func TestExecutionLogic_GetExecution(t *testing.T) {
 			return nil, errdefs.ErrExecutionNotFound
 		},
 	}
-	logic := execution.NewExecutionLogic(repo)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
 
 	// Empty ID
 	_, err := logic.GetExecution(context.Background(), "")
@@ -205,8 +191,8 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo)
-	handler := execution.NewExecutionHandler(logic)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Trigger with {"context": {"amount": 50000}}
 	body := bytes.NewBufferString(`{"context":{"amount":50000}}`)
@@ -282,8 +268,8 @@ func TestExecutionHandler_ListExecutions(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo)
-	handler := execution.NewExecutionHandler(logic)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// With query parameters ?limit=25&offset=50
 	req := httptest.NewRequest(http.MethodGet, "/executions?limit=25&offset=50", nil)
@@ -315,8 +301,8 @@ func TestExecutionHandler_GetExecution(t *testing.T) {
 			return nil, errdefs.ErrExecutionNotFound
 		},
 	}
-	logic := execution.NewExecutionLogic(repo)
-	handler := execution.NewExecutionHandler(logic)
+	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Found -> 200 OK
 	reqFound := httptest.NewRequest(http.MethodGet, "/executions/exec-found", nil)

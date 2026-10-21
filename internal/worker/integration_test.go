@@ -5,60 +5,23 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/testutil"
 	"github.com/vhysxl/relay/internal/validator"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
-func getTestDB(t *testing.T) *sql.DB {
-	dsn := os.Getenv("TEST_DB_DSN")
-	if dsn == "" {
-		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true&clientFoundRows=true"
-	}
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Skipf("skipping integration test, cannot open db: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		t.Skipf("skipping integration test, cannot ping db: %v", err)
-	}
-
-	cleanDB(t, db)
-
-	return db
-}
-
-func cleanDB(t *testing.T, db *sql.DB) {
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, "DELETE FROM step_executions"); err != nil {
-		t.Logf("cleanDB step_executions error: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "DELETE FROM workflow_executions"); err != nil {
-		t.Logf("cleanDB workflow_executions error: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "DELETE FROM step_definitions"); err != nil {
-		t.Logf("cleanDB step_definitions error: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, "DELETE FROM workflow_definitions"); err != nil {
-		t.Logf("cleanDB workflow_definitions error: %v", err)
-	}
-}
+func getTestDB(t *testing.T) *sql.DB { return testutil.OpenMySQL(t) }
 
 func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	db := getTestDB(t)
@@ -71,7 +34,7 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. CREATE WORKFLOW + STEPS
@@ -223,6 +186,12 @@ func TestIntegration_Workflow_Steps_And_ClaimNext(t *testing.T) {
 	compStepExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, `INSERT INTO step_executions (id, workflow_execution_id, step_id, name, type, config, status, is_compensation, created_at, updated_at) VALUES (?, ?, 'step-rollback', 'Rollback Payment', 'http', '{}', 'PENDING', TRUE, NOW(), NOW())`, compStepExecID, compWfExecID)
 
+	// Compensation requires a successfully completed original.
+	if _, err := db.ExecContext(ctx, `INSERT INTO step_executions (id, workflow_execution_id, step_id, type, config, status, is_compensation)
+ VALUES (?, ?, 'step-rollback', 'http', '{}', 'COMPLETED', FALSE)`, uuid.NewString(), compWfExecID); err != nil {
+		t.Fatal(err)
+	}
+
 	// ClaimNext should pick the COMPENSATING step first!
 	compStep, compExec, err := workerLogic.ClaimNext(ctx, "worker-1")
 	if err != nil {
@@ -244,7 +213,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create test workflow and step definition
@@ -403,8 +372,7 @@ func TestIntegration_CompleteStep(t *testing.T) {
 
 	ctx := context.Background()
 
-	stepRepo := step.NewStepRepository(db)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create test workflow and execution
@@ -513,8 +481,7 @@ func TestIntegration_FailStep_Retry(t *testing.T) {
 
 	ctx := context.Background()
 
-	stepRepo := step.NewStepRepository(db)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
@@ -590,8 +557,7 @@ func TestIntegration_FailStep_ExhaustedAndCompensation(t *testing.T) {
 
 	ctx := context.Background()
 
-	stepRepo := step.NewStepRepository(db)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
@@ -705,8 +671,7 @@ func TestIntegration_FailStep_FirstStepFails_TransitionsDirectlyToFailed(t *test
 
 	ctx := context.Background()
 
-	stepRepo := step.NewStepRepository(db)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
@@ -766,8 +731,8 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
-	execLogic := execution.NewExecutionLogic(execRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create a workflow definition with 1 step
@@ -801,7 +766,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	if wfExec.Status != execution.StatusRunning {
 		t.Errorf("expected workflow status RUNNING, got %s", wfExec.Status)
 	}
-	if string(wfExec.Context) != string(customContext) {
+	if !util.AreJSONEqual(wfExec.Context, customContext) {
 		t.Errorf("expected context %s, got %s", string(customContext), string(wfExec.Context))
 	}
 	if len(wfExec.Steps) != 1 {
@@ -852,7 +817,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
@@ -905,7 +870,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	}()
 
 	// 4. Trigger workflow execution
-	execLogic := execution.NewExecutionLogic(execRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
 		Context: json.RawMessage(`{"batch_id":"batch-123"}`),
 	})
@@ -954,7 +919,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// Workflow: Step A -> (Step B & Step C in parallel) -> Step D
@@ -1018,7 +983,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execLogic := execution.NewExecutionLogic(execRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
@@ -1132,7 +1097,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	// Step A -> (Step B & Step C in parallel)
@@ -1183,7 +1148,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execLogic := execution.NewExecutionLogic(execRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
 	wfExec, err := execLogic.ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to execute workflow: %v", err)
@@ -1229,10 +1194,10 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	if err != nil {
 		t.Fatalf("failed to check slow comp status: %v", err)
 	}
-	if slowCompStatus != "PENDING" {
-		t.Fatalf("CRITICAL: Sibling step %s was RUNNING, but its compensation ticket was set to %s instead of PENDING!", slowExec.StepID, slowCompStatus)
+	if slowCompStatus != "WAITING" {
+		t.Fatalf("CRITICAL: Sibling step %s was RUNNING, but its compensation ticket was set to %s instead of WAITING!", slowExec.StepID, slowCompStatus)
 	}
-	t.Logf("✓ Verified sibling step %s compensation ticket was protected and remained PENDING while RUNNING!", slowExec.StepID)
+	t.Logf("✓ Verified sibling step %s compensation ticket was protected and remained WAITING while RUNNING!", slowExec.StepID)
 
 	// 5. Worker now finishes the slow step successfully
 	if err := workerLogic.CompleteStep(ctx, slowExec.ID, slowWorker, json.RawMessage(`{"status":"ok"}`)); err != nil {
@@ -1275,7 +1240,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
@@ -1323,7 +1288,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	wfExec, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}
@@ -1389,7 +1354,15 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 
 	// Check full object substitution:
 	expectedMeta := `{"role":"admin","tier":2}`
-	if !strings.Contains(configStr, expectedMeta) {
+	var resolvedConfig struct {
+		Body struct {
+			FullMeta json.RawMessage `json:"full_meta"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal(se2.Config, &resolvedConfig); err != nil {
+		t.Fatal(err)
+	}
+	if !util.AreJSONEqual(resolvedConfig.Body.FullMeta, json.RawMessage(expectedMeta)) {
 		t.Errorf("expected meta object %s in config, got %s", expectedMeta, configStr)
 	}
 
@@ -1427,7 +1400,7 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, stepRepo)
+	execRepo := execution.NewExecutionRepository(db, nil)
 	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
 
 	wfID := uuid.NewString()
@@ -1476,7 +1449,7 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	wfExec, err := execRepo.ExecuteWorkflowTx(ctx, wf.ID, nil)
+	wfExec, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, nil)
 	if err != nil {
 		t.Fatalf("failed to trigger workflow: %v", err)
 	}

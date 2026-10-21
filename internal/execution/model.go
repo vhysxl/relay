@@ -2,11 +2,11 @@ package execution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/workflow"
 )
 
 type ExecutionStatus string
@@ -103,14 +103,22 @@ type ExecutionLogic interface {
 }
 
 type ExecutionRepository interface {
-	ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*WorkflowExecution, error)
+	CreateExecution(ctx context.Context, execution *WorkflowExecution) (*WorkflowExecution, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
+}
+
+type WorkflowReader interface {
+	GetWorkflow(ctx context.Context, name string) (*workflow.Workflow, error)
+}
+
+// Repository is the SQL store's combined contract. Consumers depend on the
+// smaller interfaces they need, rather than this wiring interface.
+type Repository interface {
+	ExecutionRepository
 	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error)
 	ReapExpiredSteps(ctx context.Context) (int64, error)
-	WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error
 	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
 	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
 	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
-

@@ -3,41 +3,19 @@ package execution_test
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/testutil"
 )
 
-func getExecutionTestDB(t *testing.T) *sql.DB {
-	dsn := os.Getenv("TEST_DB_DSN")
-	if dsn == "" {
-		dsn = "relay:relay@tcp(localhost:3306)/relay_taskqueue?parseTime=true&clientFoundRows=true"
-	}
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Skipf("skipping integration test, cannot open db: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
-		t.Skipf("skipping integration test, cannot ping db: %v", err)
-	}
-
-	return db
-}
+func getExecutionTestDB(t *testing.T) *sql.DB { return testutil.OpenMySQL(t) }
 
 func TestRepository_ReapExpiredSteps(t *testing.T) {
 	db := getExecutionTestDB(t)
-	stepRepo := step.NewStepRepository(db)
-	repo := execution.NewExecutionRepository(db, stepRepo)
+	repo := execution.NewExecutionRepository(db, nil)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -108,8 +86,7 @@ func TestRepository_ReapExpiredSteps(t *testing.T) {
 
 func TestRepository_WakeUpDependents_And_ClaimPending(t *testing.T) {
 	db := getExecutionTestDB(t)
-	stepRepo := step.NewStepRepository(db)
-	repo := execution.NewExecutionRepository(db, stepRepo)
+	repo := execution.NewExecutionRepository(db, nil)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -160,19 +137,14 @@ func TestRepository_WakeUpDependents_And_ClaimPending(t *testing.T) {
 		t.Fatalf("failed to insert step execution B: %v", err)
 	}
 
-	// 1. Wake up dependent steps in transaction
-	tx, err := db.BeginTx(ctx, nil)
+	// Complete the original through the public lifecycle operation.
+	_, err = db.ExecContext(ctx, "UPDATE step_executions SET status='RUNNING', locked_by='worker-a', locked_until=DATE_ADD(NOW(), INTERVAL 30 SECOND) WHERE id=?", seAID)
 	if err != nil {
-		t.Fatalf("failed to begin tx: %v", err)
+		t.Fatal(err)
 	}
-
-	err = repo.WakeUpDependentsTx(ctx, tx, wfExecID, false)
+	err = repo.CompleteStep(ctx, seAID, "worker-a", nil)
 	if err != nil {
-		tx.Rollback()
-		t.Fatalf("WakeUpDependentsTx error: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("failed to commit tx: %v", err)
+		t.Fatal(err)
 	}
 
 	// 2. Verify Step B transitioned from WAITING -> PENDING
@@ -203,8 +175,7 @@ func TestRepository_WakeUpDependents_And_ClaimPending(t *testing.T) {
 
 func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
 	db := getExecutionTestDB(t)
-	stepRepo := step.NewStepRepository(db)
-	repo := execution.NewExecutionRepository(db, stepRepo)
+	repo := execution.NewExecutionRepository(db, nil)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -306,4 +277,3 @@ func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
 		t.Errorf("expected workflow status FAILED, got %s", wfStatus)
 	}
 }
-
