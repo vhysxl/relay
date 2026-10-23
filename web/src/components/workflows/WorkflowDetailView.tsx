@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   ArrowLeft,
   RotateCw,
@@ -15,6 +15,7 @@ import {
 import type { Workflow, Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
 import { formatTimestamp, formatJSON } from '../../utils/format'
+import { sortStepsTopologically } from '../../utils/dag'
 import { WorkflowDagCanvas } from './WorkflowDagCanvas'
 
 interface WorkflowDetailViewProps {
@@ -34,6 +35,10 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'canvas' | 'list' | 'raw'>('canvas')
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
+
+  const orderedSteps = useMemo(() => {
+    return sortStepsTopologically(workflow?.steps || [])
+  }, [workflow?.steps])
 
   const toggleStepExpand = (stepId: string) => {
     setExpandedSteps((prev) => ({ ...prev, [stepId]: !prev[stepId] }))
@@ -204,6 +209,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         <div className="px-5 py-3 bg-[#181818] border-b border-neutral-800 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <button
+              id="workflow-tab-canvas"
               onClick={() => setActiveTab('canvas')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'canvas'
@@ -215,6 +221,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               <span>DAG Canvas</span>
             </button>
             <button
+              id="workflow-tab-list"
               onClick={() => setActiveTab('list')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'list'
@@ -226,6 +233,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
               <span>Step List ({steps.length})</span>
             </button>
             <button
+              id="workflow-tab-raw"
               onClick={() => setActiveTab('raw')}
               className={`px-3 py-1 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'raw'
@@ -247,12 +255,12 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
         {activeTab === 'list' && (
           <div className="divide-y divide-neutral-800/80">
-            {steps.length === 0 ? (
+            {orderedSteps.length === 0 ? (
               <div className="px-5 py-10 text-center text-neutral-500 text-xs">
                 No steps defined in this workflow.
               </div>
             ) : (
-              steps.map((step, idx) => {
+              orderedSteps.map((step, idx) => {
                 const isExpanded = expandedSteps[step.id]
                 return (
                   <div key={step.id || idx} className="p-4 space-y-3">

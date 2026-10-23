@@ -1,15 +1,19 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Layers } from 'lucide-react'
 import type { Workflow } from '../../types/relay'
 import { StepNodeBadge } from './StepNodeBadge'
 import { formatTimestamp } from '../../utils/format'
+import { sortStepsTopologically } from '../../utils/dag'
 
 interface WorkflowCardProps {
   workflow: Workflow
 }
 
 export const WorkflowCard: React.FC<WorkflowCardProps> = ({ workflow }) => {
-  const steps = workflow.steps || []
+  const steps = useMemo(
+    () => sortStepsTopologically(workflow.steps || []),
+    [workflow.steps]
+  )
 
   return (
     <div className="bg-white rounded-lg border border-slate-200/80 shadow-xs p-4 space-y-3 transition-all hover:border-slate-300">

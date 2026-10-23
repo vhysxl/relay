@@ -56,7 +56,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		steps := make([]step.Step, len(req.Steps))
 		for i, s := range req.Steps {
 			s.WorkflowID = id
-			s.CreatedAt = now
+			s.CreatedAt = now.Add(time.Duration(i) * time.Second)
 			s.UpdatedAt = now
 			steps[i] = s
 		}

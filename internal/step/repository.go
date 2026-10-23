@@ -60,7 +60,7 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 
 			stepCreatedAt := s.CreatedAt
 			if stepCreatedAt.IsZero() {
-				stepCreatedAt = now
+				stepCreatedAt = now.Add(time.Duration(start+i) * time.Second)
 			}
 			stepUpdatedAt := s.UpdatedAt
 			if stepUpdatedAt.IsZero() {
