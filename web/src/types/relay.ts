@@ -81,6 +81,8 @@ export interface StepExecution {
   error_message?: string
   is_compensation?: boolean
   executed_at?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface Execution {

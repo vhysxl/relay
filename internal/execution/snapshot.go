@@ -16,8 +16,9 @@ func snapshotSteps(execID string, definitions []step.Step, context json.RawMessa
 		}
 	}
 	result := make([]StepExecution, 0, len(definitions)*2)
-	for _, s := range definitions {
-		normal := snapshotStep(execID, s.ID, s.Name, s.Type, s.Config, s.DependsOn, s.Timeout, s.Retry, context, now)
+	for i, s := range definitions {
+		stepCreatedAt := now.Add(time.Duration(i) * time.Second)
+		normal := snapshotStep(execID, s.ID, s.Name, s.Type, s.Config, s.DependsOn, s.Timeout, s.Retry, context, stepCreatedAt)
 		if len(s.When) > 0 {
 			normal.When = append(json.RawMessage(nil), s.When...)
 		}
@@ -26,7 +27,7 @@ func snapshotSteps(execID string, definitions []step.Step, context json.RawMessa
 		}
 		result = append(result, normal)
 		if c := s.Compensation; c != nil {
-			comp := snapshotStep(execID, s.ID, s.Name+" (Compensation)", c.Type, c.Config, reverse[s.ID], c.Timeout, c.Retry, context, now)
+			comp := snapshotStep(execID, s.ID, s.Name+" (Compensation)", c.Type, c.Config, reverse[s.ID], c.Timeout, c.Retry, context, stepCreatedAt)
 			comp.IsCompensation = true
 			result = append(result, comp)
 		}

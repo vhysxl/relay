@@ -2,14 +2,13 @@ import React, { useState, useEffect } from 'react'
 import {
   ArrowLeft,
   RotateCw,
-  AlertTriangle,
   FileCode,
   ChevronDown,
   Loader2,
 } from 'lucide-react'
 import type { Execution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
-import { ExecutionHorizontalTimeline } from './ExecutionHorizontalTimeline'
+import { ExecutionStepList } from './ExecutionStepList'
 import { formatTimestamp, formatDuration, formatJSON } from '../../utils/format'
 
 interface ExecutionDetailViewProps {
@@ -75,12 +74,6 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
   }
 
   const steps = execution.steps || []
-  const failedSteps = steps.filter(
-    (s) =>
-      s.status === 'FAILED' ||
-      s.status === 'COMPENSATION_FAILED' ||
-      (Boolean(s.error_message) && s.error_message!.trim() !== '')
-  )
   const completedStepsCount = steps.filter((s) => s.status === 'COMPLETED').length
   const skippedStepsCount = steps.filter((s) => s.status === 'SKIPPED').length
   const contextFormatted = formatJSON(execution.context)
@@ -175,36 +168,6 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         </div>
       </div>
 
-      {/* Prominent Failure Alert (if failed) */}
-      {(failedSteps.length > 0 ||
-        execution.status === 'FAILED' ||
-        execution.status === 'COMPENSATION_FAILED') && (
-        <div className="bg-rose-950/20 border border-rose-900/60 rounded-lg p-4 shadow-xs space-y-2">
-          <div className="flex items-center space-x-2 text-rose-400 font-bold text-xs uppercase tracking-wide">
-            <AlertTriangle className="w-4 h-4 text-rose-400" />
-            <span>Execution Failed</span>
-          </div>
-          {failedSteps.map((fs) => (
-            <div
-              key={fs.step_id}
-              className="bg-[#141414] border border-rose-900/40 rounded-md p-3 space-y-1 text-xs"
-            >
-              <div className="flex items-center justify-between font-semibold text-rose-300">
-                <span>
-                  Step: <strong className="font-mono">{fs.name || fs.step_id}</strong> ({fs.step_id})
-                </span>
-                <span className="font-mono text-neutral-400">
-                  Attempt {fs.attempt ?? 0}/{fs.max_attempts || 1}
-                </span>
-              </div>
-              <pre className="bg-[#0c0c0c] border border-rose-900/30 rounded p-2 text-xs font-mono text-rose-300 whitespace-pre-wrap break-words">
-                {fs.error_message || execution.error_message || 'Step execution failed'}
-              </pre>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Collapsible Context Payload */}
       {contextFormatted && contextFormatted !== '{}' && (
         <details className="group bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
@@ -225,16 +188,17 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
         </details>
       )}
 
-      {/* Horizontal Steps Stepper + Active Inspector */}
-      <div className="space-y-2">
+      {/* Steps Section: Execution Step List */}
+      <div className="space-y-3">
         <div className="flex items-center space-x-2 pt-1">
-          <h3 className="text-sm font-bold text-neutral-100">Steps</h3>
+          <h3 className="text-sm font-bold text-neutral-100">Execution Steps</h3>
           <span className="text-xs font-mono font-medium text-neutral-300 bg-neutral-800/80 px-2 py-0.5 rounded border border-neutral-700/60">
             {completedStepsCount} ok{skippedStepsCount > 0 ? `, ${skippedStepsCount} skipped` : ''} / {steps.length}
           </span>
         </div>
 
-        <ExecutionHorizontalTimeline steps={steps} />
+        {/* Step List with inline expandable details & compensation inspection */}
+        <ExecutionStepList execution={execution} />
       </div>
     </div>
   )

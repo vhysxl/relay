@@ -18,12 +18,26 @@ export function formatDuration(startStr?: string | null, endStr?: string | null)
   const end = new Date(endStr)
   const diffMs = end.getTime() - start.getTime()
   if (isNaN(diffMs) || diffMs < 0) return '—'
+  if (diffMs === 0) return '< 1s'
   if (diffMs < 1000) return `${diffMs}ms`
   const sec = (diffMs / 1000).toFixed(2)
   if (Number(sec) < 60) return `${sec}s`
   const min = Math.floor(Number(sec) / 60)
   const remSec = (Number(sec) % 60).toFixed(0)
   return `${min}m ${remSec}s`
+}
+
+export function formatMs(ms: number): string {
+  if (isNaN(ms) || ms < 0) return '—'
+  if (ms === 0) return '< 1s'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60000) {
+    const s = (ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 2)
+    return `${s}s`
+  }
+  const min = Math.floor(ms / 60000)
+  const remS = ((ms % 60000) / 1000).toFixed(0)
+  return `${min}m ${remS}s`
 }
 
 export function formatJSON(data: any): string {

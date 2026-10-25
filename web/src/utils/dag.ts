@@ -1,4 +1,4 @@
-import type { Step } from '../types/relay'
+import type { Step, StepExecution } from '../types/relay'
 
 /**
  * Sorts steps topologically based on their `depends_on` relationships.
@@ -57,6 +57,69 @@ export function sortStepsTopologically(steps: Step[]): Step[] {
     const visited = new Set(sorted.map((s) => s.id))
     steps.forEach((s) => {
       if (!visited.has(s.id)) {
+        sorted.push(s)
+      }
+    })
+  }
+
+  return sorted
+}
+
+/**
+ * Sorts step executions topologically based on their `depends_on` relationships.
+ * Guarantees that upstream prerequisite steps always appear before downstream dependent steps.
+ */
+export function sortStepExecutionsTopologically(steps: StepExecution[]): StepExecution[] {
+  if (!steps || steps.length <= 1) return steps || []
+
+  const stepMap = new Map<string, StepExecution>()
+  const inDegree = new Map<string, number>()
+  const dependents = new Map<string, string[]>()
+
+  steps.forEach((step) => {
+    stepMap.set(step.step_id, step)
+    inDegree.set(step.step_id, step.depends_on?.length || 0)
+    dependents.set(step.step_id, [])
+  })
+
+  steps.forEach((step) => {
+    if (step.depends_on) {
+      step.depends_on.forEach((dep) => {
+        if (dependents.has(dep)) {
+          dependents.get(dep)!.push(step.step_id)
+        }
+      })
+    }
+  })
+
+  const queue: string[] = []
+  steps.forEach((step) => {
+    if ((inDegree.get(step.step_id) || 0) === 0) {
+      queue.push(step.step_id)
+    }
+  })
+
+  const sorted: StepExecution[] = []
+  while (queue.length > 0) {
+    const curr = queue.shift()!
+    const s = stepMap.get(curr)
+    if (s) sorted.push(s)
+
+    const nextSteps = dependents.get(curr) || []
+    for (const next of nextSteps) {
+      const deg = (inDegree.get(next) || 0) - 1
+      inDegree.set(next, deg)
+      if (deg === 0) {
+        queue.push(next)
+      }
+    }
+  }
+
+  // Fallback for any unvisited nodes
+  if (sorted.length < steps.length) {
+    const visited = new Set(sorted.map((s) => s.step_id))
+    steps.forEach((s) => {
+      if (!visited.has(s.step_id)) {
         sorted.push(s)
       }
     })
