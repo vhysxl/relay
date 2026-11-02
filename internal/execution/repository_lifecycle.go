@@ -37,7 +37,7 @@ func (r *executionRepository) ownedStepTx(ctx context.Context, tx *sql.Tx, id, w
 		return StepExecution{}, "", nil, err
 	}
 	s, err := scanStep(tx.QueryRowContext(ctx, `SELECT `+stepColumns+` FROM step_executions
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW() FOR UPDATE`, id, worker))
+		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3) FOR UPDATE`, id, worker))
 	if errors.Is(err, sql.ErrNoRows) {
 		err = errdefs.ErrLockLost
 	}
@@ -70,11 +70,11 @@ func (r *executionRepository) CompleteStep(ctx context.Context, id, worker strin
 		return fmt.Errorf("accumulate output: %w", err)
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = ?, output = ?,
-		locked_by = NULL, locked_until = NULL, next_retry_at = NULL, updated_at = NOW() WHERE id = ?`, next, string(output), id)
+		locked_by = NULL, locked_until = NULL, next_retry_at = NULL, updated_at = NOW(3) WHERE id = ?`, next, string(output), id)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET context = ?, updated_at = NOW() WHERE id = ?`, string(merged), s.WorkflowExecutionID)
+	_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET context = ?, updated_at = NOW(3) WHERE id = ?`, string(merged), s.WorkflowExecutionID)
 	if err != nil {
 		return err
 	}
@@ -106,8 +106,8 @@ func (r *executionRepository) FailStep(ctx context.Context, id, worker, message 
 func recordFailureTx(ctx context.Context, tx *sql.Tx, s StepExecution, status WorkflowStatus, message string) error {
 	if mayRetry(status, s) {
 		_, err := tx.ExecContext(ctx, `UPDATE step_executions SET status = 'PENDING', error_message = ?,
-			next_retry_at = DATE_ADD(NOW(), INTERVAL ? SECOND), locked_by = NULL, locked_until = NULL,
-			updated_at = NOW() WHERE id = ?`, message, retryDelay(s), s.ID)
+			next_retry_at = DATE_ADD(NOW(3), INTERVAL ? SECOND), locked_by = NULL, locked_until = NULL,
+			updated_at = NOW(3) WHERE id = ?`, message, retryDelay(s), s.ID)
 		return err
 	}
 	next := StatusFailed
@@ -115,11 +115,11 @@ func recordFailureTx(ctx context.Context, tx *sql.Tx, s StepExecution, status Wo
 		next = StatusCompensationFailed
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE step_executions SET status = ?, error_message = ?,
-		locked_by = NULL, locked_until = NULL, next_retry_at = NULL, updated_at = NOW() WHERE id = ?`, next, message, s.ID)
+		locked_by = NULL, locked_until = NULL, next_retry_at = NULL, updated_at = NOW(3) WHERE id = ?`, next, message, s.ID)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET error_message = ?, updated_at = NOW()
+	_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET error_message = ?, updated_at = NOW(3)
 		WHERE id = ? AND status NOT IN ('COMPENSATION_FAILED', 'COMPLETED', 'COMPENSATED')`,
 		fmt.Sprintf("step %s failed: %s", s.ID, message), s.WorkflowExecutionID)
 	return err

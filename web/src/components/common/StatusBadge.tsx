@@ -16,7 +16,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-emerald-950/40 text-emerald-400 border-emerald-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <Check className={`${iconClass} text-emerald-400 stroke-[2.5]`} />
@@ -28,7 +28,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-slate-900/70 text-slate-300 border-slate-700/80 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <SkipForward className={`${iconClass} text-slate-400 stroke-[2.5]`} />
@@ -40,7 +40,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-blue-950/40 text-blue-400 border-blue-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <Loader2 className={`${iconClass} text-blue-400 animate-spin`} />
@@ -52,7 +52,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-950/40 text-rose-400 border-rose-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <AlertCircle className={`${iconClass} text-rose-400 stroke-[2.5]`} />
@@ -64,7 +64,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-950/40 text-amber-400 border-amber-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <Loader2 className={`${iconClass} text-amber-400 animate-spin`} />
@@ -76,7 +76,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-amber-950/40 text-amber-400 border-amber-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <RotateCcw className={`${iconClass} text-amber-400 stroke-[2]`} />
@@ -88,7 +88,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1.5 font-bold rounded-lg border bg-rose-950/40 text-rose-400 border-rose-800/60 ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <AlertCircle className={`${iconClass} text-rose-400 stroke-[2.5]`} />
@@ -100,7 +100,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
       return (
         <span
           className={`inline-flex items-center gap-1 font-semibold rounded-lg border bg-neutral-900 text-neutral-400 border-neutral-800 uppercase ${
-            isMd ? 'px-3 py-1 text-xs' : 'px-2.5 py-0.5 text-xs'
+            isMd ? 'px-3 py-1 text-xs sm:text-sm' : 'px-2.5 py-0.5 text-xs'
           }`}
         >
           <span>{status || 'QUEUED'}</span>

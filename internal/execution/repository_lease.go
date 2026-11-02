@@ -24,8 +24,8 @@ func (r *executionRepository) leaseSeconds(duration time.Duration) int64 {
 
 func (r *executionRepository) Heartbeat(ctx context.Context, id, worker string, duration time.Duration) error {
 	res, err := r.db.ExecContext(ctx, `UPDATE step_executions
-		SET locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND), updated_at = NOW()
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW()`, r.leaseSeconds(duration), id, worker)
+		SET locked_until = DATE_ADD(NOW(3), INTERVAL ? SECOND), updated_at = NOW(3)
+		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3)`, r.leaseSeconds(duration), id, worker)
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func (r *executionRepository) Heartbeat(ctx context.Context, id, worker string, 
 	// Support DSNs without clientFoundRows when a same-second heartbeat is a no-op.
 	var exists bool
 	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM step_executions
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW())`, id, worker).Scan(&exists)
+		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3))`, id, worker).Scan(&exists)
 	if err != nil {
 		return err
 	}
@@ -63,8 +63,8 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 	err = tx.QueryRowContext(ctx, `SELECT we.id, we.workflow_id, we.status, we.context
  FROM workflow_executions we WHERE we.status IN ('RUNNING','COMPENSATING')
  AND EXISTS (SELECT 1 FROM step_executions se WHERE se.workflow_execution_id=we.id
-   AND se.status='PENDING' AND (se.next_retry_at IS NULL OR se.next_retry_at<=NOW())
-   AND (se.locked_until IS NULL OR se.locked_until<=NOW())
+   AND se.status='PENDING' AND (se.next_retry_at IS NULL OR se.next_retry_at<=NOW(3))
+   AND (se.locked_until IS NULL OR se.locked_until<=NOW(3))
    AND ((we.status='RUNNING' AND se.is_compensation=FALSE)
      OR (we.status='COMPENSATING' AND se.is_compensation=TRUE)))
  ORDER BY CASE WHEN we.status='COMPENSATING' THEN 0 ELSE 1 END, we.created_at, we.id
@@ -84,7 +84,7 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 	}
 	s, err := scanStep(tx.QueryRowContext(ctx, `SELECT `+stepColumns+` FROM step_executions
  WHERE workflow_execution_id=? AND is_compensation=? AND status='PENDING'
- AND (next_retry_at IS NULL OR next_retry_at<=NOW()) AND (locked_until IS NULL OR locked_until<=NOW())
+ AND (next_retry_at IS NULL OR next_retry_at<=NOW(3)) AND (locked_until IS NULL OR locked_until<=NOW(3))
  ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, execID, status == StatusCompensating))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, tx.Commit()
@@ -142,11 +142,11 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 			if evalErr != nil {
 				errMsg := fmt.Sprintf("condition evaluation error: %v", evalErr)
 				_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'FAILED', condition_evaluation = ?,
-					error_message = ?, updated_at = NOW() WHERE id = ?`, string(auditBytes), errMsg, id)
+					error_message = ?, updated_at = NOW(3) WHERE id = ?`, string(auditBytes), errMsg, id)
 				if err != nil {
 					return nil, nil, err
 				}
-				_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET error_message = ?, updated_at = NOW()
+				_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET error_message = ?, updated_at = NOW(3)
 					WHERE id = ? AND status NOT IN ('COMPENSATION_FAILED', 'COMPLETED', 'COMPENSATED')`,
 					fmt.Sprintf("step %s failed: %s", id, errMsg), execID)
 				if err != nil {
@@ -160,7 +160,7 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 
 			if !pass {
 				_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'SKIPPED', condition_evaluation = ?,
-					updated_at = NOW() WHERE id = ?`, string(auditBytes), id)
+					updated_at = NOW(3) WHERE id = ?`, string(auditBytes), id)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -181,8 +181,8 @@ func (r *executionRepository) ClaimPending(ctx context.Context, worker string, d
 		condEvalVal = string(condEvalRaw)
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = 'RUNNING', attempt = attempt + 1,
-		locked_by = ?, locked_until = DATE_ADD(NOW(), INTERVAL ? SECOND), config = ?,
-		condition_evaluation = ?, executed_at = NOW(), next_retry_at = NULL, updated_at = NOW() WHERE id = ?`,
+		locked_by = ?, locked_until = DATE_ADD(NOW(3), INTERVAL ? SECOND), config = ?,
+		condition_evaluation = ?, executed_at = NOW(3), next_retry_at = NULL, updated_at = NOW(3) WHERE id = ?`,
 		worker, r.leaseSeconds(duration), string(resolved), condEvalVal, id)
 	if err != nil {
 		return nil, nil, err

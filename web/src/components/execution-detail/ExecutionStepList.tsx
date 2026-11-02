@@ -97,20 +97,16 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
       startedAtStr = formatTimestamp(s.executed_at)
       if (s.updated_at) {
         const diff = new Date(s.updated_at).getTime() - new Date(s.executed_at).getTime()
-        if (diff > 0) {
+        if (diff >= 0) {
           durationStr = formatMs(diff)
-        } else {
-          durationStr = '< 1s'
         }
       }
     } else if (hasExecuted) {
       if (s.created_at) startedAtStr = formatTimestamp(s.created_at)
       if (s.created_at && s.updated_at) {
         const diff = new Date(s.updated_at).getTime() - new Date(s.created_at).getTime()
-        if (diff > 0) {
+        if (diff >= 0) {
           durationStr = formatMs(diff)
-        } else {
-          durationStr = '< 1s'
         }
       }
     }
@@ -129,7 +125,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
   return (
     <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden select-none">
       {/* Table Header: Columns */}
-      <div className="grid grid-cols-12 gap-3 items-center px-4 py-3 bg-[#181818] border-b border-neutral-800 text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+      <div className="grid grid-cols-12 gap-3 items-center px-5 py-3.5 bg-[#181818] border-b border-neutral-800 text-xs sm:text-sm font-bold text-neutral-400 uppercase tracking-wider">
         <div className="col-span-5 sm:col-span-4">Step Name</div>
         <div className="col-span-2 sm:col-span-2">Status</div>
         <div className="col-span-2 sm:col-span-2">Duration</div>
@@ -158,7 +154,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
               {/* Row Header (Click to toggle expansion) */}
               <div
                 onClick={() => toggleRow(step.step_id)}
-                className={`grid grid-cols-12 gap-3 items-center px-4 py-3 cursor-pointer group transition select-none ${
+                className={`grid grid-cols-12 gap-3 items-center px-5 py-3.5 cursor-pointer group transition select-none ${
                   step.status === 'FAILED' || step.status === 'COMPENSATION_FAILED'
                     ? 'bg-rose-950/20 hover:bg-rose-950/30'
                     : isExpanded
@@ -167,25 +163,25 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                 }`}
               >
                 {/* Column 1: Step Name & ID & Type */}
-                <div className="col-span-5 sm:col-span-4 flex items-center space-x-2.5 truncate pr-2">
-                  <span className="w-6 h-6 rounded bg-neutral-800 text-neutral-400 font-mono font-bold text-xs flex items-center justify-center flex-shrink-0">
+                <div className="col-span-5 sm:col-span-4 flex items-center space-x-3 truncate pr-2">
+                  <span className="w-8 h-8 rounded-md bg-neutral-800 text-neutral-300 font-mono font-bold text-xs sm:text-sm flex items-center justify-center flex-shrink-0 border border-neutral-700/60 shadow-xs">
                     {stepNumber}
                   </span>
                   <div className="truncate">
-                    <div className="flex items-center gap-1.5 truncate">
-                      <span className="font-bold text-xs text-neutral-100 group-hover:text-white truncate">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-bold text-sm sm:text-base text-neutral-100 group-hover:text-white truncate">
                         {step.name || step.step_id}
                       </span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium uppercase bg-neutral-800 text-neutral-400 border border-neutral-700/60 hidden sm:inline-block">
+                      <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold uppercase bg-neutral-800 text-neutral-300 border border-neutral-700/60 hidden sm:inline-block">
                         {step.type}
                       </span>
                     </div>
-                    <p className="font-mono text-[10px] text-neutral-500 truncate">
+                    <p className="font-mono text-xs sm:text-[13px] text-neutral-400 truncate mt-0.5">
                       {step.step_id}
                     </p>
                     {stepError && (
-                      <p className="font-mono text-[11px] text-rose-400 truncate flex items-center gap-1 mt-0.5 font-medium">
-                        <AlertCircle className="w-3 h-3 text-rose-400 flex-shrink-0" />
+                      <p className="font-mono text-xs sm:text-sm text-rose-400 truncate flex items-center gap-1.5 mt-1 font-medium">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
                         <span className="truncate">{stepError}</span>
                       </p>
                     )}
@@ -194,24 +190,24 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
 
                 {/* Column 2: Status */}
                 <div className="col-span-2 sm:col-span-2 flex items-center">
-                  <StatusBadge status={step.status} size="sm" />
+                  <StatusBadge status={step.status} size="md" />
                 </div>
 
                 {/* Column 3: Duration */}
-                <div className="col-span-2 sm:col-span-2 font-mono text-xs font-semibold text-neutral-300">
+                <div className="col-span-2 sm:col-span-2 font-mono text-sm sm:text-base font-semibold text-neutral-200">
                   {timing.durationStr}
                 </div>
 
                 {/* Column 4: Started At + Rollback Pill + Expand Chevron */}
                 <div className="col-span-3 sm:col-span-4 flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-neutral-400 truncate">
+                  <span className="font-mono text-xs sm:text-sm text-neutral-300 truncate">
                     {timing.startedAtStr}
                   </span>
 
                   <div className="flex items-center space-x-2 flex-shrink-0 pl-2">
                     {compensation && (
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase hidden sm:inline-flex items-center gap-1 ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono font-semibold uppercase hidden sm:inline-flex items-center gap-1.5 ${
                           compensation.status === 'COMPENSATED' || compensation.status === 'REVERTED'
                             ? 'bg-amber-950/60 text-amber-400 border border-amber-800/60'
                             : compensation.status === 'COMPENSATING'
@@ -222,16 +218,16 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                         }`}
                         title={`Compensation: ${compensation.status}`}
                       >
-                        <RotateCcw className="w-2.5 h-2.5" />
+                        <RotateCcw className="w-3 h-3" />
                         <span>Rollback: {compensation.status}</span>
                       </span>
                     )}
 
                     <span className="text-neutral-500 group-hover:text-neutral-300 transition">
                       {isExpanded ? (
-                        <ChevronDown className="w-4 h-4" />
+                        <ChevronDown className="w-5 h-5" />
                       ) : (
-                        <ChevronRight className="w-4 h-4" />
+                        <ChevronRight className="w-5 h-5" />
                       )}
                     </span>
                   </div>
@@ -242,20 +238,20 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
               {isExpanded && (
                 <div className="px-5 py-4 bg-[#111111] border-t border-neutral-800 space-y-4 text-xs select-text">
                   {/* Top Metadata Badges */}
-                  <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-neutral-800 text-[11px] font-mono text-neutral-400">
-                    <span className="px-2 py-0.5 rounded bg-neutral-800 border border-neutral-700/80 text-neutral-300">
+                  <div className="flex flex-wrap items-center gap-2.5 pb-3 border-b border-neutral-800 text-xs sm:text-sm font-mono text-neutral-300">
+                    <span className="px-2.5 py-1 rounded bg-neutral-800 border border-neutral-700/80 text-neutral-200">
                       Step ID: <strong className="text-white">{step.step_id}</strong>
                     </span>
-                    <span className="px-2 py-0.5 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-300">
+                    <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
                       Attempt: {step.attempt ?? 0}/{step.max_attempts || 1}
                     </span>
                     {step.timeout_seconds && (
-                      <span className="px-2 py-0.5 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-300">
+                      <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
                         Timeout: {step.timeout_seconds}s
                       </span>
                     )}
                     {step.depends_on && step.depends_on.length > 0 && (
-                      <span className="px-2 py-0.5 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-300">
+                      <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
                         Depends on: {step.depends_on.join(', ')}
                       </span>
                     )}
@@ -341,27 +337,27 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     {step.config && (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-neutral-300 uppercase tracking-wide">
+                          <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide">
                             Configuration (Input)
                           </span>
                           <button
                             onClick={() => handleCopy(`config-${step.id}`, formatJSON(step.config))}
-                            className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-[10px]"
+                            className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-xs"
                           >
                             {copiedKey === `config-${step.id}` ? (
                               <>
-                                <Check className="w-3 h-3 text-emerald-400" />
-                                <span className="text-emerald-400">Copied</span>
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                <span className="text-emerald-400 font-semibold">Copied</span>
                               </>
                             ) : (
                               <>
-                                <Copy className="w-3 h-3" />
+                                <Copy className="w-3.5 h-3.5" />
                                 <span>Copy</span>
                               </>
                             )}
                           </button>
                         </div>
-                        <pre className="bg-[#0c0c0c] border border-neutral-800 text-neutral-300 p-3 rounded font-mono text-[11px] overflow-x-auto max-h-56">
+                        <pre className="bg-[#0c0c0c] border border-neutral-800 text-neutral-300 p-3 rounded font-mono text-xs sm:text-[13px] leading-relaxed overflow-x-auto max-h-56">
                           {formatJSON(step.config)}
                         </pre>
                       </div>
@@ -370,27 +366,27 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     {step.output && (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+                          <span className="text-xs font-bold text-emerald-400 uppercase tracking-wide">
                             Output (Result)
                           </span>
                           <button
                             onClick={() => handleCopy(`output-${step.id}`, formatJSON(step.output))}
-                            className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-[10px]"
+                            className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-xs"
                           >
                             {copiedKey === `output-${step.id}` ? (
                               <>
-                                <Check className="w-3 h-3 text-emerald-400" />
-                                <span className="text-emerald-400">Copied</span>
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                <span className="text-emerald-400 font-semibold">Copied</span>
                               </>
                             ) : (
                               <>
-                                <Copy className="w-3 h-3" />
+                                <Copy className="w-3.5 h-3.5" />
                                 <span>Copy</span>
                               </>
                             )}
                           </button>
                         </div>
-                        <pre className="bg-[#0c0c0c] border border-neutral-800 text-emerald-400 p-3 rounded font-mono text-[11px] overflow-x-auto max-h-56">
+                        <pre className="bg-[#0c0c0c] border border-neutral-800 text-emerald-400 p-3 rounded font-mono text-xs sm:text-[13px] leading-relaxed overflow-x-auto max-h-56">
                           {formatJSON(step.output)}
                         </pre>
                       </div>
@@ -403,29 +399,29 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                       <div className="flex items-center justify-between pb-2 border-b border-amber-900/30">
                         <div className="flex items-center space-x-2">
                           <RotateCcw className="w-4 h-4 text-amber-400" />
-                          <span className="font-bold text-xs text-amber-300 uppercase tracking-wide">
+                          <span className="font-bold text-xs sm:text-sm text-amber-300 uppercase tracking-wide">
                             Saga Compensation (Rollback Execution)
                           </span>
                         </div>
-                        <StatusBadge status={compensation.status} size="sm" />
+                        <StatusBadge status={compensation.status} size="md" />
                       </div>
 
                       {/* Compensation Metadata */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono text-neutral-400">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono text-neutral-400">
                         <div>
-                          <span className="text-neutral-500 block text-[10px]">Status:</span>
+                          <span className="text-neutral-500 block text-xs">Status:</span>
                           <span className="font-semibold text-neutral-200">{compensation.status}</span>
                         </div>
                         <div>
-                          <span className="text-neutral-500 block text-[10px]">Duration:</span>
+                          <span className="text-neutral-500 block text-xs">Duration:</span>
                           <span className="font-semibold text-neutral-200">{compTiming?.durationStr}</span>
                         </div>
                         <div>
-                          <span className="text-neutral-500 block text-[10px]">Executed At:</span>
+                          <span className="text-neutral-500 block text-xs">Executed At:</span>
                           <span className="font-semibold text-neutral-200">{compTiming?.startedAtStr}</span>
                         </div>
                         <div>
-                          <span className="text-neutral-500 block text-[10px]">Attempt:</span>
+                          <span className="text-neutral-500 block text-xs">Attempt:</span>
                           <span className="font-semibold text-neutral-200">
                             {compensation.attempt ?? 0}/{compensation.max_attempts || 1}
                           </span>
@@ -491,29 +487,29 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
             <div key={step.id || idx} className="transition">
               <div
                 onClick={() => toggleRow(step.step_id || `comp-${idx}`)}
-                className="grid grid-cols-12 gap-3 items-center px-4 py-3 cursor-pointer group hover:bg-neutral-800/40 select-none"
+                className="grid grid-cols-12 gap-3 items-center px-5 py-3.5 cursor-pointer group hover:bg-neutral-800/40 select-none"
               >
-                <div className="col-span-5 sm:col-span-4 flex items-center space-x-2.5 truncate">
-                  <span className="w-6 h-6 rounded bg-amber-950/60 text-amber-400 font-mono font-bold text-xs flex items-center justify-center flex-shrink-0">
-                    <RotateCcw className="w-3 h-3" />
+                <div className="col-span-5 sm:col-span-4 flex items-center space-x-3 truncate">
+                  <span className="w-8 h-8 rounded-md bg-amber-950/60 text-amber-400 font-mono font-bold text-xs sm:text-sm flex items-center justify-center flex-shrink-0 border border-amber-800/60 shadow-xs">
+                    <RotateCcw className="w-3.5 h-3.5" />
                   </span>
                   <div className="truncate">
-                    <span className="font-bold text-xs text-amber-300 group-hover:text-amber-200 truncate">
+                    <span className="font-bold text-sm sm:text-base text-amber-300 group-hover:text-amber-200 truncate">
                       [Compensate] {step.name || step.step_id}
                     </span>
-                    <p className="font-mono text-[10px] text-neutral-500 truncate">{step.step_id}</p>
+                    <p className="font-mono text-xs sm:text-[13px] text-neutral-400 truncate mt-0.5">{step.step_id}</p>
                   </div>
                 </div>
                 <div className="col-span-2 sm:col-span-2">
-                  <StatusBadge status={step.status} size="sm" />
+                  <StatusBadge status={step.status} size="md" />
                 </div>
-                <div className="col-span-2 sm:col-span-2 font-mono text-xs font-semibold text-neutral-300">
+                <div className="col-span-2 sm:col-span-2 font-mono text-sm sm:text-base font-semibold text-neutral-200">
                   {timing.durationStr}
                 </div>
                 <div className="col-span-3 sm:col-span-4 flex items-center justify-between">
-                  <span className="font-mono text-[11px] text-neutral-400 truncate">{timing.startedAtStr}</span>
+                  <span className="font-mono text-xs sm:text-sm text-neutral-300 truncate">{timing.startedAtStr}</span>
                   <span className="text-neutral-500 group-hover:text-neutral-300">
-                    {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
                   </span>
                 </div>
               </div>

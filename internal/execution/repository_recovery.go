@@ -10,7 +10,7 @@ import (
 
 func (r *executionRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT workflow_execution_id FROM step_executions
-		WHERE status = 'RUNNING' AND locked_until <= NOW() ORDER BY workflow_execution_id`)
+		WHERE status = 'RUNNING' AND locked_until <= NOW(3) ORDER BY workflow_execution_id`)
 	if err != nil {
 		return 0, err
 	}
@@ -62,7 +62,7 @@ func (r *executionRepository) reapWorkflow(ctx context.Context, id string) (int6
 		return 0, err
 	}
 	var now time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT NOW()`).Scan(&now); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT NOW(3)`).Scan(&now); err != nil {
 		return 0, err
 	}
 	var count int64

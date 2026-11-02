@@ -86,12 +86,12 @@ func reconcileTx(ctx context.Context, tx *sql.Tx, execID string, status Workflow
 		if s.Status == steps[i].Status {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE step_executions SET status = ?, updated_at = NOW() WHERE id = ?`, s.Status, s.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE step_executions SET status = ?, updated_at = NOW(3) WHERE id = ?`, s.Status, s.ID); err != nil {
 			return err
 		}
 	}
 	if nextStatus != status {
-		_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET status = ?, updated_at = NOW() WHERE id = ?`, nextStatus, execID)
+		_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET status = ?, updated_at = NOW(3) WHERE id = ?`, nextStatus, execID)
 	}
 	return err
 }

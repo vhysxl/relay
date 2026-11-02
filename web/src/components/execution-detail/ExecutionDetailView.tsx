@@ -191,8 +191,8 @@ export const ExecutionDetailView: React.FC<ExecutionDetailViewProps> = ({
       {/* Steps Section: Execution Step List */}
       <div className="space-y-3">
         <div className="flex items-center space-x-2 pt-1">
-          <h3 className="text-sm font-bold text-neutral-100">Execution Steps</h3>
-          <span className="text-xs font-mono font-medium text-neutral-300 bg-neutral-800/80 px-2 py-0.5 rounded border border-neutral-700/60">
+          <h3 className="text-base sm:text-lg font-bold text-neutral-100">Execution Steps</h3>
+          <span className="text-xs sm:text-sm font-mono font-medium text-neutral-300 bg-neutral-800/80 px-2.5 py-0.5 rounded border border-neutral-700/60">
             {completedStepsCount} ok{skippedStepsCount > 0 ? `, ${skippedStepsCount} skipped` : ''} / {steps.length}
           </span>
         </div>
