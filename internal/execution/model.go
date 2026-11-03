@@ -2,11 +2,12 @@ package execution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 type ExecutionStatus string
@@ -33,6 +34,7 @@ const (
 	StatusWaiting   ExecutionStatus = "WAITING"
 	StatusPending   ExecutionStatus = "PENDING"
 	StatusCancelled ExecutionStatus = "CANCELLED"
+	StatusSkipped   ExecutionStatus = "SKIPPED"
 )
 
 type WorkflowExecution struct {
@@ -71,16 +73,28 @@ type StepExecution struct {
 	LockedBy    *string    `json:"locked_by,omitempty" db:"locked_by"`
 	LockedUntil *time.Time `json:"locked_until,omitempty" db:"locked_until"`
 
-	IsCompensation bool       `json:"is_compensation" db:"is_compensation"`
-	ExecutedAt     *time.Time `json:"executed_at,omitempty" db:"executed_at"`
-	NextRetryAt    *time.Time `json:"next_retry_at,omitempty" db:"next_retry_at"`
+	IsCompensation      bool            `json:"is_compensation" db:"is_compensation"`
+	When                json.RawMessage `json:"when,omitempty" db:"condition"`
+	ConditionEvaluation json.RawMessage `json:"condition_evaluation,omitempty" db:"condition_evaluation"`
+	ExecutedAt          *time.Time      `json:"executed_at,omitempty" db:"executed_at"`
+	NextRetryAt         *time.Time      `json:"next_retry_at,omitempty" db:"next_retry_at"`
 
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type ExecuteWorkflowRequest struct {
-	Context json.RawMessage `json:"context,omitempty"`
+	Context        json.RawMessage `json:"context,omitempty"`
+	IdempotencyKey string          `json:"-"`
+}
+
+type ExecutionRequestRecord struct {
+	WorkflowName        string          `db:"workflow_name"`
+	IdempotencyKey      string          `db:"idempotency_key"`
+	WorkflowExecutionID string          `db:"workflow_execution_id"`
+	InputContext        json.RawMessage `db:"input_context"`
+	ResponseReceipt     json.RawMessage `db:"response_receipt"`
+	CreatedAt           time.Time       `db:"created_at"`
 }
 
 type ExecuteWorkflowResponse struct {
@@ -97,20 +111,43 @@ type ErrorResponse struct {
 }
 
 type ExecutionLogic interface {
-	ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*WorkflowExecution, error)
+	ExecuteWorkflow(ctx context.Context, name string, req *ExecuteWorkflowRequest) (*ExecuteWorkflowResponse, bool, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
 }
 
 type ExecutionRepository interface {
-	ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*WorkflowExecution, error)
+	CreateExecutionWithIdempotency(ctx context.Context, exec *WorkflowExecution, record *ExecutionRequestRecord, targetIsExplicitID bool, targetID string) (*ExecuteWorkflowResponse, bool, error)
+	GetExecutionRequest(ctx context.Context, workflowName string, idempotencyKey string) (*ExecutionRequestRecord, error)
+	CreateExecution(ctx context.Context, execution *WorkflowExecution) (*WorkflowExecution, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
+}
+
+func ValidateIdempotencyKey(key string) error {
+	if len(key) < 1 || len(key) > 128 {
+		return errdefs.ErrInvalidIdempotencyKey
+	}
+	for i := 0; i < len(key); i++ {
+		b := key[i]
+		if b < 33 || b > 126 {
+			return errdefs.ErrInvalidIdempotencyKey
+		}
+	}
+	return nil
+}
+
+type WorkflowReader interface {
+	GetWorkflow(ctx context.Context, name string) (*workflow.Workflow, error)
+}
+
+// Repository is the SQL store's combined contract. Consumers depend on the
+// smaller interfaces they need, rather than this wiring interface.
+type Repository interface {
+	ExecutionRepository
 	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error)
 	ReapExpiredSteps(ctx context.Context) (int64, error)
-	WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error
 	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
 	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
 	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
-

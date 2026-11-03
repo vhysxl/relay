@@ -9,6 +9,13 @@ import (
 	"github.com/vhysxl/relay/internal/step"
 )
 
+type Repository interface {
+	ClaimPending(context.Context, string, time.Duration) (*step.Step, *execution.StepExecution, error)
+	Heartbeat(context.Context, string, string, time.Duration) error
+	CompleteStep(context.Context, string, string, json.RawMessage) error
+	FailStep(context.Context, string, string, string) error
+}
+
 // WorkerLogic defines business logic operations for task claiming, heartbeat renewal, and completion.
 type WorkerLogic interface {
 	ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error)

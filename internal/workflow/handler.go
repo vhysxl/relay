@@ -3,7 +3,10 @@ package workflow
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/vhysxl/relay/bootstrap/config"
@@ -32,14 +35,32 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 		r.Body = http.MaxBytesReader(w, r.Body, h.maxPayloadSize)
 	}
 
+	if r.Body == nil {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "request body is empty"})
+		return
+	}
+
+	dec := json.NewDecoder(r.Body)
+
 	var req WorkflowRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := dec.Decode(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			util.WriteJSON(w, http.StatusRequestEntityTooLarge, ErrorResponse{Error: errdefs.ErrPayloadTooLarge.Error()})
 			return
 		}
 		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body: " + err.Error()})
+		return
+	}
+
+	var extra struct{}
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			util.WriteJSON(w, http.StatusRequestEntityTooLarge, ErrorResponse{Error: errdefs.ErrPayloadTooLarge.Error()})
+			return
+		}
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid request body: extra data after JSON object"})
 		return
 	}
 
@@ -93,4 +114,90 @@ func (h *WorkflowHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) 
 		wfs = []WorkflowSummary{}
 	}
 	util.WriteJSON(w, http.StatusOK, wfs)
+}
+
+func (h *WorkflowHandler) ListWorkflowVersions(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow name is required"})
+		return
+	}
+
+	pg := util.ParsePagination(r, 50, 100)
+	wfs, err := h.logic.ListWorkflowVersions(r.Context(), name, pg.Limit, pg.Offset)
+	if err != nil {
+		switch {
+		case errors.Is(err, errdefs.ErrWorkflowNotFound):
+			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		case errors.Is(err, errdefs.ErrInvalidWorkflowName):
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		}
+		return
+	}
+	if wfs == nil {
+		wfs = []WorkflowSummary{}
+	}
+	util.WriteJSON(w, http.StatusOK, wfs)
+}
+
+func (h *WorkflowHandler) GetWorkflowVersion(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow name is required"})
+		return
+	}
+
+	versionStr := strings.TrimSpace(r.PathValue("version"))
+	version, err := strconv.Atoi(versionStr)
+	if err != nil || version <= 0 || version > math.MaxInt32 {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid version: must be a positive integer"})
+		return
+	}
+
+	wf, err := h.logic.GetWorkflowVersion(r.Context(), name, version)
+	if err != nil {
+		switch {
+		case errors.Is(err, errdefs.ErrWorkflowNotFound):
+			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		case errors.Is(err, errdefs.ErrInvalidWorkflowVersion), errors.Is(err, errdefs.ErrInvalidWorkflowName):
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		}
+		return
+	}
+
+	util.WriteJSON(w, http.StatusOK, wf)
+}
+
+func (h *WorkflowHandler) GetWorkflowVersionChanges(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow name is required"})
+		return
+	}
+
+	versionStr := strings.TrimSpace(r.PathValue("version"))
+	version, err := strconv.Atoi(versionStr)
+	if err != nil || version <= 0 || version > math.MaxInt32 {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid version: must be a positive integer"})
+		return
+	}
+
+	changes, err := h.logic.GetWorkflowVersionChanges(r.Context(), name, version)
+	if err != nil {
+		switch {
+		case errors.Is(err, errdefs.ErrWorkflowNotFound):
+			util.WriteJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		case errors.Is(err, errdefs.ErrInvalidWorkflowVersion), errors.Is(err, errdefs.ErrInvalidWorkflowName):
+			util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		default:
+			util.WriteJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		}
+		return
+	}
+
+	util.WriteJSON(w, http.StatusOK, changes)
 }

@@ -21,6 +21,7 @@ import {
   Check,
   X,
   Layers,
+  GitBranch,
 } from 'lucide-react'
 import type { Step } from '../../types/relay'
 import { formatJSON } from '../../utils/format'
@@ -57,9 +58,19 @@ const StepCustomNode: React.FC<{ data: StepNodeData }> = ({ data }) => {
 
       {/* Top Header */}
       <div className="flex items-center justify-between gap-1 mb-1.5">
-        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
-          {step.type}
-        </span>
+        <div className="flex items-center space-x-1">
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
+            {step.type}
+          </span>
+          {step.when && (
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-indigo-950/50 text-indigo-400 border border-indigo-800/60"
+              title="Conditional step (when)"
+            >
+              when
+            </span>
+          )}
+        </div>
 
         <div className="flex items-center space-x-1">
           {step.retry?.max_attempts && (
@@ -396,6 +407,19 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
                     </pre>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* When Condition */}
+            {selectedStep.when && (
+              <div className="pt-2 border-t border-neutral-800 space-y-1.5">
+                <div className="flex items-center gap-1.5 font-medium text-indigo-400">
+                  <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Condition (When):</span>
+                </div>
+                <pre className="p-2.5 bg-[#0c0c0c] border border-indigo-950/60 text-indigo-300 rounded font-mono text-[10px] overflow-x-auto">
+                  {formatJSON(selectedStep.when)}
+                </pre>
               </div>
             )}
 

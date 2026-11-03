@@ -66,7 +66,7 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, name string) (*Wor
 	query := `
 		SELECT id, name, version, context, created_at, updated_at
 		FROM workflow_definitions
-		WHERE id = ? OR name = ?
+		WHERE name = ?
 		ORDER BY version DESC LIMIT 1
 	`
 
@@ -75,7 +75,7 @@ func (r *workflowRepository) GetWorkflow(ctx context.Context, name string) (*Wor
 		contextData sql.NullString
 	)
 
-	err := r.db.QueryRowContext(ctx, query, name, name).Scan(
+	err := r.db.QueryRowContext(ctx, query, name).Scan(
 		&wf.ID,
 		&wf.Name,
 		&wf.Version,
@@ -151,4 +151,140 @@ func (r *workflowRepository) ListWorkflows(ctx context.Context, limit, offset in
 	}
 
 	return wfs, nil
+}
+
+func (r *workflowRepository) ListWorkflowVersions(ctx context.Context, name string, limit, offset int) ([]WorkflowSummary, error) {
+	if r.db == nil {
+		return []WorkflowSummary{}, nil
+	}
+
+	// Verify that workflow name exists
+	var count int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM workflow_definitions WHERE name = ?", name).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, errdefs.ErrWorkflowNotFound
+	}
+
+	query := `
+		SELECT wd.id, wd.name, wd.version, wd.created_at, wd.updated_at,
+		       (SELECT COUNT(*) FROM step_definitions sd WHERE sd.workflow_id = wd.id) AS step_count
+		FROM workflow_definitions wd
+		WHERE wd.name = ?
+		ORDER BY wd.version DESC
+		LIMIT ? OFFSET ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, name, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wfs []WorkflowSummary
+	for rows.Next() {
+		var wf WorkflowSummary
+		if err := rows.Scan(
+			&wf.ID,
+			&wf.Name,
+			&wf.Version,
+			&wf.CreatedAt,
+			&wf.UpdatedAt,
+			&wf.StepCount,
+		); err != nil {
+			return nil, err
+		}
+		wfs = append(wfs, wf)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if wfs == nil {
+		wfs = []WorkflowSummary{}
+	}
+	return wfs, nil
+}
+
+func (r *workflowRepository) GetWorkflowVersion(ctx context.Context, name string, version int) (*Workflow, error) {
+	query := `
+		SELECT id, name, version, context, created_at, updated_at
+		FROM workflow_definitions
+		WHERE name = ? AND version = ?
+	`
+
+	var (
+		wf          Workflow
+		contextData sql.NullString
+	)
+
+	err := r.db.QueryRowContext(ctx, query, name, version).Scan(
+		&wf.ID,
+		&wf.Name,
+		&wf.Version,
+		&contextData,
+		&wf.CreatedAt,
+		&wf.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errdefs.ErrWorkflowNotFound
+		}
+		return nil, err
+	}
+	if contextData.Valid && len(contextData.String) > 0 {
+		wf.Context = json.RawMessage(contextData.String)
+	}
+
+	if r.stepRepo != nil {
+		steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, wf.ID)
+		if err != nil {
+			return nil, err
+		}
+		wf.Steps = steps
+	}
+
+	return &wf, nil
+}
+
+func (r *workflowRepository) GetPreviousWorkflowVersion(ctx context.Context, name string, version int) (*Workflow, error) {
+	query := `
+		SELECT id, name, version, context, created_at, updated_at
+		FROM workflow_definitions
+		WHERE name = ? AND version < ?
+		ORDER BY version DESC LIMIT 1
+	`
+
+	var (
+		wf          Workflow
+		contextData sql.NullString
+	)
+
+	err := r.db.QueryRowContext(ctx, query, name, version).Scan(
+		&wf.ID,
+		&wf.Name,
+		&wf.Version,
+		&contextData,
+		&wf.CreatedAt,
+		&wf.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errdefs.ErrWorkflowNotFound
+		}
+		return nil, err
+	}
+	if contextData.Valid && len(contextData.String) > 0 {
+		wf.Context = json.RawMessage(contextData.String)
+	}
+
+	if r.stepRepo != nil {
+		steps, err := r.stepRepo.GetStepsByWorkflowID(ctx, wf.ID)
+		if err != nil {
+			return nil, err
+		}
+		wf.Steps = steps
+	}
+
+	return &wf, nil
 }

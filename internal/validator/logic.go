@@ -1,20 +1,39 @@
 package validator
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/vhysxl/relay/internal/condition"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-type validator struct{}
+type validator struct {
+	maxDepth int
+	maxNodes int
+}
 
 func NewValidator() Validator {
-	return &validator{}
+	return NewValidatorWithLimits(8, 64)
+}
+
+func NewValidatorWithLimits(maxDepth, maxNodes int) Validator {
+	if maxDepth <= 0 {
+		maxDepth = 8
+	}
+	if maxNodes <= 0 {
+		maxNodes = 64
+	}
+	return &validator{
+		maxDepth: maxDepth,
+		maxNodes: maxNodes,
+	}
 }
 
 func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowRequest) error {
@@ -184,6 +203,73 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 
 	if visited != len(steps) {
 		return errdefs.ErrCyclicDependency
+	}
+
+	stepMap := make(map[string]step.Step, len(steps))
+	for _, s := range steps {
+		stepMap[s.ID] = s
+	}
+
+	var ancestorCache map[string]map[string]bool
+	getAncestors := func(stepID string) map[string]bool {
+		if ancestorCache == nil {
+			ancestorCache = make(map[string]map[string]bool)
+		}
+		if cached, ok := ancestorCache[stepID]; ok {
+			return cached
+		}
+		ans := make(map[string]bool)
+		q := append([]string(nil), stepMap[stepID].DependsOn...)
+		for len(q) > 0 {
+			depID := q[0]
+			q = q[1:]
+			if ans[depID] {
+				continue
+			}
+			ans[depID] = true
+			if parent, ok := stepMap[depID]; ok {
+				q = append(q, parent.DependsOn...)
+			}
+		}
+		ancestorCache[stepID] = ans
+		return ans
+	}
+
+	for _, s := range steps {
+		if len(s.When) == 0 || bytes.Equal(bytes.TrimSpace(s.When), []byte("null")) {
+			continue
+		}
+
+		cond, err := condition.ParseConditionWithLimits(s.When, v.maxDepth, v.maxNodes)
+		if err != nil {
+			return err
+		}
+
+		if err := condition.ValidateTree(cond, v.maxDepth, v.maxNodes); err != nil {
+			return err
+		}
+
+		refs := condition.CollectRefs(cond)
+		for _, ref := range refs {
+			if strings.HasPrefix(ref, "steps.") {
+				parts := strings.Split(ref, ".")
+				if len(parts) < 3 || parts[2] != "output" {
+					return fmt.Errorf("%w: reference %q must follow 'steps.<id>.output...'", errdefs.ErrInvalidCondition, ref)
+				}
+				targetID := parts[1]
+				if targetID == "" || !idMap[targetID] {
+					return errdefs.ErrDependencyNotFound
+				}
+				if !getAncestors(s.ID)[targetID] {
+					return errdefs.ErrConditionNonAncestor
+				}
+			} else {
+				rootSeg := strings.Split(ref, ".")[0]
+				if idMap[rootSeg] {
+					return errdefs.ErrConditionAmbiguousAnchor
+				}
+			}
+		}
 	}
 
 	return nil

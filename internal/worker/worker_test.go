@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -29,31 +28,11 @@ type mockExecutionRepository struct {
 	failFunc      func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
 
-func (m *mockExecutionRepository) ExecuteWorkflowTx(ctx context.Context, name string, initialContext json.RawMessage) (*execution.WorkflowExecution, error) {
-	return nil, nil
-}
-
-func (m *mockExecutionRepository) ListExecutions(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
-	return nil, nil
-}
-
-func (m *mockExecutionRepository) GetExecution(ctx context.Context, executionID string) (*execution.WorkflowExecution, error) {
-	return nil, nil
-}
-
 func (m *mockExecutionRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
 	if m.claimFunc != nil {
 		return m.claimFunc(ctx, workerID, leaseDuration)
 	}
 	return nil, nil, nil
-}
-
-func (m *mockExecutionRepository) ReapExpiredSteps(ctx context.Context) (int64, error) {
-	return 0, nil
-}
-
-func (m *mockExecutionRepository) WakeUpDependentsTx(ctx context.Context, tx *sql.Tx, workflowExecID string, isCompensation bool) error {
-	return nil
 }
 
 func (m *mockExecutionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
@@ -831,6 +810,3 @@ func TestWorkerPool_ProcessOne_HeartbeatLockLost_AbortsExecution(t *testing.T) {
 		t.Errorf("expected step NOT to be marked failed when lock was lost")
 	}
 }
-
-
-

@@ -29,7 +29,7 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 		return nil
 	}
 
-	// 1000 steps * 12 params = 12.000 placeholders (limit batch mysql 65.535) -> rarely change so hardcoded
+	// 1000 steps * 13 params = 13.000 placeholders (limit batch mysql 65.535) -> rarely change so hardcoded
 	const batchSize = 1000
 	now := time.Now().UTC()
 
@@ -42,13 +42,13 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 
 		var (
 			b    strings.Builder
-			args = make([]any, 0, len(batch)*12)
+			args = make([]any, 0, len(batch)*13)
 		)
 
 		b.WriteString(`
 			INSERT INTO step_definitions (
 				id, workflow_id, name, type, config, depends_on,
-				timeout, retry, compensation, irreversible, created_at, updated_at
+				timeout, retry, compensation, irreversible, ` + "`condition`" + `, created_at, updated_at
 			) VALUES 
 		`)
 
@@ -56,11 +56,11 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 			stepCreatedAt := s.CreatedAt
 			if stepCreatedAt.IsZero() {
-				stepCreatedAt = now
+				stepCreatedAt = now.Add(time.Duration(start+i) * time.Second)
 			}
 			stepUpdatedAt := s.UpdatedAt
 			if stepUpdatedAt.IsZero() {
@@ -99,6 +99,11 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 				compVal = string(bytes)
 			}
 
+			var conditionVal any
+			if len(s.When) > 0 {
+				conditionVal = string(s.When)
+			}
+
 			args = append(args,
 				s.ID,
 				workflowID,
@@ -110,6 +115,7 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 				retryVal,
 				compVal,
 				s.Irreversible,
+				conditionVal,
 				stepCreatedAt,
 				stepUpdatedAt,
 			)
@@ -148,7 +154,7 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 
 	query := fmt.Sprintf(`
 		SELECT id, workflow_id, name, type, config, depends_on,
-		       timeout, retry, compensation, irreversible, created_at, updated_at
+		       timeout, retry, compensation, irreversible, `+"`condition`"+`, created_at, updated_at
 		FROM step_definitions
 		WHERE workflow_id IN (%s)
 		ORDER BY created_at ASC
@@ -168,6 +174,7 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 			dependsOnStr sql.NullString
 			retryStr     sql.NullString
 			compStr      sql.NullString
+			conditionStr sql.NullString
 		)
 
 		err := rows.Scan(
@@ -181,6 +188,7 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 			&retryStr,
 			&compStr,
 			&s.Irreversible,
+			&conditionStr,
 			&s.CreatedAt,
 			&s.UpdatedAt,
 		)
@@ -191,6 +199,10 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 		s.Type = StepType(typeStr)
 		if len(configStr) > 0 {
 			s.Config = json.RawMessage(configStr)
+		}
+
+		if conditionStr.Valid && len(conditionStr.String) > 0 {
+			s.When = json.RawMessage(conditionStr.String)
 		}
 
 		if dependsOnStr.Valid && len(dependsOnStr.String) > 0 {
@@ -227,7 +239,7 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error) {
 	query := `
 		SELECT id, workflow_id, name, type, config, depends_on,
-		       timeout, retry, compensation, irreversible, created_at, updated_at
+		       timeout, retry, compensation, irreversible, ` + "`condition`" + `, created_at, updated_at
 		FROM step_definitions
 		WHERE workflow_id = ? AND id = ?
 	`
@@ -239,6 +251,7 @@ func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, ste
 		dependsOnStr sql.NullString
 		retryStr     sql.NullString
 		compStr      sql.NullString
+		conditionStr sql.NullString
 	)
 
 	err := r.db.QueryRowContext(ctx, query, workflowID, stepID).Scan(
@@ -252,6 +265,7 @@ func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, ste
 		&retryStr,
 		&compStr,
 		&s.Irreversible,
+		&conditionStr,
 		&s.CreatedAt,
 		&s.UpdatedAt,
 	)
@@ -265,6 +279,10 @@ func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, ste
 	s.Type = StepType(typeStr)
 	if len(configStr) > 0 {
 		s.Config = json.RawMessage(configStr)
+	}
+
+	if conditionStr.Valid && len(conditionStr.String) > 0 {
+		s.When = json.RawMessage(conditionStr.String)
 	}
 
 	if dependsOnStr.Valid && len(dependsOnStr.String) > 0 {

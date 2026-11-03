@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -56,7 +57,7 @@ func (l *workflowLogic) CreateWorkflow(ctx context.Context, req *WorkflowRequest
 		steps := make([]step.Step, len(req.Steps))
 		for i, s := range req.Steps {
 			s.WorkflowID = id
-			s.CreatedAt = now
+			s.CreatedAt = now.Add(time.Duration(i) * time.Second)
 			s.UpdatedAt = now
 			steps[i] = s
 		}
@@ -99,4 +100,58 @@ func (l *workflowLogic) GetWorkflow(ctx context.Context, name string) (*Workflow
 func (l *workflowLogic) ListWorkflows(ctx context.Context, limit, offset int) ([]WorkflowSummary, error) {
 	limit, offset = util.NormalizePagination(limit, offset, 50, 100)
 	return l.repo.ListWorkflows(ctx, limit, offset)
+}
+
+func (l *workflowLogic) ListWorkflowVersions(ctx context.Context, name string, limit, offset int) ([]WorkflowSummary, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errdefs.ErrInvalidWorkflowName
+	}
+	limit, offset = util.NormalizePagination(limit, offset, 50, 100)
+	return l.repo.ListWorkflowVersions(ctx, name, limit, offset)
+}
+
+func (l *workflowLogic) GetWorkflowVersion(ctx context.Context, name string, version int) (*Workflow, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errdefs.ErrInvalidWorkflowName
+	}
+	if version <= 0 || version > math.MaxInt32 {
+		return nil, errdefs.ErrInvalidWorkflowVersion
+	}
+	return l.repo.GetWorkflowVersion(ctx, name, version)
+}
+
+func (l *workflowLogic) GetWorkflowVersionChanges(ctx context.Context, name string, version int) (*WorkflowVersionChangesResponse, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errdefs.ErrInvalidWorkflowName
+	}
+	if version <= 0 || version > math.MaxInt32 {
+		return nil, errdefs.ErrInvalidWorkflowVersion
+	}
+
+	target, err := l.repo.GetWorkflowVersion(ctx, name, version)
+	if err != nil {
+		return nil, err
+	}
+
+	prev, err := l.repo.GetPreviousWorkflowVersion(ctx, name, version)
+	if err != nil {
+		if errors.Is(err, errdefs.ErrWorkflowNotFound) {
+			return &WorkflowVersionChangesResponse{
+				FromVersion: nil,
+				ToVersion:   target.Version,
+				Changes:     []WorkflowChange{},
+			}, nil
+		}
+		return nil, err
+	}
+
+	changes := CompareWorkflows(prev, target)
+	return &WorkflowVersionChangesResponse{
+		FromVersion: &prev.Version,
+		ToVersion:   target.Version,
+		Changes:     changes,
+	}, nil
 }

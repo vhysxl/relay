@@ -34,6 +34,20 @@ test:
     - go vet ./...
     - go test -v -race -timeout 5m ./...
 
+integration:
+  stage: test
+  services:
+    - name: mysql:8.4
+      alias: mysql
+  variables:
+    MYSQL_ROOT_PASSWORD: relay_test_only
+    MYSQL_ROOT_HOST: "%"
+    TEST_DB_DSN: "root:relay_test_only@tcp(mysql:3306)/?parseTime=true&clientFoundRows=true"
+  script:
+    # Each test creates its own schema and applies the existing migrations.
+    # Configured database failures are fatal, never silently skipped.
+    - go test -v -race -count=1 -timeout 5m ./internal/execution ./internal/worker ./internal/step ./internal/workflow
+
 govulncheck:
   stage: security
   before_script:

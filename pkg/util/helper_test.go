@@ -187,3 +187,91 @@ func TestNormalizePagination(t *testing.T) {
 	}
 }
 
+func TestAreJSONEqual_LargeNumbers(t *testing.T) {
+	// 9007199254740992 and 9007199254740993 are distinct integers above 2^53
+	a := json.RawMessage(`{"value": 9007199254740992}`)
+	b := json.RawMessage(`{"value": 9007199254740993}`)
+	if AreJSONEqual(a, b) {
+		t.Fatal("expected distinct large numbers to not be equal in AreJSONEqual")
+	}
+
+	c := json.RawMessage(`{"value": 9007199254740992}`)
+	if !AreJSONEqual(a, c) {
+		t.Fatal("expected identical large numbers to be equal in AreJSONEqual")
+	}
+}
+
+func TestAreJSONEqual_NumberVsString(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        json.RawMessage
+		b        json.RawMessage
+		expected bool
+	}{
+		{
+			name:     "float 0.5 vs string fraction 1/2",
+			a:        json.RawMessage(`{"value": 0.5}`),
+			b:        json.RawMessage(`{"value": "1/2"}`),
+			expected: false,
+		},
+		{
+			name:     "integer 42 vs string 42",
+			a:        json.RawMessage(`{"value": 42}`),
+			b:        json.RawMessage(`{"value": "42"}`),
+			expected: false,
+		},
+		{
+			name:     "zero vs string zero",
+			a:        json.RawMessage(`{"value": 0}`),
+			b:        json.RawMessage(`{"value": "0"}`),
+			expected: false,
+		},
+		{
+			name:     "large number vs string large number",
+			a:        json.RawMessage(`{"value": 9007199254740992}`),
+			b:        json.RawMessage(`{"value": "9007199254740992"}`),
+			expected: false,
+		},
+		{
+			name:     "float 0.5 vs 0.50 (both numbers)",
+			a:        json.RawMessage(`{"value": 0.5}`),
+			b:        json.RawMessage(`{"value": 0.50}`),
+			expected: true,
+		},
+		{
+			name:     "scientific notation 1e2 vs 100 (both numbers)",
+			a:        json.RawMessage(`{"value": 1e2}`),
+			b:        json.RawMessage(`{"value": 100}`),
+			expected: true,
+		},
+		{
+			name:     "integer 10 vs float 10.0 (both numbers)",
+			a:        json.RawMessage(`{"value": 10}`),
+			b:        json.RawMessage(`{"value": 10.0}`),
+			expected: true,
+		},
+		{
+			name:     "array with number vs array with string",
+			a:        json.RawMessage(`{"items": [1, 2, 3]}`),
+			b:        json.RawMessage(`{"items": [1, 2, "3"]}`),
+			expected: false,
+		},
+		{
+			name:     "nested object number vs string",
+			a:        json.RawMessage(`{"nested": {"rate": 0.25}}`),
+			b:        json.RawMessage(`{"nested": {"rate": "1/4"}}`),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AreJSONEqual(tt.a, tt.b)
+			if got != tt.expected {
+				t.Errorf("AreJSONEqual(%s, %s) = %v; want %v", tt.a, tt.b, got, tt.expected)
+			}
+		})
+	}
+}
+
+

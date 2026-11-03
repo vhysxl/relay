@@ -2,6 +2,7 @@ package validator
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/vhysxl/relay/internal/step"
@@ -455,5 +456,157 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrSelfDependency {
 		t.Fatalf("expected errdefs.ErrSelfDependency, got %v", err)
+	}
+}
+
+func TestValidateSteps_Conditions(t *testing.T) {
+	v := NewValidatorWithLimits(3, 10)
+
+	t.Run("valid ancestor reference", func(t *testing.T) {
+		steps := []step.Step{
+			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{
+				ID:        "b",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"a"},
+				When:      json.RawMessage(`{"ref":"steps.a.output.user.tier","op":"eq","value":"diamond"}`),
+			},
+		}
+		if err := v.ValidateSteps(steps); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("non-ancestor reference returns ErrConditionNonAncestor", func(t *testing.T) {
+		steps := []step.Step{
+			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{
+				ID:        "c",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"a"}, // depends on a, but references b (not an ancestor)
+				When:      json.RawMessage(`{"ref":"steps.b.output.user.tier","op":"eq","value":"diamond"}`),
+			},
+		}
+		if err := v.ValidateSteps(steps); err != errdefs.ErrConditionNonAncestor {
+			t.Fatalf("expected ErrConditionNonAncestor, got %v", err)
+		}
+	})
+
+	t.Run("ambiguous context anchor colliding with step ID returns ErrConditionAmbiguousAnchor", func(t *testing.T) {
+		steps := []step.Step{
+			{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{
+				ID:        "b",
+				Type:      step.StepTypeHTTP,
+				Config:    json.RawMessage(`{}`),
+				DependsOn: []string{"user"},
+				When:      json.RawMessage(`{"ref":"user.tier","op":"eq","value":"diamond"}`),
+			},
+		}
+		if err := v.ValidateSteps(steps); err != errdefs.ErrConditionAmbiguousAnchor {
+			t.Fatalf("expected ErrConditionAmbiguousAnchor, got %v", err)
+		}
+	})
+
+	t.Run("condition exceeding max depth returns ErrConditionMaxDepth", func(t *testing.T) {
+		steps := []step.Step{
+			{
+				ID:     "a",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{}`),
+				When:   json.RawMessage(`{"all":[{"all":[{"all":[{"ref":"context.flag","op":"exists"}]}]}]}`), // depth 4 > 3
+			},
+		}
+		if err := v.ValidateSteps(steps); err != errdefs.ErrConditionMaxDepth {
+			t.Fatalf("expected ErrConditionMaxDepth, got %v", err)
+		}
+	})
+
+	t.Run("long chain without when avoids ancestor computation overhead", func(t *testing.T) {
+		const chainLen = 300
+		steps := make([]step.Step, chainLen)
+		for i := 0; i < chainLen; i++ {
+			s := step.Step{
+				ID:     fmt.Sprintf("s%d", i),
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{}`),
+			}
+			if i > 0 {
+				s.DependsOn = []string{fmt.Sprintf("s%d", i-1)}
+			}
+			steps[i] = s
+		}
+		if err := v.ValidateSteps(steps); err != nil {
+			t.Fatalf("unexpected error for long chain: %v", err)
+		}
+	})
+}
+
+func TestIsWorkflowEqual_WhenCondition(t *testing.T) {
+	v := NewValidator()
+	existing := []step.Step{
+		{
+			ID:     "a",
+			Type:   step.StepTypeHTTP,
+			Config: json.RawMessage(`{}`),
+			When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"true"}`),
+		},
+	}
+
+	reqIdentical := &workflow.WorkflowRequest{
+		Steps: []step.Step{
+			{
+				ID:     "a",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{}`),
+				When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"true"}`),
+			},
+		},
+	}
+	if !v.IsWorkflowEqual(existing, nil, reqIdentical) {
+		t.Fatal("expected identical condition to be equal")
+	}
+
+	reqChanged := &workflow.WorkflowRequest{
+		Steps: []step.Step{
+			{
+				ID:     "a",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{}`),
+				When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"false"}`),
+			},
+		},
+	}
+	if v.IsWorkflowEqual(existing, nil, reqChanged) {
+		t.Fatal("expected changed condition to not be equal")
+	}
+}
+
+func TestIsWorkflowEqual_WhenCondition_LargeNumbers(t *testing.T) {
+	v := NewValidator()
+	existing := []step.Step{
+		{
+			ID:     "a",
+			Type:   step.StepTypeHTTP,
+			Config: json.RawMessage(`{}`),
+			When:   json.RawMessage(`{"ref":"val","op":"eq","value":9007199254740992}`),
+		},
+	}
+
+	reqChanged := &workflow.WorkflowRequest{
+		Steps: []step.Step{
+			{
+				ID:     "a",
+				Type:   step.StepTypeHTTP,
+				Config: json.RawMessage(`{}`),
+				When:   json.RawMessage(`{"ref":"val","op":"eq","value":9007199254740993}`),
+			},
+		},
+	}
+	if v.IsWorkflowEqual(existing, nil, reqChanged) {
+		t.Fatal("expected changing 9007199254740992 to 9007199254740993 in when to not be equal")
 	}
 }

@@ -6,6 +6,8 @@ import {
   Loader2,
   ChevronDown,
   ArrowDown,
+  SkipForward,
+  GitBranch,
 } from 'lucide-react'
 import type { StepExecution } from '../../types/relay'
 import { formatTimestamp, formatJSON } from '../../utils/format'
@@ -41,6 +43,15 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
     )
     cardAccentColor = 'border border-emerald-200/90 shadow-xs'
     leftBarColor = 'bg-emerald-500'
+  } else if (step.status === 'SKIPPED') {
+    stepStatusBadge = (
+      <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
+        <SkipForward className="w-3.5 h-3.5 text-slate-500 stroke-[2.5]" />
+        <span>Skipped</span>
+      </span>
+    )
+    cardAccentColor = 'border border-slate-300 bg-slate-50/40 shadow-xs'
+    leftBarColor = 'bg-slate-400'
   } else if (isFailed) {
     stepStatusBadge = (
       <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
@@ -146,7 +157,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
             </span>
           )}
           <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200/80 font-medium">
-            Attempt: {step.attempt || 1} / {step.max_attempts || 1}
+            Attempt: {step.attempt ?? 0} / {step.max_attempts || 1}
           </span>
           {step.timeout_seconds && (
             <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-md border border-slate-200/80 font-medium">
@@ -159,6 +170,80 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
             </span>
           )}
         </div>
+
+        {/* Condition Evaluation / When Audit */}
+        {step.condition_evaluation && (
+          <div className="ml-2 bg-slate-50/80 border border-slate-200/90 rounded-md p-3.5 space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5 font-bold text-slate-800">
+                <GitBranch className="w-4 h-4 text-slate-600" />
+                <span>Condition Evaluation</span>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                  step.condition_evaluation.error
+                    ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                    : step.condition_evaluation.result
+                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                    : 'bg-slate-200 text-slate-700 border border-slate-300'
+                }`}
+              >
+                {step.condition_evaluation.error
+                  ? 'Evaluation Error'
+                  : step.condition_evaluation.result
+                  ? 'Condition True'
+                  : 'Condition False (Skipped)'}
+              </span>
+            </div>
+
+            {step.condition_evaluation.error && (
+              <p className="text-rose-600 font-mono text-[11px] bg-rose-50 p-2 rounded border border-rose-200">
+                {step.condition_evaluation.error}
+              </p>
+            )}
+
+            {step.condition_evaluation.checks && step.condition_evaluation.checks.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left font-mono text-[11px] divide-y divide-slate-200">
+                  <thead>
+                    <tr className="text-slate-500 font-semibold text-[10px] uppercase">
+                      <th className="py-1 pr-2">Anchor</th>
+                      <th className="py-1 px-2">Op</th>
+                      <th className="py-1 px-2">Expected</th>
+                      <th className="py-1 px-2">Actual</th>
+                      <th className="py-1 pl-2">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {step.condition_evaluation.checks.map((c: any, i: number) => (
+                      <tr key={i} className="text-slate-700">
+                        <td className="py-1 pr-2 text-indigo-700 font-semibold">{c.ref || c.anchor}</td>
+                        <td className="py-1 px-2 font-bold">{c.op}</td>
+                        <td className="py-1 px-2 text-slate-600">
+                          {c.expected !== undefined ? JSON.stringify(c.expected) : '—'}
+                        </td>
+                        <td className="py-1 px-2">
+                          {c.missing ? (
+                            <span className="text-amber-600 italic">[missing]</span>
+                          ) : (
+                            <span className="text-slate-800">{JSON.stringify(c.actual)}</span>
+                          )}
+                        </td>
+                        <td className="py-1 pl-2">
+                          {c.result ? (
+                            <span className="text-emerald-600 font-bold">✓ pass</span>
+                          ) : (
+                            <span className="text-rose-600 font-bold">✗ fail</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Step Failure Alert */}
         {step.error_message && (

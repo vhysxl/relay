@@ -40,6 +40,14 @@ export const StepNodeBadge: React.FC<StepNodeBadgeProps> = ({ step, index, isLas
               depends: {step.depends_on.join(', ')}
             </span>
           )}
+          {step.when && (
+            <span
+              className="inline-flex items-center text-xs font-mono font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded"
+              title="Conditional step (when)"
+            >
+              when
+            </span>
+          )}
           {step.compensation && (
             <span
               className="inline-flex items-center text-xs font-semibold text-amber-800 bg-amber-100/80 border border-amber-300/80 px-2 py-0.5 rounded"

@@ -14,12 +14,12 @@ import (
 )
 
 type workerLogic struct {
-	execRepo      execution.ExecutionRepository
+	execRepo      Repository
 	leaseDuration time.Duration
 }
 
 // NewWorkerLogic creates a new WorkerLogic with required execution repository and lease duration.
-func NewWorkerLogic(execRepo execution.ExecutionRepository, leaseDuration time.Duration) WorkerLogic {
+func NewWorkerLogic(execRepo Repository, leaseDuration time.Duration) WorkerLogic {
 	return &workerLogic{
 		execRepo:      execRepo,
 		leaseDuration: leaseDuration,

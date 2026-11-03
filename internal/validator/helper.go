@@ -56,6 +56,7 @@ func isStepEqual(s1, s2 step.Step) bool {
 		s1.Timeout == s2.Timeout &&
 		s1.Irreversible == s2.Irreversible &&
 		util.AreJSONEqual(s1.Config, s2.Config) &&
+		util.AreJSONEqual(s1.When, s2.When) &&
 		util.AreStringSlicesEqualUnordered(s1.DependsOn, s2.DependsOn) &&
 		areRetriesEqual(s1.Retry, s2.Retry) &&
 		areCompensationsEqual(s1.Compensation, s2.Compensation)

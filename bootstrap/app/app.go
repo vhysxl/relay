@@ -61,13 +61,13 @@ func InitApp() (*Application, error) {
 		return nil, fmt.Errorf("rabbitmq: %w", err)
 	}
 
-	validation := validator.NewValidator()
+	validation := validator.NewValidatorWithLimits(conf.ConditionMaxDepth, conf.ConditionMaxNodes)
 	stepRepo := step.NewStepRepository(conf.DB)
-	executionRepo := execution.NewExecutionRepository(conf.DB, stepRepo)
+	executionRepo := execution.NewExecutionRepository(conf.DB, conf)
 	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
 
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, conf.ConcurrentRetryLimit)
-	executionLogic := execution.NewExecutionLogic(executionRepo)
+	executionLogic := execution.NewExecutionLogic(executionRepo, workflowRepo)
 	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration)
 
 	hostname, err := os.Hostname()

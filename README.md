@@ -6,7 +6,19 @@ Relay adalah distributed workflow engine dan task orchestrator berkinerja tinggi
 
 ---
 
+## Pengujian backend
+
+Jalankan `go vet ./...` dan `go test -race -timeout 5m ./...`.
+Untuk menyertakan tes integrasi, set `TEST_DB_DSN` ke server **MySQL 8.4 khusus tes**
+(contoh `root:test_password@tcp(127.0.0.1:3306)/?parseTime=true&clientFoundRows=true`).
+Akun tersebut memerlukan izin CREATE/DROP DATABASE. Setiap tes membuat schema
+`relay_test_<uuid>`, menerapkan seluruh migrasi `.up.sql` secara berurutan, lalu
+menghapus hanya schema tersebut. Tanpa DSN tes integrasi dilewati; jika DSN sudah
+diatur, koneksi atau migrasi yang gagal membuat tes gagal. Job CI `integration`
+menyediakan server tersebut dan menjalankan tes dengan race detector.
+
 ## Daftar Isi
+
 1. [Workflow & Step Definition Guide](#1-workflow--step-definition-guide)
    - [1.1 Struktur Workflow Definition](#11-struktur-workflow-definition)
    - [1.2 Struktur Step Definition](#12-struktur-step-definition)
@@ -15,10 +27,11 @@ Relay adalah distributed workflow engine dan task orchestrator berkinerja tinggi
    - [1.5 Aturan Validasi DAG](#15-aturan-validasi-dag)
    - [1.6 Saga Pattern & Definisi Kompensasi](#16-saga-pattern--definisi-kompensasi)
    - [1.7 Contoh Lengkap Workflow Definition (E-Commerce Saga)](#17-contoh-lengkap-workflow-definition-e-commerce-saga)
+   - [1.8 Conditional Step Execution (when)](#18-conditional-step-execution-when)
 2. [Workflow Calling Guide](#2-workflow-calling-guide)
    - [2.1 Ringkasan REST API Endpoints](#21-ringkasan-rest-api-endpoints)
    - [2.2 Mendaftarkan Workflow Baru (`POST /workflows`)](#22-mendaftarkan-workflow-baru-post-workflows)
-   - [2.3 Menjalankan Workflow (`POST /workflows/{id}/execute`)](#23-menjalankan-workflow-post-workflowsidexecute)
+   - [2.3 Menjalankan Workflow (`POST /workflows/{name}/execute`)](#23-menjalankan-workflow-post-workflowsnameexecute)
    - [2.4 Memeriksa Status Eksekusi (`GET /executions/{id}`)](#24-memeriksa-status-eksekusi-get-executionsid)
    - [2.5 Contoh Integrasi Client (cURL, TypeScript/NestJS, Go)](#25-contoh-integrasi-client)
 3. [Mekanisme Arsitektur Relay & Diagram Pendukung](#3-mekanisme-arsitektur-relay--diagram-pendukung)
@@ -53,7 +66,8 @@ Setiap elemen dalam array `steps` memiliki spesifikasi sebagai berikut:
 | `name` | `string` | Tidak | - | Nama deskriptif untuk ditampilkan di log/dashboard. |
 | `type` | `string` | **Ya** | - | Tipe runner eksekutor: `"http"` atau `"message"`. |
 | `config` | `object` | **Ya** | - | Konfigurasi spesifik runner sesuai tipe yang dipilih (lihat Bagian 1.3). |
-| `depends_on` | `string[]` | Tidak | `[]` | ID step lain yang harus selesai berstatus `COMPLETED` sebelum step ini dijalankan. Jika kosong, step dapat langsung dijalankan saat workflow dimulai. |
+| `depends_on` | `string[]` | Tidak | `[]` | ID step lain yang harus selesai berstatus `COMPLETED` atau `SKIPPED` sebelum step ini dijalankan. Jika kosong, step dapat langsung dijalankan saat workflow dimulai. |
+| `when` | `object` | Tidak | `null` | Kondisi opsional sebelum step dieksekusi. Jika bernilai `false`, step berstatus `SKIPPED` dan step downstream tetap berjalan (lihat Bagian 1.8). |
 | `timeout` | `int` | Tidak | `0` (unlimited) | Batas waktu eksekusi step dalam detik. |
 | `retry` | `object` | Tidak | `null` | Kebijakan percobaan ulang jika step mengalami error eksekusi. |
 | `compensation`| `object` | Tidak | `null` | Definisi aksi rollback jika workflow gagal di step downstream (Saga pattern). |
@@ -201,6 +215,7 @@ Relay melakukan validasi integritas struktur grafik sebelum workflow disimpan ke
 4. **Unique Step ID**: Setiap step dalam satu workflow wajib memiliki `id` yang unik.
 5. **Config Schema**: Field `config` harus sesuai dengan tipe eksekutor (misal: HTTP wajib memiliki `method` dan URL valid; RabbitMQ wajib memiliki `exchange` atau `routing_key`).
 6. **Irreversible vs Compensation**: Jika `irreversible: true`, step **dilarang** memiliki `compensation`.
+7. **Condition Tree & Anchor Validation (`when`)**: Jika step mendefinisikan kondisi `when`, pohon kondisi divalidasi tidak melebihi batas `CONDITION_MAX_DEPTH` dan `CONDITION_MAX_NODES`. Anchor output (`steps.<id>.output...`) wajib merujuk ke step ancestor dalam DAG, dan anchor context dilarang bertabrakan dengan ID root step apa pun.
 
 ---
 
@@ -309,6 +324,88 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
 
 ---
 
+### 1.8 Conditional Step Execution (`when`)
+
+Relay mendukung percabangan deklaratif dengan menambahkan properti `when` opsional pada step HTTP maupun Message normal. Kondisi membaca satu anchor eksplisit per perbandingan:
+- **Anchor Context**: `"ref": "user.tier"` membaca langsung dari root payload `context` eksekusi.
+- **Anchor Output Step**: `"ref": "steps.<id>.output.path.to.field"` membaca output dari step ancestor yang telah selesai (`COMPLETED`).
+
+> **Penting**: Engine tidak melakukan pencarian sumber alternatif atau interpolasi ekspresi pada `when`. Anchor output harus memakai format kanonis `steps.<id>.output...`, dan validator menolak jika step tersebut bukan ancestor dalam DAG atau jika anchor context bertabrakan dengan ID root step.
+
+#### Bentuk Kondisi
+
+1. **Leaf Node**: Membandingkan anchor dengan operator dan nilai target.
+```json
+{
+  "ref": "steps.check_user.output.tier",
+  "op": "eq",
+  "value": "diamond"
+}
+```
+2. **Logical Group**: Menggabungkan kumpulan kondisi secara terurut (`all` untuk AND, `any` untuk OR).
+```json
+{
+  "all": [
+    { "ref": "user.is_active", "op": "eq", "value": true },
+    { "ref": "user.age", "op": "gte", "value": 18 }
+  ]
+}
+```
+Setiap node kondisi hanya boleh memilih satu bentuk: berupa leaf `{ref, op, value}` atau grup `{"all": [...]}` / `{"any": [...]}`. Grup wajib berisi minimal satu kondisi anak.
+
+#### Operator yang Didukung
+
+| Operator | Deskripsi | Aturan Tipe Nilai |
+| :--- | :--- | :--- |
+| `eq` | Sama dengan | Scalar JSON (string, number, boolean) atau `null`. |
+| `ne` | Tidak sama dengan | Scalar JSON (string, number, boolean) atau `null`. |
+| `exists` | Memeriksa apakah path/properti tersedia | **Dilarang** menyertakan `value`. Mengembalikan `true` jika path ditemukan (meski nilainya `null`). |
+| `gt` | Lebih besar dari | Angka numerik. |
+| `gte` | Lebih besar atau sama dengan | Angka numerik. |
+| `lt` | Lebih kecil dari | Angka numerik. |
+| `lte` | Lebih kecil atau sama dengan | Angka numerik. |
+| `in` | Membership dalam himpunan | Array scalar seragam (misal: array string atau array number). |
+
+#### Aturan Presisi Angka & Tipe Data
+- Relay membandingkan angka menggunakan representasi numerik presisi tinggi (`big.Rat` / `json.Number`). Angka di atas $2^{53}$ dibandingkan secara akurat tanpa kehilangan presisi float64.
+- Tidak ada konversi implisit (*no coercion*); string `"100"` tidak akan cocok dengan angka `100`.
+- Operator urutan (`gt`, `gte`, `lt`, `lte`) hanya menerima tipe numerik pada `actual` dan `value`.
+
+#### Missing Path vs JSON `null` & Short-Circuit Guard
+- Path yang tidak ditemukan (*missing path*) dibedakan dari nilai JSON literal `null`. Operator selain `exists` akan mengembalikan evaluasi `error` jika target path tidak ditemukan.
+- Evaluasi pada `all` dan `any` dievaluasi terurut dari kiri ke kanan dan melakukan **short-circuit** begitu hasilnya pasti.
+- Pola guard dengan `exists`: Anda dapat memeriksa keberadaan properti opsional sebelum membaca nilainya:
+```json
+{
+  "when": {
+    "all": [
+      { "ref": "steps.enrich_user.output.profile", "op": "exists" },
+      { "ref": "steps.enrich_user.output.profile.score", "op": "gt", "value": 80 }
+    ]
+  }
+}
+```
+Jika `enrich_user.output.profile` tidak ada, grup `all` langsung berhenti (*short-circuit*) pada kondisi pertama tanpa mencoba membaca path kedua, sehingga terhindar dari error missing path.
+
+#### Siklus Hidup & Perilaku Runtime
+Evaluasi kondisi dilakukan saat worker me-lease step (`ClaimPending`), setelah seluruh dependensi terpenuhi dan sebelum resolusi config payload:
+- **True**: Transisi ke status `RUNNING`, attempt bertambah, audit evaluasi dicatat, dan executor dijalankan normal.
+- **False (`SKIPPED`)**: Step bertransisi ke status `SKIPPED` dengan attempt tetap `0`. Tidak ada lease worker, output, `executed_at`, atau pemanggilan executor. Downstream dependencies yang bergantung pada step ini tetap terpenuhi (`COMPLETED` maupun `SKIPPED`).
+- **Error / Missing Anchor**: Evaluasi gagal (misal: path missing pada operator selain `exists` atau tipe data tidak kompatibel). Step bertransisi ke `FAILED` dengan attempt `0`, memicu alur kegagalan workflow dan rollback/kompensasi.
+- **Kompensasi Step Skipped**: Kompensasi milik step yang `SKIPPED` dialihkan ke `CANCELLED`. Traversal rollback tetap melewati step skipped untuk menjaga urutan kompensasi ancestor sebelumnya.
+- **Audit Evaluasi**: Audit evaluasi disimpan pada kolom `condition_evaluation` di `step_executions` dan dapat dipantau langsung melalui dashboard execution detail.
+
+#### Konfigurasi Batas Pohon Kondisi (Environment Variables)
+
+| Variabel Lingkungan | Default | Keterangan |
+| :--- | :---: | :--- |
+| `CONDITION_MAX_DEPTH` | `8` | Batas kedalaman rekursi maksimal pohon kondisi `when`. |
+| `CONDITION_MAX_NODES` | `64` | Batas jumlah node maksimal (leaf + grup) dalam satu kondisi step. |
+
+Keduanya wajib bilangan bulat positif dan divalidasi pada saat startup engine sebelum koneksi database dibuka.
+
+---
+
 ## 2. Workflow Calling Guide
 
 Relay mengekspos REST API standar untuk mendaftarkan definisi alur kerja, men-trigger eksekusi, serta memantau status eksekusi.
@@ -319,8 +416,8 @@ Relay mengekspos REST API standar untuk mendaftarkan definisi alur kerja, men-tr
 | :--- | :--- | :--- |
 | `POST` | `/workflows` | Mendaftarkan workflow definition baru beserta steps DAG. |
 | `GET` | `/workflows` | Mengambil ringkasan versi terbaru setiap workflow: metadata dan `step_count`, tanpa context atau steps/config. Mendukung `limit` (default 50, maksimum 100) dan `offset`. |
-| `GET` | `/workflows/{id}` | Mengambil detail workflow definition spesifik berdasarkan ID. |
-| `POST` | `/workflows/{id}/execute` | Memulai/men-trigger instance eksekusi baru dari workflow definition. |
+| `GET` | `/workflows/{name}` | Mengambil detail workflow definition spesifik berdasarkan nama (versi terbaru). |
+| `POST` | `/workflows/{name}/execute` | Memulai/men-trigger instance eksekusi baru dari workflow definition berdasarkan nama. |
 | `GET` | `/executions` | Mengambil seluruh riwayat tiket eksekusi beserta detail step-nya. |
 | `GET` | `/executions/{id}` | Mengambil data status dan output dari sebuah tiket eksekusi spesifik. |
 | `GET` | `/dashboard` / `GET /` | Mengakses Web Observability Dashboard interaktif. |
@@ -371,16 +468,24 @@ Endpoint ini dipanggil sekali saat inisialisasi aplikasi (atau pipeline CI/CD) u
 
 ---
 
-### 2.3 Menjalankan Workflow (`POST /workflows/{id}/execute`)
+### 2.3 Menjalankan Workflow (`POST /workflows/{name}/execute`)
 
 Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaan transaksi yang ingin didelegasikan ke Relay.
 
-> **Tips:** Parameter `{id}` di URL dapat berupa **UUID** ataupun **Nama Workflow** secara langsung (misal: `ecommerce.checkout_saga`), sehingga aplikasi client tidak perlu menghafal atau me-lookup UUID acak.
+> **Catatan:** Workflow diidentifikasi **hanya melalui nama**. Parameter `{name}` pada URL adalah nama workflow. UUID diperlakukan sebagai string nama biasa; jika tidak ada workflow bernama UUID tersebut, endpoint mengembalikan `404 Not Found`.
+
+#### Ketentuan Idempotency-Key
+- Header `Idempotency-Key` bersifat **wajib** (`1–128` byte ASCII printable tanpa whitespace).
+- Key berlaku dalam scope **nama workflow logis** lintas versi.
+- Response mengembalikan status `201 Created` dengan header `Idempotency-Replayed: false` untuk eksekusi baru dan `Idempotency-Replayed: true` untuk replay permintaan yang identik.
+- Jika key yang sama dikirimkan dengan input context berbeda, endpoint mengembalikan `409 Conflict`. Replay dengan key dan input context yang sama pada nama workflow yang sama akan selalu mengembalikan receipt awal meskipun versi baru workflow telah dibuat.
+- Request body `raw-context` maupun `wrapped-context` (`{"context": {...}}`) yang menghasilkan context sama dianggap setara. Context kosong, `null`, dan body kosong dinormalisasi menjadi `{}`.
 
 - **Request (Memanggil langsung dengan Nama Workflow):**
   ```http
   POST http://localhost:8000/workflows/ecommerce.checkout_saga/execute
   Content-Type: application/json
+  Idempotency-Key: checkout:ORD-20260923-001
 
   {
     "context": {
@@ -391,8 +496,12 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
   }
   ```
 
-- **Response:** `202 Accepted`
-  ```json
+- **Response:** `201 Created`
+  ```http
+  HTTP/1.1 201 Created
+  Content-Type: application/json
+  Idempotency-Replayed: false
+
   {
     "id": "afd70011-56d5-45f6-a590-bf514bf2091d",
     "workflow_id": "710d3e9f-0e4f-4f1e-9189-02c731e0672c",
@@ -458,9 +567,10 @@ Dipanggil untuk polling atau mendapatkan status akhir tiket eksekusi.
 
 #### A. Menggunakan cURL
 ```bash
-# 1. Trigger eksekusi workflow
-EXECUTION_ID=$(curl -s -X POST http://localhost:8000/workflows/710d3e9f-0e4f-4f1e-9189-02c731e0672c/execute \
+# 1. Trigger eksekusi workflow dengan Idempotency-Key wajib
+EXECUTION_ID=$(curl -s -X POST http://localhost:8000/workflows/ecommerce.checkout_saga/execute \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: checkout:ORD-1001" \
   -d '{"context":{"order_id":"ORD-1001"}}' | jq -r '.id')
 
 # 2. Cek status eksekusi
@@ -474,10 +584,16 @@ import axios from 'axios';
 export class RelayClient {
   private readonly baseUrl = 'http://localhost:8000';
 
-  async triggerWorkflow(workflowId: string, context: Record<string, any>) {
-    const response = await axios.post(`${this.baseUrl}/workflows/${workflowId}/execute`, {
-      context,
-    });
+  async triggerWorkflow(workflowId: string, idempotencyKey: string, context: Record<string, any>) {
+    const response = await axios.post(
+      `${this.baseUrl}/workflows/${workflowId}/execute`,
+      { context },
+      {
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+        },
+      }
+    );
     return response.data; // { id: "execution-uuid", status: "RUNNING", ... }
   }
 
@@ -499,17 +615,28 @@ import (
 	"net/http"
 )
 
-func TriggerWorkflow(workflowID string, payload map[string]interface{}) (string, error) {
+func TriggerWorkflow(workflowID string, idempotencyKey string, payload map[string]interface{}) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{"context": payload})
-	resp, err := http.Post(
+	req, err := http.NewRequest(
+		http.MethodPost,
 		fmt.Sprintf("http://localhost:8000/workflows/%s/execute", workflowID),
-		"application/json",
 		bytes.NewBuffer(body),
 	)
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
 
 	var result struct {
 		ID     string `json:"id"`
@@ -588,7 +715,7 @@ flowchart TD
         RabbitMQBroker["RabbitMQ Broker"]
     end
 
-    NestJS -->|POST /workflows/:id/execute| Router
+    NestJS -->|POST /workflows/:name/execute| Router
     Curl -->|POST /workflows| Router
     Browser -->|GET /dashboard, GET /history| Router
 
@@ -623,7 +750,7 @@ sequenceDiagram
     participant Worker as Worker Pool
     participant Ext as Target Service (HTTP / RMQ)
 
-    Client->>API: POST /workflows/{id}/execute {context}
+    Client->>API: POST /workflows/{name}/execute {context}
     API->>DB: INSERT INTO workflow_executions (status='RUNNING')
     API->>DB: INSERT INTO step_executions (status='PENDING')
     API-->>Client: 202 Accepted (execution_id)
@@ -715,7 +842,8 @@ Setiap task yang di-claim memiliki batas kedaluwarsa sewa `locked_until`:
 #### 3. Resolusi Dependensi DAG Runtime
 Worker hanya dapat mengambil step bertipe normal jika:
 - Workflow berstatus `RUNNING`.
-- Seluruh `depends_on` dari step tersebut sudah berstatus `COMPLETED`.
+- Seluruh `depends_on` dari step tersebut sudah berstatus `COMPLETED` atau `SKIPPED`.
+- Kondisi step `when` (jika ada) dievaluasi; jika false maka step beralih ke `SKIPPED` tanpa eksekusi dan membuka dependensi downstream berikutnya.
 Dengan mekanisme ini, step-step yang tidak saling bergantung (paralel) akan langsung dieksekusi bersamaan oleh worker yang tersedia.
 
 #### 4. Prioritas Darurat Kompensasi (`Emergency Priority`)

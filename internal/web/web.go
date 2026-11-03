@@ -31,7 +31,8 @@ func Handler() http.HandlerFunc {
 			}
 		}
 
-		// Fallback for SPA routing: serve index.html
+		// Fallback for SPA routing: serve index.html with no-cache so clients always get latest bundle references
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	}

@@ -23,6 +23,8 @@ type Config struct {
 	MaxPayloadSize           int
 	ConcurrentRetryLimit     int
 	WorkerCount              int
+	ConditionMaxDepth        int
+	ConditionMaxNodes        int
 }
 
 func Init() (*Config, error) {
@@ -71,6 +73,16 @@ func Init() (*Config, error) {
 		return nil, err
 	}
 
+	conditionMaxDepth, err := getIntEnv("CONDITION_MAX_DEPTH", 8)
+	if err != nil {
+		return nil, err
+	}
+
+	conditionMaxNodes, err := getIntEnv("CONDITION_MAX_NODES", 64)
+	if err != nil {
+		return nil, err
+	}
+
 	// DB Init
 	dbconf := &database.DBConfig{
 		Host:     getEnv("DB_HOST", "mysql"),
@@ -96,6 +108,8 @@ func Init() (*Config, error) {
 		MaxPayloadSize:           maxPayloadSize,
 		ConcurrentRetryLimit:     concurrentRetryLimit,
 		WorkerCount:              workerCount,
+		ConditionMaxDepth:        conditionMaxDepth,
+		ConditionMaxNodes:        conditionMaxNodes,
 	}, nil
 }
 
