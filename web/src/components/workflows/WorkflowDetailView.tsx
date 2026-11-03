@@ -60,6 +60,10 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   const [hasMoreVersions, setHasMoreVersions] = useState<boolean>(false)
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
 
+  // Keep a ref to versions for stable pagination without effect re-triggers
+  const versionsRef = useRef<WorkflowSummary[]>([])
+  versionsRef.current = versions
+
   // Selected Version details & diff
   const [versionDetailsLoading, setVersionDetailsLoading] = useState<boolean>(false)
   const [versionDetailsError, setVersionDetailsError] = useState<string | null>(null)
@@ -150,7 +154,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         setVersionsError(null)
       }
 
-      const offset = reset ? 0 : versions.length
+      const offset = reset ? 0 : versionsRef.current.length
       try {
         const res = await fetch(
           `/workflows/${encodeURIComponent(targetName)}/versions?limit=50&offset=${offset}`,
@@ -172,9 +176,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         if (reset) {
           setVersions(items)
           setHasMoreVersions(items.length === 50)
-          if (items.length > 0 && selectedVersion === null) {
-            setSelectedVersion(items[0].version)
-          }
+          setSelectedVersion((prev) =>
+            prev === null && items.length > 0 ? items[0].version : prev
+          )
         } else {
           setVersions((prev) => [...prev, ...items])
           setHasMoreVersions(items.length === 50)
@@ -189,7 +193,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
         }
       }
     },
-    [targetName, versions.length, selectedVersion]
+    [targetName]
   )
 
   // Fetch specific version definition and changes
@@ -273,27 +277,27 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
     }
   }, [targetName, fetchWorkflow])
 
-  // When switching to History tab, load versions if not loaded yet
+  // When switching to History tab, load versions (independent of loading states to prevent request-abort loops)
   useEffect(() => {
-    if (activeTab === 'history' && versions.length === 0 && !versionsLoading && !versionsError) {
+    if (activeTab === 'history' && targetName) {
       const controller = new AbortController()
       fetchVersions(true, controller.signal)
       return () => {
         controller.abort()
       }
     }
-  }, [activeTab, versions.length, versionsLoading, versionsError, fetchVersions])
+  }, [activeTab, targetName, fetchVersions])
 
   // When a version is selected in History tab, load its details & changes
   useEffect(() => {
-    if (selectedVersion !== null) {
+    if (activeTab === 'history' && targetName && selectedVersion !== null) {
       const controller = new AbortController()
       fetchVersionDetails(selectedVersion, controller.signal)
       return () => {
         controller.abort()
       }
     }
-  }, [selectedVersion, fetchVersionDetails])
+  }, [activeTab, targetName, selectedVersion, fetchVersionDetails])
 
   // Derived change statistics
   const changeStats = useMemo(() => {
