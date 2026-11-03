@@ -31,7 +31,7 @@ menyediakan server tersebut dan menjalankan tes dengan race detector.
 2. [Workflow Calling Guide](#2-workflow-calling-guide)
    - [2.1 Ringkasan REST API Endpoints](#21-ringkasan-rest-api-endpoints)
    - [2.2 Mendaftarkan Workflow Baru (`POST /workflows`)](#22-mendaftarkan-workflow-baru-post-workflows)
-   - [2.3 Menjalankan Workflow (`POST /workflows/{id}/execute`)](#23-menjalankan-workflow-post-workflowsidexecute)
+   - [2.3 Menjalankan Workflow (`POST /workflows/{name}/execute`)](#23-menjalankan-workflow-post-workflowsnameexecute)
    - [2.4 Memeriksa Status Eksekusi (`GET /executions/{id}`)](#24-memeriksa-status-eksekusi-get-executionsid)
    - [2.5 Contoh Integrasi Client (cURL, TypeScript/NestJS, Go)](#25-contoh-integrasi-client)
 3. [Mekanisme Arsitektur Relay & Diagram Pendukung](#3-mekanisme-arsitektur-relay--diagram-pendukung)
@@ -416,8 +416,8 @@ Relay mengekspos REST API standar untuk mendaftarkan definisi alur kerja, men-tr
 | :--- | :--- | :--- |
 | `POST` | `/workflows` | Mendaftarkan workflow definition baru beserta steps DAG. |
 | `GET` | `/workflows` | Mengambil ringkasan versi terbaru setiap workflow: metadata dan `step_count`, tanpa context atau steps/config. Mendukung `limit` (default 50, maksimum 100) dan `offset`. |
-| `GET` | `/workflows/{id}` | Mengambil detail workflow definition spesifik berdasarkan ID. |
-| `POST` | `/workflows/{id}/execute` | Memulai/men-trigger instance eksekusi baru dari workflow definition. |
+| `GET` | `/workflows/{name}` | Mengambil detail workflow definition spesifik berdasarkan nama (versi terbaru). |
+| `POST` | `/workflows/{name}/execute` | Memulai/men-trigger instance eksekusi baru dari workflow definition berdasarkan nama. |
 | `GET` | `/executions` | Mengambil seluruh riwayat tiket eksekusi beserta detail step-nya. |
 | `GET` | `/executions/{id}` | Mengambil data status dan output dari sebuah tiket eksekusi spesifik. |
 | `GET` | `/dashboard` / `GET /` | Mengakses Web Observability Dashboard interaktif. |
@@ -468,17 +468,17 @@ Endpoint ini dipanggil sekali saat inisialisasi aplikasi (atau pipeline CI/CD) u
 
 ---
 
-### 2.3 Menjalankan Workflow (`POST /workflows/{id}/execute`)
+### 2.3 Menjalankan Workflow (`POST /workflows/{name}/execute`)
 
 Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaan transaksi yang ingin didelegasikan ke Relay.
 
-> **Tips:** Parameter `{id}` di URL dapat berupa **UUID** ataupun **Nama Workflow** secara langsung (misal: `ecommerce.checkout_saga`), sehingga aplikasi client tidak perlu menghafal atau me-lookup UUID acak.
+> **Catatan:** Workflow diidentifikasi **hanya melalui nama**. Parameter `{name}` pada URL adalah nama workflow. UUID diperlakukan sebagai string nama biasa; jika tidak ada workflow bernama UUID tersebut, endpoint mengembalikan `404 Not Found`.
 
 #### Ketentuan Idempotency-Key
 - Header `Idempotency-Key` bersifat **wajib** (`1–128` byte ASCII printable tanpa whitespace).
 - Key berlaku dalam scope **nama workflow logis** lintas versi.
 - Response mengembalikan status `201 Created` dengan header `Idempotency-Replayed: false` untuk eksekusi baru dan `Idempotency-Replayed: true` untuk replay permintaan yang identik.
-- Jika key yang sama dikirimkan dengan input berbeda atau ID versi eksplisit yang berbeda, endpoint mengembalikan `409 Conflict`.
+- Jika key yang sama dikirimkan dengan input context berbeda, endpoint mengembalikan `409 Conflict`. Replay dengan key dan input context yang sama pada nama workflow yang sama akan selalu mengembalikan receipt awal meskipun versi baru workflow telah dibuat.
 - Request body `raw-context` maupun `wrapped-context` (`{"context": {...}}`) yang menghasilkan context sama dianggap setara. Context kosong, `null`, dan body kosong dinormalisasi menjadi `{}`.
 
 - **Request (Memanggil langsung dengan Nama Workflow):**
@@ -715,7 +715,7 @@ flowchart TD
         RabbitMQBroker["RabbitMQ Broker"]
     end
 
-    NestJS -->|POST /workflows/:id/execute| Router
+    NestJS -->|POST /workflows/:name/execute| Router
     Curl -->|POST /workflows| Router
     Browser -->|GET /dashboard, GET /history| Router
 
@@ -750,7 +750,7 @@ sequenceDiagram
     participant Worker as Worker Pool
     participant Ext as Target Service (HTTP / RMQ)
 
-    Client->>API: POST /workflows/{id}/execute {context}
+    Client->>API: POST /workflows/{name}/execute {context}
     API->>DB: INSERT INTO workflow_executions (status='RUNNING')
     API->>DB: INSERT INTO step_executions (status='PENDING')
     API-->>Client: 202 Accepted (execution_id)

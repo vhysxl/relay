@@ -12,6 +12,7 @@ import (
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
+	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 // A small database/sql connector keeps these I/O contract tests independent of MySQL.
@@ -44,11 +45,15 @@ func (c *summaryConn) QueryContext(ctx context.Context, query string, args []dri
 }
 
 type summaryRows struct {
-	values [][]driver.Value
-	err    error
+	columns []string
+	values  [][]driver.Value
+	err     error
 }
 
-func (*summaryRows) Columns() []string {
+func (r *summaryRows) Columns() []string {
+	if len(r.columns) > 0 {
+		return r.columns
+	}
 	return []string{"id", "name", "version", "created_at", "updated_at", "step_count"}
 }
 func (*summaryRows) Close() error { return nil }
@@ -149,4 +154,157 @@ func TestWorkflowRepository_ListWorkflows_EmptyAndErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkflowRepository_GetWorkflow_QueryByNameOnly(t *testing.T) {
+	now := time.Now().UTC()
+	cols := []string{"id", "name", "version", "context", "created_at", "updated_at"}
+
+	t.Run("query uses WHERE name = ? ORDER BY version DESC LIMIT 1 with 1 argument", func(t *testing.T) {
+		queries := 0
+		db := sql.OpenDB(&summaryConnector{query: func(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+			queries++
+			qUpper := strings.ToUpper(query)
+			if !strings.Contains(qUpper, "WHERE NAME = ?") {
+				t.Fatalf("expected WHERE name = ? in query, got: %s", query)
+			}
+			if strings.Contains(qUpper, "ID = ?") {
+				t.Fatalf("query must not search by ID, got: %s", query)
+			}
+			if !strings.Contains(qUpper, "ORDER BY VERSION DESC LIMIT 1") {
+				t.Fatalf("expected ORDER BY version DESC LIMIT 1, got: %s", query)
+			}
+			if len(args) != 1 || args[0].Value != "order-flow" {
+				t.Fatalf("expected exactly 1 argument ('order-flow'), got: %+v", args)
+			}
+			return &summaryRows{
+				columns: cols,
+				values: [][]driver.Value{
+					{"wf-id-2", "order-flow", int64(2), `{"env":"prod"}`, now, now},
+				},
+			}, nil
+		}})
+		t.Cleanup(func() { db.Close() })
+
+		repo := workflow.NewWorkflowRepository(db, nil)
+		wf, err := repo.GetWorkflow(context.Background(), "order-flow")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if queries != 1 {
+			t.Fatalf("expected 1 query, got %d", queries)
+		}
+		if wf.ID != "wf-id-2" || wf.Name != "order-flow" || wf.Version != 2 {
+			t.Fatalf("unexpected workflow: %+v", wf)
+		}
+	})
+
+	t.Run("returns ErrWorkflowNotFound when no rows matched", func(t *testing.T) {
+		db := sql.OpenDB(&summaryConnector{query: func(_ context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+			return &summaryRows{columns: cols, values: [][]driver.Value{}}, nil
+		}})
+		t.Cleanup(func() { db.Close() })
+
+		repo := workflow.NewWorkflowRepository(db, nil)
+		_, err := repo.GetWorkflow(context.Background(), "non-existent")
+		if !errors.Is(err, errdefs.ErrWorkflowNotFound) {
+			t.Fatalf("expected ErrWorkflowNotFound, got %v", err)
+		}
+	})
+}
+
+func TestWorkflowRepository_VersionsQueries(t *testing.T) {
+	now := time.Now().UTC()
+	cols := []string{"id", "name", "version", "context", "created_at", "updated_at"}
+
+	t.Run("ListWorkflowVersions checks existence then returns versions DESC", func(t *testing.T) {
+		queries := 0
+		db := sql.OpenDB(&summaryConnector{query: func(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+			queries++
+			qUpper := strings.ToUpper(query)
+			if strings.Contains(qUpper, "COUNT(*) FROM WORKFLOW_DEFINITIONS") {
+				return &summaryRows{columns: []string{"count"}, values: [][]driver.Value{{int64(2)}}}, nil
+			}
+			if !strings.Contains(qUpper, "WHERE WD.NAME = ?") || !strings.Contains(qUpper, "ORDER BY WD.VERSION DESC") {
+				t.Fatalf("unexpected list versions query: %s", query)
+			}
+			return &summaryRows{
+				columns: []string{"id", "name", "version", "created_at", "updated_at", "step_count"},
+				values: [][]driver.Value{
+					{"wf-2", "orders", int64(2), now, now, int64(3)},
+					{"wf-1", "orders", int64(1), now, now, int64(2)},
+				},
+			}, nil
+		}})
+		t.Cleanup(func() { db.Close() })
+
+		repo := workflow.NewWorkflowRepository(db, nil)
+		versions, err := repo.ListWorkflowVersions(context.Background(), "orders", 50, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if queries != 2 {
+			t.Fatalf("expected 2 queries (count + page), got %d", queries)
+		}
+		if len(versions) != 2 || versions[0].Version != 2 || versions[1].Version != 1 {
+			t.Fatalf("unexpected versions: %+v", versions)
+		}
+	})
+
+	t.Run("GetWorkflowVersion queries name and version", func(t *testing.T) {
+		queries := 0
+		db := sql.OpenDB(&summaryConnector{query: func(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+			queries++
+			qUpper := strings.ToUpper(query)
+			if !strings.Contains(qUpper, "WHERE NAME = ? AND VERSION = ?") {
+				t.Fatalf("expected WHERE name = ? AND version = ?, got: %s", query)
+			}
+			if len(args) != 2 || args[0].Value != "orders" || args[1].Value != int64(2) {
+				t.Fatalf("unexpected arguments: %+v", args)
+			}
+			return &summaryRows{
+				columns: cols,
+				values: [][]driver.Value{
+					{"wf-2", "orders", int64(2), `{"env":"prod"}`, now, now},
+				},
+			}, nil
+		}})
+		t.Cleanup(func() { db.Close() })
+
+		repo := workflow.NewWorkflowRepository(db, nil)
+		wf, err := repo.GetWorkflowVersion(context.Background(), "orders", 2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wf.Version != 2 || wf.Name != "orders" {
+			t.Fatalf("unexpected workflow: %+v", wf)
+		}
+	})
+
+	t.Run("GetPreviousWorkflowVersion queries version < ? ORDER BY version DESC LIMIT 1", func(t *testing.T) {
+		queries := 0
+		db := sql.OpenDB(&summaryConnector{query: func(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+			queries++
+			qUpper := strings.ToUpper(query)
+			if !strings.Contains(qUpper, "WHERE NAME = ? AND VERSION < ?") || !strings.Contains(qUpper, "ORDER BY VERSION DESC LIMIT 1") {
+				t.Fatalf("expected previous version query, got: %s", query)
+			}
+			return &summaryRows{
+				columns: cols,
+				values: [][]driver.Value{
+					{"wf-1", "orders", int64(1), `{}`, now, now},
+				},
+			}, nil
+		}})
+		t.Cleanup(func() { db.Close() })
+
+		repo := workflow.NewWorkflowRepository(db, nil)
+		prev, err := repo.GetPreviousWorkflowVersion(context.Background(), "orders", 3)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if prev.Version != 1 {
+			t.Fatalf("expected version 1, got %d", prev.Version)
+		}
+	})
 }

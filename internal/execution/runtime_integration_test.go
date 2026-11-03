@@ -39,7 +39,7 @@ func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
 	}
 	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
 	logic := execution.NewExecutionLogic(repo, wfRepo)
-	resp, _, err := logic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	resp, _, err := logic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -306,7 +306,7 @@ func TestRuntimeRecoveryContinuesAfterWorkflowError(t *testing.T) {
 	s := basicStep("a")
 	s.Retry = &step.RetryPolicy{MaxAttempts: 2}
 	f := runtimeDB(t, []step.Step{s})
-	otherResp, _, err := f.logic.ExecuteWorkflow(f.ctx, f.exec.WorkflowID, &execution.ExecuteWorkflowRequest{
+	otherResp, _, err := f.logic.ExecuteWorkflow(f.ctx, f.exec.WorkflowName, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {

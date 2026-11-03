@@ -27,7 +27,7 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard')
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null)
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null)
+  const [selectedWorkflowName, setSelectedWorkflowName] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
 
   // Clear any legacy mock mode preference
@@ -80,29 +80,37 @@ export const App: React.FC = () => {
     if (hash.startsWith('execution/')) {
       const id = hash.replace('execution/', '')
       setSelectedExecutionId(id)
-      setSelectedWorkflowId(null)
+      setSelectedWorkflowName(null)
       setCurrentView('execution-detail')
     } else if (hash.startsWith('workflows/')) {
-      const id = hash.replace('workflows/', '')
-      setSelectedWorkflowId(id)
+      const raw = hash.replace('workflows/', '')
+      try {
+        setSelectedWorkflowName(decodeURIComponent(raw))
+      } catch {
+        setSelectedWorkflowName(raw)
+      }
       setSelectedExecutionId(null)
       setCurrentView('workflow-detail')
     } else if (hash.startsWith('workflow/')) {
-      const id = hash.replace('workflow/', '')
-      setSelectedWorkflowId(id)
+      const raw = hash.replace('workflow/', '')
+      try {
+        setSelectedWorkflowName(decodeURIComponent(raw))
+      } catch {
+        setSelectedWorkflowName(raw)
+      }
       setSelectedExecutionId(null)
       setCurrentView('workflow-detail')
     } else if (hash === 'history' || window.location.pathname.includes('/history')) {
       setSelectedExecutionId(null)
-      setSelectedWorkflowId(null)
+      setSelectedWorkflowName(null)
       setCurrentView('history')
     } else if (hash === 'workflows') {
       setSelectedExecutionId(null)
-      setSelectedWorkflowId(null)
+      setSelectedWorkflowName(null)
       setCurrentView('workflows')
     } else {
       setSelectedExecutionId(null)
-      setSelectedWorkflowId(null)
+      setSelectedWorkflowName(null)
       setCurrentView('dashboard')
     }
   }, [])
@@ -125,7 +133,7 @@ export const App: React.FC = () => {
     if (view === 'execution-detail' && id) {
       window.location.hash = `execution/${id}`
     } else if (view === 'workflow-detail' && id) {
-      window.location.hash = `workflows/${id}`
+      window.location.hash = `workflows/${encodeURIComponent(id)}`
     } else if (view === 'history') {
       window.location.hash = 'history'
     } else if (view === 'workflows') {
@@ -174,9 +182,9 @@ export const App: React.FC = () => {
             />
           )}
 
-          {currentView === 'workflow-detail' && selectedWorkflowId && (
+          {currentView === 'workflow-detail' && selectedWorkflowName && (
             <WorkflowDetailView
-              workflowId={selectedWorkflowId}
+              workflowName={selectedWorkflowName}
               onBack={() => navigateToView('workflows')}
               onNavigateToExecution={(execId) => navigateToView('execution-detail', execId)}
             />

@@ -51,15 +51,13 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		return nil, false, err
 	}
 
-	targetIsExplicitID := (name == wf.ID)
-
 	// Step 2 & 3: Check existing idempotency record before merging context or building snapshot
 	existing, err := l.repo.GetExecutionRequest(ctx, wf.Name, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errdefs.ErrExecutionRequestNotFound) {
 		return nil, false, err
 	}
 	if existing != nil {
-		receipt, err := evaluateReplay(existing, normalizedInput, targetIsExplicitID, name)
+		receipt, err := evaluateReplay(existing, normalizedInput, false, "")
 		if err != nil {
 			return nil, false, err
 		}
@@ -106,7 +104,7 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 	}
 
 	// Step 5 & 6: Create execution with idempotency inside a single transaction
-	return l.repo.CreateExecutionWithIdempotency(ctx, exec, reqRecord, targetIsExplicitID, name)
+	return l.repo.CreateExecutionWithIdempotency(ctx, exec, reqRecord, false, "")
 }
 
 func (l *executionLogic) ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error) {

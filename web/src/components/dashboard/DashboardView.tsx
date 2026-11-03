@@ -349,7 +349,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 return (
                   <div
                     key={wf.id}
-                    onClick={() => onNavigate('workflow-detail', wf.id)}
+                    onClick={() => onNavigate('workflow-detail', wf.name)}
                     className="px-5 py-3 hover:bg-neutral-800/40 transition-colors group cursor-pointer flex items-center justify-between"
                   >
                     <div className="space-y-0.5">

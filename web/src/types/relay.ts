@@ -61,7 +61,23 @@ export interface WorkflowSummary extends WorkflowMetadata {
 }
 
 export interface Workflow extends WorkflowMetadata {
+  context?: any
   steps?: Step[]
+}
+
+export type ChangeKind = 'added' | 'removed' | 'modified'
+
+export interface WorkflowChange {
+  path: string
+  kind: ChangeKind
+  before?: any
+  after?: any
+}
+
+export interface WorkflowVersionChangesResponse {
+  from_version: number | null
+  to_version: number
+  changes: WorkflowChange[]
 }
 
 export interface StepExecution {

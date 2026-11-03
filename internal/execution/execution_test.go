@@ -86,7 +86,7 @@ func (workflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.W
 	if name == "unknown-wf" {
 		return nil, errdefs.ErrWorkflowNotFound
 	}
-	return &workflow.Workflow{ID: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {

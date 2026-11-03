@@ -109,14 +109,11 @@ func evaluateReplayInMemory(record *execution.ExecutionRequestRecord, input json
 }
 
 type multiVersionWorkflowReader struct {
-	workflows map[string]*workflow.Workflow
+	workflows []*workflow.Workflow
 }
 
 func (r *multiVersionWorkflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.Workflow, error) {
-	if wf, ok := r.workflows[name]; ok {
-		return wf, nil
-	}
-	// Search by name
+	// Search strictly by workflow name, returning latest version
 	var latest *workflow.Workflow
 	for _, wf := range r.workflows {
 		if wf.Name == name {
@@ -134,8 +131,8 @@ func (r *multiVersionWorkflowReader) GetWorkflow(ctx context.Context, name strin
 func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
-		workflows: map[string]*workflow.Workflow{
-			"wf-test": {ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+		workflows: []*workflow.Workflow{
+			{ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
@@ -177,8 +174,8 @@ func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
-		workflows: map[string]*workflow.Workflow{
-			"checkout": {
+		workflows: []*workflow.Workflow{
+			{
 				ID:      "wf-v1",
 				Name:    "checkout",
 				Version: 1,
@@ -309,10 +306,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}, {ID: "s2", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}},
 	}
 	reader := &multiVersionWorkflowReader{
-		workflows: map[string]*workflow.Workflow{
-			"wf-v1":      wfV1,
-			"order-flow": wfV1,
-		},
+		workflows: []*workflow.Workflow{wfV1},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
@@ -339,8 +333,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 	exec.Context = json.RawMessage(`{"user":"alice","region":"US","runtime_output":"done"}`)
 
 	// 3. Upgrade workflow to v2
-	reader.workflows["order-flow"] = wfV2
-	reader.workflows["wf-v2"] = wfV2
+	reader.workflows = append(reader.workflows, wfV2)
 
 	// 4. Replay via workflow name "order-flow"
 	r2 := httptest.NewRequest(http.MethodPost, "/workflows/order-flow/execute", strings.NewReader(`{"user":"alice"}`))
@@ -368,24 +361,23 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 		t.Errorf("receipt should not leak runtime outputs: %s", string(resp2.Context))
 	}
 
-	// 5. Replay targeting original explicit version ID wf-v1 -> succeeds
+	// 5. Attempt execute targeting explicit version ID wf-v1 or wf-v2 without matching workflow name -> 404 Not Found
 	r3 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v1/execute", strings.NewReader(`{"user":"alice"}`))
 	r3.SetPathValue("name", "wf-v1")
 	r3.Header.Set("Idempotency-Key", "key-ver-1")
 	w3 := httptest.NewRecorder()
 	handler.ExecuteWorkflow(w3, r3)
-	if w3.Code != http.StatusCreated || w3.Header().Get("Idempotency-Replayed") != "true" {
-		t.Fatalf("expected replay for original version ID, got status %d", w3.Code)
+	if w3.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found when executing by ID without matching name, got %d: %s", w3.Code, w3.Body.String())
 	}
 
-	// 6. Replay targeting DIFFERENT explicit version ID wf-v2 -> 409 Conflict
 	r4 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v2/execute", strings.NewReader(`{"user":"alice"}`))
 	r4.SetPathValue("name", "wf-v2")
 	r4.Header.Set("Idempotency-Key", "key-ver-1")
 	w4 := httptest.NewRecorder()
 	handler.ExecuteWorkflow(w4, r4)
-	if w4.Code != http.StatusConflict {
-		t.Fatalf("expected 409 Conflict when retrying with different explicit version ID, got %d: %s", w4.Code, w4.Body.String())
+	if w4.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found when executing by ID without matching name, got %d: %s", w4.Code, w4.Body.String())
 	}
 }
 
@@ -394,8 +386,8 @@ func TestIdempotency_AtomicRollbackOnStepFailure(t *testing.T) {
 	repo.failStepInsert = true
 
 	reader := &multiVersionWorkflowReader{
-		workflows: map[string]*workflow.Workflow{
-			"wf": {ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+		workflows: []*workflow.Workflow{
+			{ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
@@ -437,9 +429,9 @@ func TestIdempotency_AtomicRollbackOnStepFailure(t *testing.T) {
 func TestIdempotency_SameKeyDifferentWorkflows(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
-		workflows: map[string]*workflow.Workflow{
-			"wf-alpha": {ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
-			"wf-beta":  {ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+		workflows: []*workflow.Workflow{
+			{ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)

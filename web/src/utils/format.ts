@@ -41,7 +41,10 @@ export function formatMs(ms: number): string {
 }
 
 export function formatJSON(data: any): string {
-  if (!data) return ''
+  if (data === undefined || data === '') return ''
+  if (data === null) return 'null'
+  if (typeof data === 'boolean') return data ? 'true' : 'false'
+  if (typeof data === 'number') return String(data)
   try {
     const parsed = typeof data === 'string' ? JSON.parse(data) : data
     return JSON.stringify(parsed, null, 2)

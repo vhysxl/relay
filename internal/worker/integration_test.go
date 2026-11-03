@@ -756,7 +756,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 
 	// 2. Trigger workflow with custom initial context
 	customContext := json.RawMessage(`{"order_id":"ORD-456","amount":75000}`)
-	wfResp, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfResp, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 		Context:        customContext,
 	})
@@ -876,7 +876,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 
 	// 4. Trigger workflow execution
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 		Context:        json.RawMessage(`{"batch_id":"batch-123"}`),
 	})
@@ -990,7 +990,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	}
 
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -1157,7 +1157,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	}
 
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
-	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -1298,7 +1298,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -1461,7 +1461,7 @@ func TestIntegration_PayloadPassing_CompensationOriginalOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.ID, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
