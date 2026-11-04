@@ -2,6 +2,9 @@ package util
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -21,6 +24,43 @@ var (
 
 func GenerateUUID() string {
 	return uuid.New().String()
+}
+
+// GenerateLeaseToken generates a cryptographically secure 32-byte hex-encoded random string.
+func GenerateLeaseToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// HashLeaseToken computes the SHA-256 hex digest of a lease token.
+func HashLeaseToken(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
+}
+
+// CanonicalJSONHash normalizes JSON data (preserving numeric precision and sorting object keys)
+// and returns its SHA-256 hex digest.
+func CanonicalJSONHash(data []byte) (string, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		trimmed = []byte("{}")
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	var val any
+	if err := dec.Decode(&val); err != nil {
+		return "", err
+	}
+	normalized := normalizeJSONValue(val)
+	canonicalBytes, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.Sum256(canonicalBytes)
+	return hex.EncodeToString(h[:]), nil
 }
 
 func WriteJSON(w http.ResponseWriter, status int, data any) {
@@ -170,31 +210,77 @@ func AreJSONEqual(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(normA, normB)
 }
 
-type normalizedNumber string
+type canonicalNumber string
+
+func (c canonicalNumber) MarshalJSON() ([]byte, error) {
+	return []byte(c), nil
+}
+
+func ratToCanonicalNumber(r *big.Rat) canonicalNumber {
+	if r == nil {
+		return canonicalNumber("0")
+	}
+	if r.IsInt() {
+		return canonicalNumber(r.Num().String())
+	}
+
+	den := new(big.Int).Abs(r.Denom())
+	two := big.NewInt(2)
+	five := big.NewInt(5)
+	zero := big.NewInt(0)
+	rem := new(big.Int)
+
+	a := 0
+	for rem.Rem(den, two).Cmp(zero) == 0 {
+		den.Quo(den, two)
+		a++
+	}
+	b := 0
+	for rem.Rem(den, five).Cmp(zero) == 0 {
+		den.Quo(den, five)
+		b++
+	}
+
+	prec := a
+	if b > prec {
+		prec = b
+	}
+
+	if den.Cmp(big.NewInt(1)) == 0 {
+		return canonicalNumber(r.FloatString(prec))
+	}
+
+	s := strings.TrimRight(strings.TrimRight(r.FloatString(16), "0"), ".")
+	if s == "" || s == "-" {
+		s = "0"
+	}
+	return canonicalNumber(s)
+}
 
 func normalizeJSONValue(v any) any {
 	switch val := v.(type) {
 	case json.Number:
-		if r, ok := new(big.Rat).SetString(string(val)); ok {
-			return normalizedNumber(r.String())
+		str := string(val)
+		if r, ok := new(big.Rat).SetString(str); ok {
+			return ratToCanonicalNumber(r)
 		}
-		return normalizedNumber(string(val))
+		return canonicalNumber(str)
 	case float64:
 		r := new(big.Rat).SetFloat64(val)
 		if r != nil {
-			return normalizedNumber(r.String())
+			return ratToCanonicalNumber(r)
 		}
-		return normalizedNumber(fmt.Sprintf("%v", val))
+		return canonicalNumber(fmt.Sprintf("%v", val))
 	case float32:
 		r := new(big.Rat).SetFloat64(float64(val))
 		if r != nil {
-			return normalizedNumber(r.String())
+			return ratToCanonicalNumber(r)
 		}
-		return normalizedNumber(fmt.Sprintf("%v", val))
+		return canonicalNumber(fmt.Sprintf("%v", val))
 	case int:
-		return normalizedNumber(strconv.Itoa(val))
+		return ratToCanonicalNumber(big.NewRat(int64(val), 1))
 	case int64:
-		return normalizedNumber(strconv.FormatInt(val, 10))
+		return ratToCanonicalNumber(big.NewRat(val, 1))
 	case map[string]any:
 		res := make(map[string]any, len(val))
 		for k, child := range val {

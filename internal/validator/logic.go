@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -13,6 +14,59 @@ import (
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
+
+var routingIdentifierRegex = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+func validateRoutingIdentifier(val string) bool {
+	if len(val) < 1 || len(val) > 128 {
+		return false
+	}
+	return routingIdentifierRegex.MatchString(val)
+}
+
+func validateStepConfig(stepType step.StepType, config json.RawMessage) error {
+	var cfgMap map[string]json.RawMessage
+	if err := json.Unmarshal(config, &cfgMap); err != nil {
+		return errdefs.ErrInvalidStepConfig
+	}
+
+	if qRaw, ok := cfgMap["queue"]; ok {
+		var q string
+		if err := json.Unmarshal(qRaw, &q); err != nil {
+			return errdefs.ErrInvalidQueueName
+		}
+		if q != "" && !validateRoutingIdentifier(q) {
+			return errdefs.ErrInvalidQueueName
+		}
+	}
+
+	if stepType == step.StepTypeActivity {
+		qRaw, ok := cfgMap["queue"]
+		if !ok {
+			return errdefs.ErrEmptyQueueName
+		}
+		var q string
+		if err := json.Unmarshal(qRaw, &q); err != nil || strings.TrimSpace(q) == "" {
+			return errdefs.ErrEmptyQueueName
+		}
+		if !validateRoutingIdentifier(q) {
+			return errdefs.ErrInvalidQueueName
+		}
+
+		actRaw, ok := cfgMap["activity"]
+		if !ok {
+			return errdefs.ErrEmptyActivityName
+		}
+		var act string
+		if err := json.Unmarshal(actRaw, &act); err != nil || strings.TrimSpace(act) == "" {
+			return errdefs.ErrEmptyActivityName
+		}
+		if !validateRoutingIdentifier(act) {
+			return errdefs.ErrInvalidActivityName
+		}
+	}
+	return nil
+}
 
 type validator struct {
 	maxDepth int
@@ -108,7 +162,7 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 		if s.Type == "" {
 			return errdefs.ErrEmptyStepType
 		}
-		if s.Type != step.StepTypeHTTP && s.Type != step.StepTypeMessage {
+		if s.Type != step.StepTypeHTTP && s.Type != step.StepTypeMessage && s.Type != step.StepTypeActivity {
 			return errdefs.ErrInvalidStepType
 		}
 
@@ -118,6 +172,9 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 		trimmedConfig := strings.TrimSpace(string(s.Config))
 		if trimmedConfig == "" || trimmedConfig == "null" || !json.Valid(s.Config) {
 			return errdefs.ErrInvalidStepConfig
+		}
+		if err := validateStepConfig(s.Type, s.Config); err != nil {
+			return err
 		}
 
 		if s.Timeout < 0 {
@@ -140,7 +197,7 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 			if s.Compensation.Timeout < 0 {
 				return errdefs.ErrCompensationTimeoutNegative
 			}
-			if s.Compensation.Type != step.StepTypeHTTP && s.Compensation.Type != step.StepTypeMessage {
+			if s.Compensation.Type != step.StepTypeHTTP && s.Compensation.Type != step.StepTypeMessage && s.Compensation.Type != step.StepTypeActivity {
 				return errdefs.ErrInvalidCompensation
 			}
 			if len(s.Compensation.Config) == 0 {
@@ -148,6 +205,9 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 			}
 			trimmedComp := strings.TrimSpace(string(s.Compensation.Config))
 			if trimmedComp == "" || trimmedComp == "null" || !json.Valid(s.Compensation.Config) {
+				return errdefs.ErrInvalidCompensation
+			}
+			if err := validateStepConfig(s.Compensation.Type, s.Compensation.Config); err != nil {
 				return errdefs.ErrInvalidCompensation
 			}
 			if s.Compensation.Retry != nil {

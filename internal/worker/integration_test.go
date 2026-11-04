@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/testutil"
 	"github.com/vhysxl/relay/internal/validator"
@@ -805,13 +806,7 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	t.Logf("✓ Full End-to-End Cycle (Create -> Trigger -> Claim -> Complete) verified!")
 }
 
-type integrationMockExecutor struct{}
-
-func (e *integrationMockExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-	return json.RawMessage(`{"processed":true}`), nil
-}
-
-func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
+func TestIntegration_Worker_ConcurrentProcessing(t *testing.T) {
 	db := getTestDB(t)
 	defer db.Close()
 
@@ -823,7 +818,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
 	execRepo := execution.NewExecutionRepository(db, nil)
-	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second)
+	workerLogic := worker.NewWorkerLogic(execRepo, 30*time.Second, 25*time.Second, nil)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
 	wfName := "test-parallel-pool-wf-" + uuid.NewString()[:8]
@@ -855,26 +850,39 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	// 2. Setup registry with mock HTTP executor
-	reg := executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &integrationMockExecutor{})
+	// 2. Start 3 concurrent worker goroutines
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
 
-	// 3. Start WorkerPool with fixed 3 workers
-	pool := worker.NewWorkerPool(
-		workerLogic,
-		reg,
-		"pool-worker",
-		3,
-		20*time.Millisecond,
-		10*time.Second,
-	)
-
-	poolDone := make(chan error, 1)
+	poolDone := make(chan struct{})
 	go func() {
-		poolDone <- pool.Start(ctx)
+		var wg sync.WaitGroup
+		for i := 1; i <= 3; i++ {
+			wg.Add(1)
+			wID := fmt.Sprintf("worker-%d", i)
+			go func(workerID string) {
+				defer wg.Done()
+				for {
+					select {
+					case <-workerCtx.Done():
+						return
+					default:
+					}
+					s, se, err := workerLogic.ClaimNext(workerCtx, workerID)
+					if err != nil || se == nil {
+						time.Sleep(20 * time.Millisecond)
+						continue
+					}
+					_ = s
+					_ = workerLogic.CompleteStep(workerCtx, se.ID, workerID, json.RawMessage(`{"status":"ok"}`))
+				}
+			}(wID)
+		}
+		wg.Wait()
+		close(poolDone)
 	}()
 
-	// 4. Trigger workflow execution
+	// 3. Trigger workflow execution
 	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
 	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
@@ -884,7 +892,7 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 		t.Fatalf("failed to execute workflow: %v", err)
 	}
 
-	// 5. Poll for workflow completion (up to 10 seconds)
+	// 4. Poll for workflow completion (up to 10 seconds)
 	deadline := time.Now().Add(10 * time.Second)
 	completed := false
 	for time.Now().Before(deadline) {
@@ -901,18 +909,15 @@ func TestIntegration_WorkerPool_Fixed3_ParallelProcessing(t *testing.T) {
 		t.Fatalf("timed out waiting for 3 parallel workers to complete workflow")
 	}
 
-	// 6. Cancel pool and verify clean shutdown
-	cancel()
+	// 5. Cancel workers and verify clean shutdown
+	workerCancel()
 	select {
-	case err := <-poolDone:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Errorf("unexpected pool shutdown error: %v", err)
-		}
+	case <-poolDone:
 	case <-time.After(1 * time.Second):
-		t.Fatalf("timed out waiting for pool to shut down")
+		t.Fatalf("timed out waiting for workers to shut down")
 	}
 
-	t.Logf("✓ Fixed 3 WorkerPool successfully processed 3 parallel tasks and completed workflow %s!", wfExec.ID)
+	t.Logf("✓ Concurrent workers successfully processed tasks and completed workflow %s!", wfExec.ID)
 }
 
 func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {

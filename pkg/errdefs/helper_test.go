@@ -28,6 +28,11 @@ func TestIsValidationError(t *testing.T) {
 		errdefs.ErrIrreversibleCompensation,
 		errdefs.ErrStepTimeoutNegative,
 		errdefs.ErrCompensationTimeoutNegative,
+		errdefs.ErrInvalidQueueName,
+		errdefs.ErrInvalidActivityName,
+		errdefs.ErrEmptyQueueName,
+		errdefs.ErrEmptyActivityName,
+		errdefs.ErrInvalidWaitTimeout,
 	}
 
 	for _, err := range validationErrors {
@@ -44,6 +49,13 @@ func TestIsValidationError(t *testing.T) {
 		errdefs.ErrLockLost,
 		errdefs.ErrExecutionNotFound,
 		errdefs.ErrInvalidEnvValue,
+		errdefs.ErrUnauthorized,
+		errdefs.ErrForbiddenQueue,
+		errdefs.ErrForbiddenTask,
+		errdefs.ErrInvalidLeaseToken,
+		errdefs.ErrTaskNotRunning,
+		errdefs.ErrReportConflict,
+		errdefs.ErrWorkerAPIDisabled,
 		errors.New("db error"),
 		nil,
 	}

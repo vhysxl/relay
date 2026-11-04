@@ -2,6 +2,7 @@ package config
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -11,6 +12,24 @@ import (
 	"github.com/vhysxl/relay/bootstrap/database"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
+
+type WorkerCredential struct {
+	ID     string   `json:"id"`
+	Token  string   `json:"token"`
+	Queues []string `json:"queues"`
+}
+
+func (c WorkerCredential) HasQueueAccess(queue string) bool {
+	if queue == "" {
+		queue = "legacy"
+	}
+	for _, q := range c.Queues {
+		if q == "*" || q == queue {
+			return true
+		}
+	}
+	return false
+}
 
 type Config struct {
 	Port                     string
@@ -25,6 +44,9 @@ type Config struct {
 	WorkerCount              int
 	ConditionMaxDepth        int
 	ConditionMaxNodes        int
+	WorkerAPIEnabled         bool
+	WorkerCredentials        []WorkerCredential
+	WorkerLongPollTimeout    time.Duration
 }
 
 func Init() (*Config, error) {
@@ -83,6 +105,11 @@ func Init() (*Config, error) {
 		return nil, err
 	}
 
+	workerAPIEnabled, workerCreds, workerLongPollTimeout, err := parseWorkerConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	// DB Init
 	dbconf := &database.DBConfig{
 		Host:     getEnv("DB_HOST", "mysql"),
@@ -110,6 +137,9 @@ func Init() (*Config, error) {
 		WorkerCount:              workerCount,
 		ConditionMaxDepth:        conditionMaxDepth,
 		ConditionMaxNodes:        conditionMaxNodes,
+		WorkerAPIEnabled:         workerAPIEnabled,
+		WorkerCredentials:        workerCreds,
+		WorkerLongPollTimeout:    workerLongPollTimeout,
 	}, nil
 }
 
@@ -155,4 +185,43 @@ func getIntEnv(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%w: %s=%q must be a positive integer", errdefs.ErrInvalidEnvValue, key, os.Getenv(key))
 	}
 	return n, nil
+}
+
+func parseWorkerConfig() (bool, []WorkerCredential, time.Duration, error) {
+	workerAPIEnabledStr := strings.TrimSpace(os.Getenv("RELAY_WORKER_API_ENABLED"))
+	workerCredsJSON := strings.TrimSpace(os.Getenv("RELAY_WORKER_CREDENTIALS"))
+
+	workerAPIEnabled := false
+	if workerAPIEnabledStr != "" {
+		b, err := strconv.ParseBool(workerAPIEnabledStr)
+		if err != nil {
+			return false, nil, 0, fmt.Errorf("%w: RELAY_WORKER_API_ENABLED must be a boolean", errdefs.ErrInvalidEnvValue)
+		}
+		workerAPIEnabled = b
+	}
+
+	var workerCreds []WorkerCredential
+	if workerCredsJSON != "" {
+		if err := json.Unmarshal([]byte(workerCredsJSON), &workerCreds); err != nil {
+			return false, nil, 0, fmt.Errorf("%w: RELAY_WORKER_CREDENTIALS is not valid JSON: %v", errdefs.ErrInvalidEnvValue, err)
+		}
+	}
+
+	if workerAPIEnabled {
+		if len(workerCreds) == 0 {
+			return false, nil, 0, fmt.Errorf("%w: RELAY_WORKER_CREDENTIALS must be configured and non-empty when RELAY_WORKER_API_ENABLED is true", errdefs.ErrInvalidEnvValue)
+		}
+		for i, cred := range workerCreds {
+			if strings.TrimSpace(cred.ID) == "" || strings.TrimSpace(cred.Token) == "" {
+				return false, nil, 0, fmt.Errorf("%w: RELAY_WORKER_CREDENTIALS[%d] must have non-empty id and token", errdefs.ErrInvalidEnvValue, i)
+			}
+		}
+	}
+
+	workerLongPollTimeout, err := parseDuration("WORKER_LONG_POLL_TIMEOUT", 25*time.Second)
+	if err != nil {
+		return false, nil, 0, err
+	}
+
+	return workerAPIEnabled, workerCreds, workerLongPollTimeout, nil
 }

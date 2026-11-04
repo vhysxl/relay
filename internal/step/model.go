@@ -10,8 +10,9 @@ import (
 type StepType string
 
 const (
-	StepTypeHTTP    StepType = "http"
-	StepTypeMessage StepType = "message"
+	StepTypeHTTP     StepType = "http"
+	StepTypeMessage  StepType = "message"
+	StepTypeActivity StepType = "activity"
 )
 
 type Step struct {
@@ -45,6 +46,7 @@ type RetryPolicy struct {
 }
 
 type HTTPConfig struct {
+	Queue   string            `json:"queue,omitempty"`   // Routing queue target (default: "legacy")
 	Method  string            `json:"method"`            // "GET", "POST", "PUT", dll.
 	URL     string            `json:"url"`               // Endpoint target
 	Headers map[string]string `json:"headers,omitempty"` // Header kustom seperti Authorization
@@ -52,11 +54,18 @@ type HTTPConfig struct {
 }
 
 type RabbitMQConfig struct {
+	Queue       string          `json:"queue,omitempty"`       // Routing queue target (default: "legacy")
 	Exchange    string          `json:"exchange"`               // Nama exchange
 	RoutingKey  string          `json:"routing_key"`            // Routing key / Queue tujuan
 	ContentType string          `json:"content_type,omitempty"` // Default: "application/json"
 	Headers     map[string]any  `json:"headers,omitempty"`      // AMQP Table headers
 	Payload     json.RawMessage `json:"payload"`                // Data pesan yang akan dipublish
+}
+
+type ActivityConfig struct {
+	Queue    string          `json:"queue"`           // Target task queue (wajib)
+	Activity string          `json:"activity"`        // Nama activity handler (wajib)
+	Input    json.RawMessage `json:"input,omitempty"` // Input JSON payload untuk activity
 }
 
 type StepRepository interface {

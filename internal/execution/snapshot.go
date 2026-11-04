@@ -39,8 +39,30 @@ func snapshotStep(execID, stepID, name string, kind step.StepType, config json.R
 	if len(config) == 0 {
 		config = json.RawMessage(`{}`)
 	}
+	interpolatedConfig := append(json.RawMessage(nil), util.InterpolateContext(config, context)...)
+
+	taskQueue := "legacy"
+	var activityName *string
+	var cfgMap map[string]json.RawMessage
+	if err := json.Unmarshal(interpolatedConfig, &cfgMap); err == nil && cfgMap != nil {
+		if qRaw, ok := cfgMap["queue"]; ok {
+			var q string
+			if json.Unmarshal(qRaw, &q) == nil && q != "" {
+				taskQueue = q
+			}
+		}
+		if kind == step.StepTypeActivity {
+			if actRaw, ok := cfgMap["activity"]; ok {
+				var act string
+				if json.Unmarshal(actRaw, &act) == nil && act != "" {
+					activityName = &act
+				}
+			}
+		}
+	}
+
 	s := StepExecution{ID: util.GenerateUUID(), WorkflowExecutionID: execID, StepID: stepID, Name: name,
-		Type: string(kind), Config: append(json.RawMessage(nil), util.InterpolateContext(config, context)...), DependsOn: append([]string{}, deps...),
+		Type: string(kind), TaskQueue: taskQueue, ActivityName: activityName, Config: interpolatedConfig, DependsOn: append([]string{}, deps...),
 		Status: StatusWaiting, MaxAttempts: 1, Multiplier: 1, TimeoutSeconds: timeout, CreatedAt: now, UpdatedAt: now}
 	if retry != nil {
 		if retry.MaxAttempts > 0 {

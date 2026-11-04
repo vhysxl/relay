@@ -80,14 +80,29 @@ export interface WorkflowVersionChangesResponse {
   changes: WorkflowChange[]
 }
 
+export interface StepExecutionAttempt {
+  attempt: number
+  service_id: string
+  worker_id: string
+  started_at: string
+  deadline: string
+  finished_at?: string | null
+  outcome: string
+  error_message?: string | null
+  report_type?: string | null
+}
+
 export interface StepExecution {
   id?: string
   step_id: string
   name?: string
   type: StepType
   status: ExecutionStatus
+  task_queue?: string
+  activity_name?: string
   attempt?: number
   max_attempts?: number
+  attempts?: StepExecutionAttempt[]
   timeout_seconds?: number
   depends_on?: string[]
   config?: any

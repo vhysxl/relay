@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -36,14 +35,6 @@ func run() error {
 	defer cancel()
 
 	g, ctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		log.Printf("Worker pool started with %d workers\n", application.Config.WorkerCount)
-		if err := application.Pool.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			return fmt.Errorf("worker pool: %w", err)
-		}
-		return nil
-	})
 
 	g.Go(func() error {
 		log.Println("Step reaper started")

@@ -2,7 +2,9 @@ package validator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/vhysxl/relay/internal/step"
@@ -608,5 +610,141 @@ func TestIsWorkflowEqual_WhenCondition_LargeNumbers(t *testing.T) {
 	}
 	if v.IsWorkflowEqual(existing, nil, reqChanged) {
 		t.Fatal("expected changing 9007199254740992 to 9007199254740993 in when to not be equal")
+	}
+}
+
+func TestValidateSteps_ActivityType_Success(t *testing.T) {
+	v := NewValidator()
+	steps := []step.Step{
+		{
+			ID:     "act-1",
+			Type:   step.StepTypeActivity,
+			Config: json.RawMessage(`{"queue":"user-service","activity":"user.finalizeProfile","input":{"id":123}}`),
+		},
+	}
+	if err := v.ValidateSteps(steps); err != nil {
+		t.Fatalf("expected valid activity step, got: %v", err)
+	}
+}
+
+func TestValidateSteps_ActivityType_Validation(t *testing.T) {
+	v := NewValidator()
+
+	tests := []struct {
+		name    string
+		config  string
+		wantErr error
+	}{
+		{
+			name:    "missing queue",
+			config:  `{"activity":"user.finalizeProfile"}`,
+			wantErr: errdefs.ErrEmptyQueueName,
+		},
+		{
+			name:    "empty queue",
+			config:  `{"queue":"","activity":"user.finalizeProfile"}`,
+			wantErr: errdefs.ErrEmptyQueueName,
+		},
+		{
+			name:    "invalid queue characters (template not allowed)",
+			config:  `{"queue":"user-{{context.service}}","activity":"user.finalizeProfile"}`,
+			wantErr: errdefs.ErrInvalidQueueName,
+		},
+		{
+			name:    "queue too long (> 128 chars)",
+			config:  fmt.Sprintf(`{"queue":"%s","activity":"user.finalizeProfile"}`, strings.Repeat("a", 129)),
+			wantErr: errdefs.ErrInvalidQueueName,
+		},
+		{
+			name:    "missing activity",
+			config:  `{"queue":"user-service"}`,
+			wantErr: errdefs.ErrEmptyActivityName,
+		},
+		{
+			name:    "empty activity",
+			config:  `{"queue":"user-service","activity":"   "}`,
+			wantErr: errdefs.ErrEmptyActivityName,
+		},
+		{
+			name:    "invalid activity characters",
+			config:  `{"queue":"user-service","activity":"user finalize"}`,
+			wantErr: errdefs.ErrInvalidActivityName,
+		},
+		{
+			name:    "activity too long (> 128 chars)",
+			config:  fmt.Sprintf(`{"queue":"user-service","activity":"%s"}`, strings.Repeat("b", 129)),
+			wantErr: errdefs.ErrInvalidActivityName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			steps := []step.Step{
+				{
+					ID:     "act-1",
+					Type:   step.StepTypeActivity,
+					Config: json.RawMessage(tt.config),
+				},
+			}
+			err := v.ValidateSteps(steps)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected %v, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidateSteps_HTTPAndMessageQueueValidation(t *testing.T) {
+	v := NewValidator()
+
+	// HTTP with valid optional queue
+	steps := []step.Step{
+		{
+			ID:     "http-1",
+			Type:   step.StepTypeHTTP,
+			Config: json.RawMessage(`{"url":"https://example.com","queue":"custom-http-queue"}`),
+		},
+	}
+	if err := v.ValidateSteps(steps); err != nil {
+		t.Fatalf("expected valid HTTP step with queue, got %v", err)
+	}
+
+	// HTTP with invalid queue
+	steps[0].Config = json.RawMessage(`{"url":"https://example.com","queue":"invalid queue name!"}`)
+	if err := v.ValidateSteps(steps); !errors.Is(err, errdefs.ErrInvalidQueueName) {
+		t.Fatalf("expected ErrInvalidQueueName, got %v", err)
+	}
+
+	// Message with valid optional queue
+	steps[0].Type = step.StepTypeMessage
+	steps[0].Config = json.RawMessage(`{"exchange":"ex","queue":"payment-queue"}`)
+	if err := v.ValidateSteps(steps); err != nil {
+		t.Fatalf("expected valid Message step with queue, got %v", err)
+	}
+}
+
+func TestValidateSteps_Compensation_Activity(t *testing.T) {
+	v := NewValidator()
+
+	// Valid activity compensation
+	steps := []step.Step{
+		{
+			ID:     "s1",
+			Type:   step.StepTypeHTTP,
+			Config: json.RawMessage(`{"url":"https://example.com"}`),
+			Compensation: &step.Compensation{
+				Type:   step.StepTypeActivity,
+				Config: json.RawMessage(`{"queue":"comp-queue","activity":"rollbackAction"}`),
+			},
+		},
+	}
+	if err := v.ValidateSteps(steps); err != nil {
+		t.Fatalf("expected valid activity compensation, got %v", err)
+	}
+
+	// Invalid activity compensation (missing queue)
+	steps[0].Compensation.Config = json.RawMessage(`{"activity":"rollbackAction"}`)
+	if err := v.ValidateSteps(steps); !errors.Is(err, errdefs.ErrInvalidCompensation) {
+		t.Fatalf("expected ErrInvalidCompensation, got %v", err)
 	}
 }

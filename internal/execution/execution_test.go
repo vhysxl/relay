@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,6 +88,13 @@ func (workflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.W
 		return nil, errdefs.ErrWorkflowNotFound
 	}
 	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+}
+
+func (workflowReader) GetWorkflowVersion(ctx context.Context, name string, version int) (*workflow.Workflow, error) {
+	if name == "unknown-wf" {
+		return nil, errdefs.ErrWorkflowNotFound
+	}
+	return &workflow.Workflow{ID: fmt.Sprintf("%s-v%d", name, version), Name: name, Version: version, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {

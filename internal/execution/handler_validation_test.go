@@ -49,6 +49,8 @@ func TestHandlerBodyValidation(t *testing.T) {
 		{"raw", `{"amount":100}`, 201, `{"amount":100}`}, {"wrapped", `{"context":{"amount":100}}`, 201, `{"amount":100}`},
 		{"null context", `{"context":null}`, 201, "null"}, {"malformed", `{`, 400, ""}, {"trailing", `{} {}`, 400, ""},
 		{"array", `[]`, 400, ""}, {"scalar", `4`, 400, ""}, {"context array", `{"context":[]}`, 400, ""},
+		{"raw with workflow_version", `{"workflow_version":1,"amount":6000000}`, 201, `{"workflow_version":1,"amount":6000000}`},
+		{"wrapped with workflow_version", `{"context":{"amount":100},"workflow_version":2}`, 201, `{"amount":100}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logic := &handlerLogic{}
