@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -19,6 +20,9 @@ func Listen(ctx context.Context, app *app.Application) error {
 	srv := &http.Server{
 		Addr:    app.Config.Port,
 		Handler: mux,
+		BaseContext: func(net.Listener) context.Context {
+			return ctx
+		},
 	}
 
 	serverErr := make(chan error, 1)

@@ -1,812 +1,606 @@
-package worker
+package worker_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/executor"
 	"github.com/vhysxl/relay/internal/step"
+	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
-const testLeaseDuration = 30 * time.Second
-
-func newTestWorkerPool(logic WorkerLogic, registry executor.Registry) WorkerPool {
-	return NewWorkerPool(logic, registry, "test-worker", 1, 10*time.Millisecond, 10*time.Second)
+type mockExecutionRepository struct {
+	claimTaskFunc        func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error)
+	heartbeatTaskFunc    func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
+	completeTaskFunc     func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
+	failTaskFunc         func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
+	getStepTaskQueueFunc func(ctx context.Context, stepExecID string) (string, error)
 }
 
-type mockExecutionRepository struct {
-	claimFunc     func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error)
-	heartbeatFunc func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
-	completeFunc  func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	failFunc      func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
+func (m *mockExecutionRepository) ClaimTask(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
+	if m.claimTaskFunc != nil {
+		return m.claimTaskFunc(ctx, filter)
+	}
+	return nil, nil
+}
+
+func (m *mockExecutionRepository) HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
+	if m.heartbeatTaskFunc != nil {
+		return m.heartbeatTaskFunc(ctx, serviceID, stepExecID, workerID, leaseToken, duration)
+	}
+	return time.Now().Add(duration), duration, nil
+}
+
+func (m *mockExecutionRepository) CompleteTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error {
+	if m.completeTaskFunc != nil {
+		return m.completeTaskFunc(ctx, serviceID, stepExecID, workerID, leaseToken, output)
+	}
+	return nil
+}
+
+func (m *mockExecutionRepository) FailTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error {
+	if m.failTaskFunc != nil {
+		return m.failTaskFunc(ctx, serviceID, stepExecID, workerID, leaseToken, errMsg, retryable)
+	}
+	return nil
+}
+
+func (m *mockExecutionRepository) GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error) {
+	if m.getStepTaskQueueFunc != nil {
+		return m.getStepTaskQueueFunc(ctx, stepExecID)
+	}
+	return "legacy", nil
 }
 
 func (m *mockExecutionRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-	if m.claimFunc != nil {
-		return m.claimFunc(ctx, workerID, leaseDuration)
-	}
 	return nil, nil, nil
 }
 
 func (m *mockExecutionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-	if m.heartbeatFunc != nil {
-		return m.heartbeatFunc(ctx, stepExecutionID, workerID, leaseDuration)
-	}
 	return nil
 }
 
 func (m *mockExecutionRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-	if m.completeFunc != nil {
-		return m.completeFunc(ctx, stepExecutionID, workerID, output)
-	}
 	return nil
 }
 
 func (m *mockExecutionRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-	if m.failFunc != nil {
-		return m.failFunc(ctx, stepExecutionID, workerID, errMsg)
-	}
 	return nil
 }
 
-func TestWorkerLogic_ClaimNext_EmptyWorkerID(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{}, testLeaseDuration)
+func TestQueueNotifier(t *testing.T) {
+	notifier := worker.NewQueueNotifier()
+	ch1, cancel1 := notifier.Subscribe("orders")
+	defer cancel1()
+	ch2, cancel2 := notifier.Subscribe("orders")
+	defer cancel2()
+	chOther, cancelOther := notifier.Subscribe("payments")
+	defer cancelOther()
 
-	_, _, err := logic.ClaimNext(context.Background(), "")
-	if err != errdefs.ErrEmptyWorkerID {
-		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
-	}
+	notifier.Notify("orders")
 
-	_, _, err = logic.ClaimNext(context.Background(), "   ")
-	if err != errdefs.ErrEmptyWorkerID {
-		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
-	}
-}
-
-func TestWorkerLogic_ClaimNext_Success(t *testing.T) {
-	expectedStep := &step.Step{
-		ID:   "step-1",
-		Type: step.StepTypeHTTP,
-	}
-	expectedExec := &execution.StepExecution{
-		ID:      "exec-999",
-		StepID:  "step-1",
-		Status:  execution.StatusRunning,
-		Attempt: 1,
-	}
-
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			if workerID != "worker-1" {
-				t.Errorf("expected workerID 'worker-1', got %s", workerID)
-			}
-			if leaseDuration != 30*time.Second {
-				t.Errorf("expected leaseDuration %v, got %v", 30*time.Second, leaseDuration)
-			}
-			return expectedStep, expectedExec, nil
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	s, se, err := logic.ClaimNext(context.Background(), "worker-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if s == nil || s.ID != "step-1" {
-		t.Errorf("expected step-1, got %+v", s)
-	}
-	if se == nil || se.ID != "exec-999" || se.Status != execution.StatusRunning {
-		t.Errorf("expected exec-999 in RUNNING state, got %+v", se)
-	}
-}
-
-func TestWorkerLogic_ClaimNext_NoTaskAvailable(t *testing.T) {
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return nil, nil, nil
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	s, se, err := logic.ClaimNext(context.Background(), "worker-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if s != nil || se != nil {
-		t.Fatalf("expected nil step and exec when queue empty, got s=%+v, se=%+v", s, se)
-	}
-}
-
-func TestWorkerLogic_Heartbeat_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{}, testLeaseDuration)
-
-	// Empty stepExecutionID
-	err := logic.Heartbeat(context.Background(), "", "worker-1")
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
-	}
-	err = logic.Heartbeat(context.Background(), "   ", "worker-1")
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
-	}
-
-	// Empty workerID
-	err = logic.Heartbeat(context.Background(), "exec-1", "")
-	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
-		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
-	}
-	err = logic.Heartbeat(context.Background(), "exec-1", "   ")
-	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
-		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
-	}
-}
-
-func TestWorkerLogic_Heartbeat_Success(t *testing.T) {
-	called := false
-	repo := &mockExecutionRepository{
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			called = true
-			if stepExecutionID != "exec-123" {
-				t.Errorf("expected exec-123, got %s", stepExecutionID)
-			}
-			if workerID != "worker-1" {
-				t.Errorf("expected worker-1, got %s", workerID)
-			}
-			if leaseDuration != 30*time.Second {
-				t.Errorf("expected leaseDuration %v, got %v", 30*time.Second, leaseDuration)
-			}
-			return nil
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.Heartbeat(context.Background(), "  exec-123  ", "  worker-1  ")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Fatalf("expected repo Heartbeat to be called")
-	}
-}
-
-func TestWorkerLogic_Heartbeat_LockLost(t *testing.T) {
-	repo := &mockExecutionRepository{
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			return errdefs.ErrLockLost
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.Heartbeat(context.Background(), "exec-123", "worker-1")
-	if !errors.Is(err, errdefs.ErrLockLost) {
-		t.Fatalf("expected ErrLockLost, got %v", err)
-	}
-}
-
-func TestWorkerLogic_StartHeartbeat_TicksAndStops(t *testing.T) {
-	var count int32
-	repo := &mockExecutionRepository{
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			atomic.AddInt32(&count, 1)
-			return nil
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	// Start with fast 15ms interval
-	stop, errChan := logic.StartHeartbeat(context.Background(), "exec-1", "worker-1", 15*time.Millisecond)
-
-	// Allow several ticks to fire
-	time.Sleep(50 * time.Millisecond)
-	stop()
-	// Allow in-flight tick to exit cleanly
-	time.Sleep(20 * time.Millisecond)
-
-	// Ensure no error on errChan
 	select {
-	case err := <-errChan:
-		t.Fatalf("unexpected error from errChan: %v", err)
+	case <-ch1:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected ch1 to receive notification")
+	}
+
+	select {
+	case <-ch2:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected ch2 to receive notification")
+	}
+
+	select {
+	case <-chOther:
+		t.Fatalf("expected chOther NOT to receive notification")
 	default:
 	}
 
-	currentCount := atomic.LoadInt32(&count)
-	if currentCount < 2 {
-		t.Errorf("expected at least 2 heartbeat ticks, got %d", currentCount)
-	}
-
-	// Wait a bit more and verify no more ticks fire after stop
-	time.Sleep(45 * time.Millisecond)
-	afterStopCount := atomic.LoadInt32(&count)
-	if afterStopCount != currentCount {
-		t.Errorf("expected heartbeat to stop firing, count changed from %d to %d", currentCount, afterStopCount)
-	}
-}
-
-func TestWorkerLogic_StartHeartbeat_StopsOnError(t *testing.T) {
-	repo := &mockExecutionRepository{
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			return errdefs.ErrLockLost
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	stop, errChan := logic.StartHeartbeat(context.Background(), "exec-1", "worker-1", 10*time.Millisecond)
-	defer stop()
+	cancel1()
+	notifier.Notify("orders")
 
 	select {
-	case err := <-errChan:
-		if !errors.Is(err, errdefs.ErrLockLost) {
-			t.Fatalf("expected errdefs.ErrLockLost, got %v", err)
-		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatalf("timed out waiting for error on errChan")
+	case <-ch2:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("expected ch2 to receive notification after cancel1")
 	}
 }
 
-func TestWorkerLogic_StartHeartbeat_ContextCancelled(t *testing.T) {
-	repo := &mockExecutionRepository{
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			return nil
-		},
-	}
+func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
 
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	stop, _ := logic.StartHeartbeat(ctx, "exec-1", "worker-1", 10*time.Millisecond)
-	defer stop()
-
-	// Cancel context immediately
-	cancel()
-	time.Sleep(30 * time.Millisecond)
-}
-
-func TestWorkerLogic_CompleteStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{}, testLeaseDuration)
-
-	// Empty stepExecutionID
-	err := logic.CompleteStep(context.Background(), "", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
-	}
-	err = logic.CompleteStep(context.Background(), "   ", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
-	}
-
-	// Empty workerID
-	err = logic.CompleteStep(context.Background(), "exec-1", "", json.RawMessage("{}"))
+	// Empty worker ID
+	_, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{})
 	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
 		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
 	}
-	err = logic.CompleteStep(context.Background(), "exec-1", "   ", json.RawMessage("{}"))
-	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
-		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
+
+	// Negative wait timeout
+	neg := -5
+	_, err = logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID:      "w-1",
+		WaitTimeoutMS: &neg,
+	})
+	if !errors.Is(err, errdefs.ErrInvalidWaitTimeout) {
+		t.Fatalf("expected ErrInvalidWaitTimeout for negative timeout, got %v", err)
 	}
 
-	// Invalid JSON output
-	err = logic.CompleteStep(context.Background(), "exec-1", "worker-1", json.RawMessage("{invalid-json"))
-	if !errors.Is(err, errdefs.ErrInvalidStepOutput) {
-		t.Fatalf("expected ErrInvalidStepOutput, got %v", err)
-	}
-}
-
-func TestWorkerLogic_CompleteStep_Success(t *testing.T) {
-	called := false
-	repo := &mockExecutionRepository{
-		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-			called = true
-			if stepExecutionID != "exec-123" {
-				t.Errorf("expected exec-123, got %s", stepExecutionID)
-			}
-			if workerID != "worker-1" {
-				t.Errorf("expected worker-1, got %s", workerID)
-			}
-			if string(output) != `{"status":"ok"}` {
-				t.Errorf("unexpected output: %s", string(output))
-			}
-			return nil
-		},
+	// Timeout exceeding maximum
+	tooLong := 30000
+	_, err = logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID:      "w-1",
+		WaitTimeoutMS: &tooLong,
+	})
+	if !errors.Is(err, errdefs.ErrInvalidWaitTimeout) {
+		t.Fatalf("expected ErrInvalidWaitTimeout for timeout > max, got %v", err)
 	}
 
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.CompleteStep(context.Background(), "  exec-123  ", "  worker-1  ", json.RawMessage(`{"status":"ok"}`))
+	// Immediate claim with 0ms timeout returning no task
+	zero := 0
+	res, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID:      "w-1",
+		WaitTimeoutMS: &zero,
+	})
+	if err != nil || res != nil {
+		t.Fatalf("expected nil result on immediate empty claim, got res=%v, err=%v", res, err)
+	}
+
+	// Immediate claim with task found
+	actName := "order.create"
+	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
+		return &execution.ClaimResult{
+			StepDefinition: &step.Step{ID: "step-1", Type: step.StepTypeActivity, Config: json.RawMessage(`{"amount":100}`)},
+			StepExecution: &execution.StepExecution{
+				ID:                  "exec-step-1",
+				WorkflowExecutionID: "wf-exec-1",
+				StepID:              "step-1",
+				TaskQueue:           "orders",
+				ActivityName:        &actName,
+				Attempt:             1,
+			},
+			LeaseToken:     "test-token",
+			LeaseExpiresAt: time.Now().Add(30 * time.Second),
+			LeaseDuration:  30 * time.Second,
+		}, nil
+	}
+
+	res, err = logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID:      "w-1",
+		Queue:         "orders",
+		WaitTimeoutMS: &zero,
+	})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("expected successful claim, got err=%v", err)
 	}
-	if !called {
-		t.Fatalf("expected completeFunc to be called")
-	}
-}
-
-func TestWorkerLogic_CompleteStep_LockLost(t *testing.T) {
-	repo := &mockExecutionRepository{
-		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-			return errdefs.ErrLockLost
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.CompleteStep(context.Background(), "exec-123", "worker-1", json.RawMessage("{}"))
-	if !errors.Is(err, errdefs.ErrLockLost) {
-		t.Fatalf("expected ErrLockLost, got %v", err)
+	if res.TaskID != "exec-step-1" || res.ActivityName != "order.create" {
+		t.Fatalf("unexpected claim result: %+v", res)
 	}
 }
 
-func TestWorkerLogic_FailStep_Validation(t *testing.T) {
-	logic := NewWorkerLogic(&mockExecutionRepository{}, testLeaseDuration)
+func TestWorkerLogic_ClaimTask_WakeupViaNotifier(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
 
-	// Empty stepExecutionID
-	err := logic.FailStep(context.Background(), "", "worker-1", "some error")
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID, got %v", err)
-	}
-	err = logic.FailStep(context.Background(), "   ", "worker-1", "some error")
-	if !errors.Is(err, errdefs.ErrEmptyStepExecutionID) {
-		t.Fatalf("expected ErrEmptyStepExecutionID for whitespace, got %v", err)
-	}
-
-	// Empty workerID
-	err = logic.FailStep(context.Background(), "exec-1", "", "some error")
-	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
-		t.Fatalf("expected ErrEmptyWorkerID, got %v", err)
-	}
-	err = logic.FailStep(context.Background(), "exec-1", "   ", "some error")
-	if !errors.Is(err, errdefs.ErrEmptyWorkerID) {
-		t.Fatalf("expected ErrEmptyWorkerID for whitespace, got %v", err)
-	}
-}
-
-func TestWorkerLogic_FailStep_Success(t *testing.T) {
-	called := false
-	repo := &mockExecutionRepository{
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			called = true
-			if stepExecutionID != "exec-123" {
-				t.Errorf("expected exec-123, got %s", stepExecutionID)
-			}
-			if workerID != "worker-1" {
-				t.Errorf("expected worker-1, got %s", workerID)
-			}
-			if errMsg != "step timed out" {
-				t.Errorf("expected 'step timed out', got %s", errMsg)
-			}
-			return nil
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.FailStep(context.Background(), "  exec-123  ", "  worker-1  ", "step timed out")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !called {
-		t.Fatalf("expected failFunc to be called")
-	}
-
-	// Empty error message defaults to "unknown error"
-	repo.failFunc = func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-		if errMsg != "unknown error" {
-			t.Errorf("expected 'unknown error', got %s", errMsg)
+	var callCount int
+	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
+		callCount++
+		if callCount == 1 {
+			return nil, nil // First attempt returns nothing
 		}
+		return &execution.ClaimResult{
+			StepDefinition: &step.Step{ID: "step-1", Type: step.StepTypeActivity, Config: json.RawMessage(`{}`)},
+			StepExecution: &execution.StepExecution{
+				ID:                  "exec-step-1",
+				WorkflowExecutionID: "wf-exec-1",
+				StepID:              "step-1",
+				TaskQueue:           "orders",
+				Attempt:             1,
+			},
+			LeaseToken:     "token-abc",
+			LeaseExpiresAt: time.Now().Add(30 * time.Second),
+			LeaseDuration:  30 * time.Second,
+		}, nil
+	}
+
+	waitMS := 5000
+	done := make(chan *worker.ClaimTaskResponse)
+	go func() {
+		res, _ := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+			WorkerID:      "w-1",
+			Queue:         "orders",
+			WaitTimeoutMS: &waitMS,
+		})
+		done <- res
+	}()
+
+	// Give goroutine time to start waiting
+	time.Sleep(50 * time.Millisecond)
+	// Trigger wake-up notification
+	notifier.Notify("orders")
+
+	select {
+	case res := <-done:
+		if res == nil || res.TaskID != "exec-step-1" {
+			t.Fatalf("expected claim result on notification wakeup, got %+v", res)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("timed out waiting for task claim after notifier wake-up")
+	}
+}
+
+func TestWorkerLogic_ClaimTask_OmittedWaitTimeout_CappedByConfig(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	cfg := &config.Config{
+		WorkerLongPollTimeout: 50 * time.Millisecond,
+	}
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, cfg, notifier)
+
+	start := time.Now()
+	res, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID: "w-1",
+		Queue:    "orders",
+		// WaitTimeoutMS is omitted!
+	})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("expected nil result, got %+v", res)
+	}
+	// Should return within ~50ms, NOT 25 seconds!
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("claim waited %v; expected to be capped near 50ms", elapsed)
+	}
+}
+
+func TestWorkerHandler_HTTPProtocol(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+
+	cfg := &config.Config{
+		WorkerAPIEnabled: true,
+		WorkerCredentials: []config.WorkerCredential{
+			{
+				ID:     "srv-payment",
+				Token:  "token-secret-123",
+				Queues: []string{"payments"},
+			},
+		},
+		WorkerLongPollTimeout: 25 * time.Second,
+	}
+
+	handler := worker.NewWorkerHandler(logic, cfg)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /worker/tasks/claim", handler.Claim)
+	mux.HandleFunc("POST /worker/tasks/{id}/heartbeat", handler.Heartbeat)
+	mux.HandleFunc("POST /worker/tasks/{id}/complete", handler.Complete)
+	mux.HandleFunc("POST /worker/tasks/{id}/fail", handler.Fail)
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// 1. Unauthorized request
+	clientUnauth := worker.NewTestWorkerClient(server.URL, "wrong-token", "w1", "payments")
+	_, err := clientUnauth.Claim(context.Background(), nil, nil, 0)
+	if err == nil {
+		t.Fatalf("expected unauthorized error with wrong token")
+	}
+
+	// 2. Forbidden queue
+	clientForbidden := worker.NewTestWorkerClient(server.URL, "token-secret-123", "w1", "other-queue")
+	_, err = clientForbidden.Claim(context.Background(), nil, nil, 0)
+	if err == nil {
+		t.Fatalf("expected forbidden queue error")
+	}
+
+	// 3. Authorized client: Claim -> Heartbeat -> Complete
+	client := worker.NewTestWorkerClient(server.URL, "token-secret-123", "w1", "payments")
+
+	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
+		return &execution.ClaimResult{
+			StepDefinition: &step.Step{ID: "pay-step", Type: step.StepTypeActivity, Config: json.RawMessage(`{"charge":50}`)},
+			StepExecution: &execution.StepExecution{
+				ID:                  "step-exec-99",
+				WorkflowExecutionID: "wf-exec-99",
+				StepID:              "pay-step",
+				TaskQueue:           "payments",
+				Attempt:             1,
+			},
+			LeaseToken:     "tok-99",
+			LeaseExpiresAt: time.Now().Add(30 * time.Second),
+			LeaseDuration:  30 * time.Second,
+		}, nil
+	}
+	repo.getStepTaskQueueFunc = func(ctx context.Context, stepExecID string) (string, error) {
+		return "payments", nil
+	}
+
+	task, err := client.Claim(context.Background(), []string{"activity"}, nil, 0)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if task.TaskID != "step-exec-99" {
+		t.Fatalf("unexpected task id: %s", task.TaskID)
+	}
+
+	hb, err := client.Heartbeat(context.Background(), task.TaskID, task.LeaseToken, 30000)
+	if err != nil {
+		t.Fatalf("heartbeat failed: %v", err)
+	}
+	if hb.LeaseDurationMS != 30000 {
+		t.Fatalf("unexpected heartbeat duration: %d", hb.LeaseDurationMS)
+	}
+
+	err = client.Complete(context.Background(), task.TaskID, task.LeaseToken, json.RawMessage(`{"status":"paid"}`))
+	if err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+
+	// 4. Heartbeat after complete returns 409 Conflict (LOCK_LOST)
+	repo.heartbeatTaskFunc = func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
+		return time.Time{}, 0, errdefs.ErrLockLost
+	}
+	_, err = client.Heartbeat(context.Background(), task.TaskID, task.LeaseToken, 30000)
+	if err == nil {
+		t.Fatalf("expected error from heartbeat after complete")
+	}
+	if !strings.Contains(err.Error(), "409") {
+		t.Fatalf("expected 409 Conflict, got: %v", err)
+	}
+
+	// 5. Fail cycle
+	err = client.Fail(context.Background(), task.TaskID, task.LeaseToken, "failed test", false)
+	if err != nil {
+		t.Fatalf("fail step failed: %v", err)
+	}
+}
+
+func TestWorkerLogic_FailTask_RetryableDefault(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+
+	var recordedRetryable bool
+	repo.failTaskFunc = func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error {
+		recordedRetryable = retryable
 		return nil
 	}
-	_ = logic.FailStep(context.Background(), "exec-123", "worker-1", "   ")
-}
 
-func TestWorkerLogic_FailStep_LockLost(t *testing.T) {
-	repo := &mockExecutionRepository{
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			return errdefs.ErrLockLost
-		},
-	}
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	err := logic.FailStep(context.Background(), "exec-123", "worker-1", "error")
-	if !errors.Is(err, errdefs.ErrLockLost) {
-		t.Fatalf("expected ErrLockLost, got %v", err)
-	}
-}
-
-type mockExecutor struct {
-	executeFn func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error)
-}
-
-func (m *mockExecutor) Execute(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-	if m.executeFn != nil {
-		return m.executeFn(ctx, s, exec)
-	}
-	return json.RawMessage(`{"status":"ok"}`), nil
-}
-
-func TestWorkerPool_ProcessOne_Success(t *testing.T) {
-	completed := false
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:   "step-1",
-					Type: step.StepTypeHTTP,
-				}, &execution.StepExecution{
-					ID:     "exec-1",
-					StepID: "step-1",
-					Type:   string(step.StepTypeHTTP),
-				}, nil
-		},
-		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-			completed = true
-			if stepExecutionID != "exec-1" {
-				t.Errorf("expected exec-1, got %s", stepExecutionID)
-			}
-			if workerID != "test-worker-1" {
-				t.Errorf("expected test-worker-1, got %s", workerID)
-			}
-			if string(output) != `{"result":"success"}` {
-				t.Errorf("unexpected output: %s", string(output))
-			}
-			return nil
-		},
-	}
-
-	reg := executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			return json.RawMessage(`{"result":"success"}`), nil
+	// 1. Omitted retryable (nil) -> defaults to true
+	_, err := logic.FailTask(context.Background(), "srv-1", "step-1", worker.FailRequest{
+		WorkerID:   "w-1",
+		LeaseToken: "tok-1",
+		Error: worker.TaskError{
+			Message:   "some error",
+			Retryable: nil,
 		},
 	})
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	pool := newTestWorkerPool(logic, reg)
-
-	processed, err := pool.ProcessOne(context.Background(), "test-worker-1")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected fail task error: %v", err)
 	}
-	if !processed {
-		t.Fatalf("expected task to be processed")
-	}
-	if !completed {
-		t.Fatalf("expected task to be marked completed")
-	}
-}
-
-func TestWorkerPool_ProcessOne_Failure(t *testing.T) {
-	failed := false
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:   "step-1",
-					Type: step.StepTypeHTTP,
-				}, &execution.StepExecution{
-					ID:   "exec-1",
-					Type: string(step.StepTypeHTTP),
-				}, nil
-		},
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			failed = true
-			if errMsg != "network error: connection refused" {
-				t.Errorf("unexpected errMsg: %s", errMsg)
-			}
-			return nil
-		},
+	if !recordedRetryable {
+		t.Fatalf("expected omitted retryable to default to true, got false")
 	}
 
-	reg := executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			return nil, errors.New("network error: connection refused")
+	// 2. Explicit false -> passes false
+	f := false
+	_, err = logic.FailTask(context.Background(), "srv-1", "step-1", worker.FailRequest{
+		WorkerID:   "w-1",
+		LeaseToken: "tok-1",
+		Error: worker.TaskError{
+			Message:   "some error",
+			Retryable: &f,
 		},
 	})
-
-	pool := newTestWorkerPool(NewWorkerLogic(repo, testLeaseDuration), reg)
-	processed, err := pool.ProcessOne(context.Background(), "worker-1")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected fail task error: %v", err)
 	}
-	if !processed || !failed {
-		t.Fatalf("expected task to be processed and failed")
-	}
-}
-
-func TestWorkerPool_ProcessOne_PanicRecovery(t *testing.T) {
-	failed := false
-	var capturedErr string
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:   "step-panic",
-					Type: step.StepTypeHTTP,
-				}, &execution.StepExecution{
-					ID:   "exec-panic",
-					Type: string(step.StepTypeHTTP),
-				}, nil
-		},
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			failed = true
-			capturedErr = errMsg
-			return nil
-		},
-	}
-
-	reg := executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			panic("unexpected nil pointer in plugin")
-		},
-	})
-
-	pool := newTestWorkerPool(NewWorkerLogic(repo, testLeaseDuration), reg)
-	processed, err := pool.ProcessOne(context.Background(), "worker-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !processed || !failed {
-		t.Fatalf("expected task to be processed and failed")
-	}
-	if capturedErr != "panic in step execution: unexpected nil pointer in plugin" {
-		t.Errorf("unexpected panic capture message: %s", capturedErr)
+	if recordedRetryable {
+		t.Fatalf("expected explicit false retryable to be false, got true")
 	}
 }
 
-func TestWorkerPool_ProcessOne_UnsupportedType(t *testing.T) {
-	failed := false
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:   "step-kafka",
-					Type: step.StepType("kafka"),
-				}, &execution.StepExecution{
-					ID:   "exec-kafka",
-					Type: "kafka",
-				}, nil
-		},
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			failed = true
-			return nil
-		},
+func TestWorkerLogic_ClaimTask_ContractFields(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	cfg := &config.Config{
+		DefaultTimeout:           45 * time.Second,
+		DefaultHeartBeatInterval: 10 * time.Second,
+		WorkerLongPollTimeout:    25 * time.Second,
 	}
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier, cfg)
 
-	// Registry is empty (kafka is not registered)
-	reg := executor.NewRegistry()
-	pool := newTestWorkerPool(NewWorkerLogic(repo, testLeaseDuration), reg)
-
-	processed, err := pool.ProcessOne(context.Background(), "worker-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !processed || !failed {
-		t.Fatalf("expected task to be processed and failed for unsupported type")
-	}
-}
-
-func TestWorkerPool_Start_Fixed3Concurrency(t *testing.T) {
-	var (
-		worker1Called int32
-		worker2Called int32
-		worker3Called int32
-	)
-
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			switch workerID {
-			case "test-fixed-1":
-				atomic.AddInt32(&worker1Called, 1)
-			case "test-fixed-2":
-				atomic.AddInt32(&worker2Called, 1)
-			case "test-fixed-3":
-				atomic.AddInt32(&worker3Called, 1)
-			}
-			return nil, nil, nil // Queue empty
-		},
-	}
-
-	reg := executor.NewRegistry()
-	pool := NewWorkerPool(
-		NewWorkerLogic(repo, testLeaseDuration),
-		reg,
-		"test-fixed",
-		3,
-		10*time.Millisecond,
-		10*time.Second,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		_ = pool.Start(ctx)
-	}()
-
-	// Allow workers to poll several times
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	// Verify all 3 fixed workers actively polled
-	w1 := atomic.LoadInt32(&worker1Called)
-	w2 := atomic.LoadInt32(&worker2Called)
-	w3 := atomic.LoadInt32(&worker3Called)
-
-	if w1 == 0 || w2 == 0 || w3 == 0 {
-		t.Errorf("expected all 3 workers to poll, got w1=%d, w2=%d, w3=%d", w1, w2, w3)
-	}
-}
-
-func TestWorkerPool_Start_GracefulShutdown(t *testing.T) {
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return nil, nil, nil
-		},
-	}
-
-	pool := NewWorkerPool(
-		NewWorkerLogic(repo, testLeaseDuration),
-		executor.NewRegistry(),
-		"test-shutdown",
-		3,
-		10*time.Millisecond,
-		10*time.Second,
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	done := make(chan error, 1)
-	go func() {
-		done <- pool.Start(ctx)
-	}()
-
-	// Cancel context and verify pool exits cleanly
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("expected context.Canceled, got %v", err)
+	deadline := time.Now().Add(60 * time.Second)
+	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
+		if filter.DefaultTimeout != 45*time.Second {
+			t.Fatalf("expected filter.DefaultTimeout to be 45s, got %v", filter.DefaultTimeout)
 		}
-	case <-time.After(200 * time.Millisecond):
-		t.Fatalf("worker pool failed to gracefully shut down within timeout")
+		return &execution.ClaimResult{
+			StepDefinition: &step.Step{ID: "step-comp", Type: step.StepTypeActivity, Config: json.RawMessage(`{}`)},
+			StepExecution: &execution.StepExecution{
+				ID:                  "exec-step-comp-1",
+				WorkflowExecutionID: "wf-exec-1",
+				StepID:              "step-comp",
+				TaskQueue:           "orders",
+				IsCompensation:      true,
+				TimeoutSeconds:      60,
+				Attempt:             2,
+			},
+			LeaseToken:     "test-token-comp",
+			LeaseExpiresAt: time.Now().Add(30 * time.Second),
+			LeaseDuration:  30 * time.Second,
+			Deadline:       deadline,
+		}, nil
+	}
+
+	zero := 0
+	res, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
+		WorkerID:      "w-1",
+		Queue:         "orders",
+		WaitTimeoutMS: &zero,
+	})
+	if err != nil {
+		t.Fatalf("unexpected claim error: %v", err)
+	}
+	if res.StepExecutionID != "exec-step-comp-1" || res.TaskID != "exec-step-comp-1" {
+		t.Fatalf("expected StepExecutionID and TaskID to be exec-step-comp-1, got %s, %s", res.StepExecutionID, res.TaskID)
+	}
+	if !res.IsCompensation {
+		t.Fatalf("expected IsCompensation to be true")
+	}
+	if res.TimeoutSeconds != 60 {
+		t.Fatalf("expected TimeoutSeconds to be 60, got %d", res.TimeoutSeconds)
+	}
+	if res.HeartbeatIntervalMS != 10000 {
+		t.Fatalf("expected HeartbeatIntervalMS to be 10000, got %d", res.HeartbeatIntervalMS)
+	}
+	if res.Deadline != deadline.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("expected Deadline to match %s, got %s", deadline.UTC().Format(time.RFC3339Nano), res.Deadline)
 	}
 }
 
-func TestWorkerPool_ProcessOne_StepTimeout(t *testing.T) {
-	failed := false
-	var capturedErr string
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:      "step-timeout",
-					Type:    step.StepTypeHTTP,
-					Timeout: 1, // 1 second timeout
-				}, &execution.StepExecution{
-					ID:             "exec-timeout",
-					Type:           string(step.StepTypeHTTP),
-					TimeoutSeconds: 1,
-				}, nil
+func TestWorkerHandler_PayloadLimit(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+
+	cfg := &config.Config{
+		WorkerAPIEnabled: true,
+		WorkerCredentials: []config.WorkerCredential{
+			{
+				ID:     "srv-1",
+				Token:  "valid-token",
+				Queues: []string{"test-queue"},
+			},
 		},
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			failed = true
-			capturedErr = errMsg
-			return nil
-		},
+		MaxPayloadSize: 1, // 1 MB
 	}
+	handler := worker.NewWorkerHandler(logic, cfg)
 
-	reg := executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			select {
-			case <-time.After(500 * time.Millisecond):
-				return json.RawMessage(`{"result":"slow"}`), nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		},
-	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /worker/tasks/claim", handler.Claim)
+	server := httptest.NewServer(mux)
+	defer server.Close()
 
-	pool := newTestWorkerPool(NewWorkerLogic(repo, testLeaseDuration), reg)
-	// Mock step with 10ms timeout to run test quickly
-	repo.claimFunc = func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-		return &step.Step{
-				ID:   "step-timeout",
-				Type: step.StepTypeHTTP,
-			}, &execution.StepExecution{
-				ID:             "exec-timeout",
-				Type:           string(step.StepTypeHTTP),
-				TimeoutSeconds: 1, // 1 second
-			}, nil
-	}
+	// Send 2MB payload (> 1MB limit)
+	largeData := make([]byte, 2*1024*1024)
+	req, _ := http.NewRequest("POST", server.URL+"/worker/tasks/claim", bytes.NewReader(largeData))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/json")
 
-	// For quick test, run with small executor wait that exceeds a custom context or verify timeout
-	processed, err := pool.ProcessOne(context.Background(), "worker-1")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("failed to execute request: %v", err)
 	}
-	if !processed {
-		t.Fatalf("expected task to be processed")
-	}
-	// The mock executor waited 500ms which is less than 1s, so it succeeded
-	// Now test an executor that takes longer than TimeoutSeconds
-	reg = executor.NewRegistry()
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			select {
-			case <-time.After(2 * time.Second):
-				return json.RawMessage(`{"result":"too_slow"}`), nil
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		},
-	})
-	pool = newTestWorkerPool(NewWorkerLogic(repo, testLeaseDuration), reg)
-	processed, err = pool.ProcessOne(context.Background(), "worker-1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !processed || !failed {
-		t.Fatalf("expected task to fail due to timeout")
-	}
-	if !strings.Contains(capturedErr, "context deadline exceeded") {
-		t.Errorf("expected context deadline exceeded, got: %s", capturedErr)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413 (Payload Too Large), got %d", resp.StatusCode)
 	}
 }
 
-func TestWorkerPool_ProcessOne_HeartbeatLockLost_AbortsExecution(t *testing.T) {
-	completed := false
-	failed := false
+func TestWorkerHandler_DisabledAPI(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
 
-	repo := &mockExecutionRepository{
-		claimFunc: func(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-			return &step.Step{
-					ID:   "step-locklost",
-					Type: step.StepTypeHTTP,
-				}, &execution.StepExecution{
-					ID:   "exec-locklost",
-					Type: string(step.StepTypeHTTP),
-				}, nil
-		},
-		heartbeatFunc: func(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-			// Simulate lock lost on heartbeat
-			return errdefs.ErrLockLost
-		},
-		completeFunc: func(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-			completed = true
-			return nil
-		},
-		failFunc: func(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-			failed = true
-			return nil
-		},
+	cfg := &config.Config{
+		WorkerAPIEnabled: false,
+	}
+	handler := worker.NewWorkerHandler(logic, cfg)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /worker/tasks/claim", handler.Claim)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	req, _ := http.NewRequest("POST", server.URL+"/worker/tasks/claim", nil)
+	req.Header.Set("Authorization", "Bearer any-token")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("failed to execute request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected status 403 (Forbidden), got %d", resp.StatusCode)
+	}
+}
+
+func TestWorkerLogic_HeartbeatDurationCap(t *testing.T) {
+	repo := &mockExecutionRepository{}
+	notifier := worker.NewQueueNotifier()
+	backendLease := 30 * time.Second
+	logic := worker.NewWorkerLogic(repo, backendLease, 25*time.Second, notifier)
+
+	var receivedDuration time.Duration
+	repo.heartbeatTaskFunc = func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
+		receivedDuration = duration
+		return time.Now().Add(duration), duration, nil
 	}
 
-	reg := executor.NewRegistry()
-	stepStarted := make(chan struct{})
-	reg.Register(step.StepTypeHTTP, &mockExecutor{
-		executeFn: func(ctx context.Context, s *step.Step, exec *execution.StepExecution) (json.RawMessage, error) {
-			close(stepStarted)
-			// Wait until context cancelled by lock loss
-			<-ctx.Done()
-			return nil, ctx.Err()
-		},
+	// 1. Worker requests 1 hour (> backend 30s) -> capped at backend lease (30s)
+	res, err := logic.HeartbeatTask(context.Background(), "srv-1", "step-1", worker.HeartbeatRequest{
+		WorkerID:        "w-1",
+		LeaseToken:      "tok-1",
+		LeaseDurationMS: 3600000,
 	})
-
-	logic := NewWorkerLogic(repo, testLeaseDuration)
-	pool := NewWorkerPool(logic, reg, "test-worker", 1, 10*time.Millisecond, 10*time.Millisecond)
-
-	processed, err := pool.ProcessOne(context.Background(), "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !processed {
-		t.Fatalf("expected task to be claimed")
+	if receivedDuration != backendLease {
+		t.Fatalf("expected repo to receive backendLease (30s), got %v", receivedDuration)
 	}
-	// Verify neither complete nor fail was recorded because lock was stolen/lost
-	if completed {
-		t.Errorf("expected step NOT to be marked completed when lock was lost")
+	if res.LeaseDurationMS != 30000 {
+		t.Fatalf("expected response LeaseDurationMS to be 30000, got %d", res.LeaseDurationMS)
 	}
-	if failed {
-		t.Errorf("expected step NOT to be marked failed when lock was lost")
+
+	// 2. Worker requests 10 seconds (< backend 30s) -> allowed to be 10s
+	res, err = logic.HeartbeatTask(context.Background(), "srv-1", "step-1", worker.HeartbeatRequest{
+		WorkerID:        "w-1",
+		LeaseToken:      "tok-1",
+		LeaseDurationMS: 10000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedDuration != 10*time.Second {
+		t.Fatalf("expected repo to receive 10s, got %v", receivedDuration)
+	}
+	if res.LeaseDurationMS != 10000 {
+		t.Fatalf("expected response LeaseDurationMS to be 10000, got %d", res.LeaseDurationMS)
+	}
+
+	// 3. Worker requests 0 -> defaults to backend 30s
+	res, err = logic.HeartbeatTask(context.Background(), "srv-1", "step-1", worker.HeartbeatRequest{
+		WorkerID:        "w-1",
+		LeaseToken:      "tok-1",
+		LeaseDurationMS: 0,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedDuration != backendLease {
+		t.Fatalf("expected repo to receive backendLease (30s), got %v", receivedDuration)
 	}
 }
+

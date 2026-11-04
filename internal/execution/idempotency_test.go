@@ -128,6 +128,15 @@ func (r *multiVersionWorkflowReader) GetWorkflow(ctx context.Context, name strin
 	return nil, errdefs.ErrWorkflowNotFound
 }
 
+func (r *multiVersionWorkflowReader) GetWorkflowVersion(ctx context.Context, name string, version int) (*workflow.Workflow, error) {
+	for _, wf := range r.workflows {
+		if wf.Name == name && wf.Version == version {
+			return wf, nil
+		}
+	}
+	return nil, errdefs.ErrWorkflowNotFound
+}
+
 func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
@@ -456,5 +465,52 @@ func TestIdempotency_SameKeyDifferentWorkflows(t *testing.T) {
 
 	if respA.ID == respB.ID {
 		t.Fatalf("expected distinct executions across workflows for same key")
+	}
+}
+
+func TestIdempotency_ExplicitWorkflowVersion(t *testing.T) {
+	repo := newMemoryIdempotencyRepo()
+	reader := &multiVersionWorkflowReader{
+		workflows: []*workflow.Workflow{
+			{ID: "wf-id-v1", Name: "order-flow", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "wf-id-v2", Name: "order-flow", Version: 2, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+		},
+	}
+	logic := execution.NewExecutionLogic(repo, reader)
+
+	// Execute with explicit version 1
+	resp1, replayed1, err := logic.ExecuteWorkflow(context.Background(), "order-flow", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey:  "key-v1",
+		WorkflowVersion: 1,
+		Context:         json.RawMessage(`{"user":"alice"}`),
+	})
+	if err != nil || replayed1 {
+		t.Fatalf("expected create success, got err=%v replayed=%v", err, replayed1)
+	}
+	if resp1.WorkflowID != "wf-id-v1" {
+		t.Fatalf("expected workflow id wf-id-v1, got %s", resp1.WorkflowID)
+	}
+
+	// Replay with explicit version 1 -> succeeds
+	resp1Replay, replayed2, err := logic.ExecuteWorkflow(context.Background(), "order-flow", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey:  "key-v1",
+		WorkflowVersion: 1,
+		Context:         json.RawMessage(`{"user":"alice"}`),
+	})
+	if err != nil || !replayed2 {
+		t.Fatalf("expected replay success, got err=%v replayed=%v", err, replayed2)
+	}
+	if resp1Replay.ID != resp1.ID {
+		t.Fatalf("expected same execution ID")
+	}
+
+	// Replay with version 2 -> conflict!
+	_, _, err = logic.ExecuteWorkflow(context.Background(), "order-flow", &execution.ExecuteWorkflowRequest{
+		IdempotencyKey:  "key-v1",
+		WorkflowVersion: 2,
+		Context:         json.RawMessage(`{"user":"alice"}`),
+	})
+	if !errors.Is(err, errdefs.ErrIdempotencyConflict) {
+		t.Fatalf("expected ErrIdempotencyConflict when replaying with different version, got %v", err)
 	}
 }

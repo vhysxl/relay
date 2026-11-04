@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
@@ -46,10 +47,17 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		return nil, false, err
 	}
 
-	wf, err := l.workflows.GetWorkflow(ctx, name)
+	var wf *workflow.Workflow
+	if req.WorkflowVersion > 0 {
+		wf, err = l.workflows.GetWorkflowVersion(ctx, name, req.WorkflowVersion)
+	} else {
+		wf, err = l.workflows.GetWorkflow(ctx, name)
+	}
 	if err != nil {
 		return nil, false, err
 	}
+
+	targetIsExplicit := req.WorkflowVersion > 0
 
 	// Step 2 & 3: Check existing idempotency record before merging context or building snapshot
 	existing, err := l.repo.GetExecutionRequest(ctx, wf.Name, req.IdempotencyKey)
@@ -57,7 +65,7 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		return nil, false, err
 	}
 	if existing != nil {
-		receipt, err := evaluateReplay(existing, normalizedInput, false, "")
+		receipt, err := evaluateReplay(existing, normalizedInput, targetIsExplicit, wf.ID)
 		if err != nil {
 			return nil, false, err
 		}
@@ -104,7 +112,7 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 	}
 
 	// Step 5 & 6: Create execution with idempotency inside a single transaction
-	return l.repo.CreateExecutionWithIdempotency(ctx, exec, reqRecord, false, "")
+	return l.repo.CreateExecutionWithIdempotency(ctx, exec, reqRecord, targetIsExplicit, wf.ID)
 }
 
 func (l *executionLogic) ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error) {

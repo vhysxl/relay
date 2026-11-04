@@ -76,6 +76,14 @@ func (h *ExecutionHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Reques
 				if err := json.Unmarshal(bodyBytes, &wrapper); err == nil {
 					if ctxRaw, ok := wrapper["context"]; ok {
 						req.Context = ctxRaw
+						if vRaw, ok := wrapper["workflow_version"]; ok {
+							var v int
+							if err := json.Unmarshal(vRaw, &v); err != nil || v < 1 {
+								h.writeError(w, errdefs.ErrInvalidWorkflowVersion)
+								return
+							}
+							req.WorkflowVersion = v
+						}
 					} else {
 						req.Context = json.RawMessage(bodyBytes)
 					}

@@ -282,3 +282,56 @@ func TestConditionLimitsConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkerAPIConfig(t *testing.T) {
+	t.Run("default disabled when unset", func(t *testing.T) {
+		t.Setenv("RELAY_WORKER_API_ENABLED", "")
+		t.Setenv("RELAY_WORKER_CREDENTIALS", "")
+		enabled, creds, timeout, err := parseWorkerConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if enabled {
+			t.Fatalf("expected enabled=false by default")
+		}
+		if len(creds) != 0 {
+			t.Fatalf("expected empty credentials by default, got %v", creds)
+		}
+		if timeout != 25*time.Second {
+			t.Fatalf("expected 25s timeout, got %v", timeout)
+		}
+	})
+
+	t.Run("enabled without credentials fails with ErrInvalidEnvValue", func(t *testing.T) {
+		t.Setenv("RELAY_WORKER_API_ENABLED", "true")
+		t.Setenv("RELAY_WORKER_CREDENTIALS", "")
+		_, _, _, err := parseWorkerConfig()
+		if !errors.Is(err, errdefs.ErrInvalidEnvValue) {
+			t.Fatalf("expected ErrInvalidEnvValue, got %v", err)
+		}
+	})
+
+	t.Run("enabled with empty array fails with ErrInvalidEnvValue", func(t *testing.T) {
+		t.Setenv("RELAY_WORKER_API_ENABLED", "true")
+		t.Setenv("RELAY_WORKER_CREDENTIALS", "[]")
+		_, _, _, err := parseWorkerConfig()
+		if !errors.Is(err, errdefs.ErrInvalidEnvValue) {
+			t.Fatalf("expected ErrInvalidEnvValue, got %v", err)
+		}
+	})
+
+	t.Run("enabled with valid credentials succeeds", func(t *testing.T) {
+		t.Setenv("RELAY_WORKER_API_ENABLED", "true")
+		t.Setenv("RELAY_WORKER_CREDENTIALS", `[{"id":"svc-1","token":"secret","queues":["payments"]}]`)
+		enabled, creds, _, err := parseWorkerConfig()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !enabled {
+			t.Fatalf("expected enabled=true")
+		}
+		if len(creds) != 1 || creds[0].ID != "svc-1" || creds[0].Token != "secret" || len(creds[0].Queues) != 1 || creds[0].Queues[0] != "payments" {
+			t.Fatalf("unexpected creds: %+v", creds)
+		}
+	})
+}

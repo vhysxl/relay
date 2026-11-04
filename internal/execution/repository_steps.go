@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-const stepColumns = `id, workflow_execution_id, step_id, name, type, config, depends_on,
+const stepColumns = `id, workflow_execution_id, step_id, name, type, config, task_queue, activity_name, depends_on,
 	status, output, error_message, attempt, max_attempts, timeout_seconds, backoff_seconds,
 	multiplier, max_backoff_seconds, locked_by, locked_until, is_compensation,
 	` + "`condition`" + `, condition_evaluation, executed_at, next_retry_at, created_at, updated_at`
@@ -16,16 +16,24 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanStep(row rowScanner) (StepExecution, error) {
 	var s StepExecution
-	var name, deps, output, message, owner, condStr, condEvalStr sql.NullString
+	var name, deps, output, message, owner, condStr, condEvalStr, taskQueue, activityName sql.NullString
 	var config string
 	var until, executed, retry sql.NullTime
-	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &deps,
+	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &taskQueue, &activityName, &deps,
 		&s.Status, &output, &message, &s.Attempt, &s.MaxAttempts, &s.TimeoutSeconds, &s.BackoffSeconds,
 		&s.Multiplier, &s.MaxBackoffSeconds, &owner, &until, &s.IsCompensation, &condStr, &condEvalStr, &executed, &retry, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
 	s.Name, s.Config = name.String, json.RawMessage(config)
+	if taskQueue.Valid && taskQueue.String != "" {
+		s.TaskQueue = taskQueue.String
+	} else {
+		s.TaskQueue = "legacy"
+	}
+	if activityName.Valid && activityName.String != "" {
+		s.ActivityName = &activityName.String
+	}
 	if condStr.Valid && len(condStr.String) > 0 {
 		s.When = json.RawMessage(condStr.String)
 	}

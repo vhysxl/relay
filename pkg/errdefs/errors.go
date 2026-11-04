@@ -17,8 +17,12 @@ var (
 	// Step definitions and DAG validation
 	ErrEmptyStepType               = errors.New("step type is required")
 	ErrEmptyID                     = errors.New("step id cannot be empty")
-	ErrInvalidStepType             = errors.New("invalid step type, must be http or message")
+	ErrInvalidStepType             = errors.New("invalid step type, must be http, message, or activity")
 	ErrInvalidStepConfig           = errors.New("step config must be valid non-empty JSON")
+	ErrInvalidQueueName            = errors.New("queue name is invalid: must match [A-Za-z0-9._-]+ and be 1-128 characters")
+	ErrInvalidActivityName         = errors.New("activity name is invalid: must match [A-Za-z0-9._-]+ and be 1-128 characters")
+	ErrEmptyQueueName              = errors.New("queue name cannot be empty for activity step")
+	ErrEmptyActivityName           = errors.New("activity name cannot be empty for activity step")
 	ErrDuplicateStepID             = errors.New("duplicate step id in workflow")
 	ErrDependencyNotFound          = errors.New("dependency step not found in workflow")
 	ErrSelfDependency              = errors.New("step cannot depend on itself")
@@ -50,6 +54,14 @@ var (
 	ErrEmptyWorkerID        = errors.New("worker id is required to claim step")
 	ErrEmptyStepExecutionID = errors.New("step execution id is required for heartbeat")
 	ErrInvalidStepOutput    = errors.New("step output must be valid JSON")
+	ErrUnauthorized         = errors.New("unauthorized: missing or invalid credentials")
+	ErrForbiddenQueue       = errors.New("forbidden: service is not authorized for queue")
+	ErrForbiddenTask        = errors.New("forbidden: task does not belong to service")
+	ErrInvalidLeaseToken    = errors.New("invalid or expired lease token")
+	ErrTaskNotRunning       = errors.New("task is not in running state")
+	ErrReportConflict       = errors.New("conflict: conflicting report received for attempt")
+	ErrWorkerAPIDisabled    = errors.New("worker API is disabled")
+	ErrInvalidWaitTimeout   = errors.New("wait_timeout_ms is invalid")
 
 	// Config / startup
 	ErrInvalidEnvValue = errors.New("invalid environment variable value")

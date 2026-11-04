@@ -74,6 +74,15 @@ func (r *executionRepository) reapWorkflow(ctx context.Context, id string) (int6
 		if mayRetry(status, s) {
 			message = "lease expired: retry scheduled"
 		}
+		// Close active attempt in step_execution_attempts
+		if _, err := tx.ExecContext(ctx, `UPDATE step_execution_attempts SET
+			outcome = CASE WHEN ? >= deadline THEN 'TIMED_OUT' ELSE 'ABANDONED' END,
+			finished_at = NOW(3),
+			error_message = ?,
+			updated_at = NOW(3)
+			WHERE step_execution_id = ? AND attempt = ? AND outcome = 'RUNNING'`, now, message, s.ID, s.Attempt); err != nil {
+			return 0, err
+		}
 		if err := recordFailureTx(ctx, tx, s, status, message); err != nil {
 			return 0, err
 		}

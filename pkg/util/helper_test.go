@@ -145,6 +145,64 @@ func TestAreJSONEqual(t *testing.T) {
 	}
 }
 
+func TestCanonicalJSONHash_TypePreservationAndNoCollision(t *testing.T) {
+	// Value 1 (number) vs "1/1" (string) must NOT produce the same hash!
+	hNum1, err := CanonicalJSONHash([]byte(`{"value": 1}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hStrFrac, err := CanonicalJSONHash([]byte(`{"value": "1/1"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hNum1 == hStrFrac {
+		t.Fatalf("collision detected! hash of number 1 and string '1/1' must be different, got %s for both", hNum1)
+	}
+
+	// Value 1 vs "1" must NOT produce the same hash!
+	hStr1, err := CanonicalJSONHash([]byte(`{"value": "1"}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hNum1 == hStr1 {
+		t.Fatalf("collision detected! hash of number 1 and string '1' must be different")
+	}
+
+	// Semantically equal numbers must produce the same hash
+	hNumFloat, err := CanonicalJSONHash([]byte(`{"value": 1.0}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hNum1 != hNumFloat {
+		t.Fatalf("expected number 1 and 1.0 to have identical hash, got %s vs %s", hNum1, hNumFloat)
+	}
+
+	hScientific, err := CanonicalJSONHash([]byte(`{"value": 1e2}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hInt100, err := CanonicalJSONHash([]byte(`{"value": 100}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hScientific != hInt100 {
+		t.Fatalf("expected 1e2 and 100 to have identical hash, got %s vs %s", hScientific, hInt100)
+	}
+
+	// Preserves 64-bit int precision without rounding
+	hBig1, err := CanonicalJSONHash([]byte(`{"id": 9007199254740993}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hBig2, err := CanonicalJSONHash([]byte(`{"id": 9007199254740992}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hBig1 == hBig2 {
+		t.Fatalf("precision lost! 9007199254740993 and 9007199254740992 produced same hash")
+	}
+}
+
 func TestParsePagination(t *testing.T) {
 	tests := []struct {
 		name         string

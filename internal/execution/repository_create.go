@@ -31,11 +31,15 @@ func insertStepExecutionsTx(ctx context.Context, tx *sql.Tx, executionID string,
 		if len(s.When) > 0 {
 			condVal = string(s.When)
 		}
+		taskQueue := s.TaskQueue
+		if taskQueue == "" {
+			taskQueue = "legacy"
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO step_executions (
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+			id, workflow_execution_id, step_id, name, type, config, task_queue, activity_name, depends_on, status,
 			attempt, max_attempts, timeout_seconds, backoff_seconds, multiplier, max_backoff_seconds,
-			is_compensation, `+"`condition`"+`, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			s.ID, executionID, s.StepID, s.Name, s.Type, string(s.Config), string(deps), s.Status,
+			is_compensation, `+"`condition`"+`, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.ID, executionID, s.StepID, s.Name, s.Type, string(s.Config), taskQueue, s.ActivityName, string(deps), s.Status,
 			s.Attempt, s.MaxAttempts, s.TimeoutSeconds, s.BackoffSeconds, s.Multiplier, s.MaxBackoffSeconds,
 			s.IsCompensation, condVal, s.CreatedAt, s.UpdatedAt)
 		if err != nil {

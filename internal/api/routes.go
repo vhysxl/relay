@@ -7,6 +7,7 @@ import (
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/system"
 	"github.com/vhysxl/relay/internal/web"
+	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/util"
 )
@@ -15,6 +16,7 @@ func RegisterRoutes(mux *http.ServeMux, app *app.Application) {
 
 	workflowHandler := workflow.NewWorkflowHandler(app.WorkflowLogic, app.Config)
 	executionHandler := execution.NewExecutionHandler(app.ExecutionLogic, app.Config)
+	workerHandler := worker.NewWorkerHandler(app.WorkerLogic, app.Config)
 
 	// Web Dashboard UI & Static Assets (SPA Fallback)
 	mux.HandleFunc("GET /", web.Handler())
@@ -39,4 +41,10 @@ func RegisterRoutes(mux *http.ServeMux, app *app.Application) {
 	mux.HandleFunc("POST /workflows/{name}/execute", executionHandler.ExecuteWorkflow)
 	mux.HandleFunc("GET /executions", executionHandler.ListExecutions)
 	mux.HandleFunc("GET /executions/{id}", executionHandler.GetExecution)
+
+	// Worker Tasks Protocol
+	mux.HandleFunc("POST /worker/tasks/claim", workerHandler.Claim)
+	mux.HandleFunc("POST /worker/tasks/{id}/heartbeat", workerHandler.Heartbeat)
+	mux.HandleFunc("POST /worker/tasks/{id}/complete", workerHandler.Complete)
+	mux.HandleFunc("POST /worker/tasks/{id}/fail", workerHandler.Fail)
 }

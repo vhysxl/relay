@@ -190,6 +190,7 @@ func (r *executionRepository) getStepExecutionsByWorkflowExecIDs(ctx context.Con
 		if err != nil {
 			return nil, err
 		}
+		se.Attempts = []StepExecutionAttempt{}
 		result[se.WorkflowExecutionID] = append(result[se.WorkflowExecutionID], se)
 	}
 
@@ -197,5 +198,86 @@ func (r *executionRepository) getStepExecutionsByWorkflowExecIDs(ctx context.Con
 		return nil, err
 	}
 
+	if err := r.loadAttemptsForStepExecutions(ctx, result); err != nil {
+		return nil, err
+	}
+
 	return result, nil
+}
+
+func (r *executionRepository) loadAttemptsForStepExecutions(ctx context.Context, stepsMap map[string][]StepExecution) error {
+	var stepExecIDs []string
+	for _, steps := range stepsMap {
+		for _, s := range steps {
+			stepExecIDs = append(stepExecIDs, s.ID)
+		}
+	}
+	if len(stepExecIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(stepExecIDs))
+	args := make([]any, len(stepExecIDs))
+	for i, id := range stepExecIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT step_execution_id, attempt, service_id, worker_id, started_at, deadline, finished_at, outcome, error_message, report_type, created_at, updated_at
+		FROM step_execution_attempts
+		WHERE step_execution_id IN (%s)
+		ORDER BY step_execution_id, attempt ASC
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	attemptsMap := make(map[string][]StepExecutionAttempt)
+	for rows.Next() {
+		var a StepExecutionAttempt
+		var finishedAt sql.NullTime
+		var errorMsg, reportType sql.NullString
+		err := rows.Scan(
+			&a.StepExecutionID,
+			&a.Attempt,
+			&a.ServiceID,
+			&a.WorkerID,
+			&a.StartedAt,
+			&a.Deadline,
+			&finishedAt,
+			&a.Outcome,
+			&errorMsg,
+			&reportType,
+			&a.CreatedAt,
+			&a.UpdatedAt,
+		)
+		if err != nil {
+			return err
+		}
+		if finishedAt.Valid {
+			a.FinishedAt = &finishedAt.Time
+		}
+		if errorMsg.Valid {
+			a.ErrorMessage = &errorMsg.String
+		}
+		if reportType.Valid {
+			a.ReportType = &reportType.String
+		}
+		attemptsMap[a.StepExecutionID] = append(attemptsMap[a.StepExecutionID], a)
+	}
+
+	for wfID, steps := range stepsMap {
+		for i := range steps {
+			if atts, ok := attemptsMap[steps[i].ID]; ok {
+				steps[i].Attempts = atts
+			}
+		}
+		stepsMap[wfID] = steps
+	}
+
+	return rows.Err()
 }

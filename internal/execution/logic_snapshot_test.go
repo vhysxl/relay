@@ -43,6 +43,10 @@ func (r snapshotReader) GetWorkflow(_ context.Context, name string) (*workflow.W
 	return r.read(name)
 }
 
+func (r snapshotReader) GetWorkflowVersion(_ context.Context, name string, _ int) (*workflow.Workflow, error) {
+	return r.read(name)
+}
+
 func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 	wf := &workflow.Workflow{ID: "wf-id", Context: json.RawMessage(`{"tier":"diamond","nested":{"base":true}}`), Steps: []step.Step{
 		{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"/{{tier}}"}`), Compensation: &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{}`), Timeout: 7, Retry: &step.RetryPolicy{MaxAttempts: 4, Backoff: 2, Multiplier: 2}}},

@@ -4,6 +4,8 @@ Relay adalah distributed workflow engine dan task orchestrator berkinerja tinggi
 
 > **Catatan:** Server Relay diasumsikan berjalan pada host lokal di port `8000` (`http://localhost:8000`).
 
+Backend Go saat ini bertindak sebagai task manager dan workflow engine. Eksekusi bisnis dijalankan oleh **external worker** melalui HTTP long polling; backend tidak menjalankan executor HTTP/RabbitMQ lokal. Panduan pembuatan **`relay-worker-node`** tersedia di [Bagian 4](#4-relay-worker-node--panduan-implementasi).
+
 ---
 
 ## Pengujian backend
@@ -22,7 +24,7 @@ menyediakan server tersebut dan menjalankan tes dengan race detector.
 1. [Workflow & Step Definition Guide](#1-workflow--step-definition-guide)
    - [1.1 Struktur Workflow Definition](#11-struktur-workflow-definition)
    - [1.2 Struktur Step Definition](#12-struktur-step-definition)
-   - [1.3 Konfigurasi Tipe Runner (HTTP & RabbitMQ)](#13-konfigurasi-tipe-runner-http--rabbitmq)
+   - [1.3 Konfigurasi Tipe Step (HTTP, Message & Activity)](#13-konfigurasi-tipe-step-http-message--activity)
    - [1.4 Dynamic Context & Parameter Interpolation](#14-dynamic-context--parameter-interpolation-data-dinamis-user)
    - [1.5 Aturan Validasi DAG](#15-aturan-validasi-dag)
    - [1.6 Saga Pattern & Definisi Kompensasi](#16-saga-pattern--definisi-kompensasi)
@@ -40,6 +42,15 @@ menyediakan server tersebut dan menjalankan tes dengan race detector.
    - [3.3 Diagram Alur Eksekusi & Siklus Hidup Worker](#33-diagram-alur-eksekusi--siklus-hidup-worker)
    - [3.4 Diagram State Machine (Workflow & Step Lifecycle)](#34-diagram-state-machine-workflow--step-lifecycle)
    - [3.5 Detail Mekanisme Kunci Engine](#35-detail-mekanisme-kunci-engine)
+4. [relay-worker-node — Panduan Implementasi](#4-relay-worker-node--panduan-implementasi)
+   - [4.1 Scope dan Struktur Project](#41-scope-dan-struktur-project)
+   - [4.2 Konfigurasi Backend dan Worker](#42-konfigurasi-backend-dan-worker)
+   - [4.3 Kontrak HTTP Worker API](#43-kontrak-http-worker-api)
+   - [4.4 Executor dan Activity Registry](#44-executor-dan-activity-registry)
+   - [4.5 Lifecycle Worker dan Penanganan Kegagalan](#45-lifecycle-worker-dan-penanganan-kegagalan)
+   - [4.6 Contoh HTTP Client Node.js](#46-contoh-http-client-nodejs)
+   - [4.7 Smoke Test Integrasi](#47-smoke-test-integrasi)
+   - [4.8 Kriteria Penerimaan](#48-kriteria-penerimaan)
 
 ---
 
@@ -64,11 +75,11 @@ Setiap elemen dalam array `steps` memiliki spesifikasi sebagai berikut:
 | :--- | :--- | :--- | :--- | :--- |
 | `id` | `string` | **Ya** | - | Pengenal unik step di dalam workflow (contoh: `step-charge-card`). |
 | `name` | `string` | Tidak | - | Nama deskriptif untuk ditampilkan di log/dashboard. |
-| `type` | `string` | **Ya** | - | Tipe runner eksekutor: `"http"` atau `"message"`. |
+| `type` | `string` | **Ya** | - | Tipe pekerjaan external worker: `"http"`, `"message"`, atau `"activity"`. |
 | `config` | `object` | **Ya** | - | Konfigurasi spesifik runner sesuai tipe yang dipilih (lihat Bagian 1.3). |
 | `depends_on` | `string[]` | Tidak | `[]` | ID step lain yang harus selesai berstatus `COMPLETED` atau `SKIPPED` sebelum step ini dijalankan. Jika kosong, step dapat langsung dijalankan saat workflow dimulai. |
 | `when` | `object` | Tidak | `null` | Kondisi opsional sebelum step dieksekusi. Jika bernilai `false`, step berstatus `SKIPPED` dan step downstream tetap berjalan (lihat Bagian 1.8). |
-| `timeout` | `int` | Tidak | `0` (unlimited) | Batas waktu eksekusi step dalam detik. |
+| `timeout` | `int` | Tidak | `0` (gunakan default backend) | Batas waktu attempt dalam detik. Nilai `0` memakai `DEFAULT_TIMEOUT` (default `15s`), bukan unlimited. |
 | `retry` | `object` | Tidak | `null` | Kebijakan percobaan ulang jika step mengalami error eksekusi. |
 | `compensation`| `object` | Tidak | `null` | Definisi aksi rollback jika workflow gagal di step downstream (Saga pattern). |
 | `irreversible`| `boolean`| Tidak | `false` | Menandai bahwa step tidak dapat di-rollback. Jika `true`, `compensation` dilarang diset. |
@@ -106,7 +117,9 @@ Setiap elemen dalam array `steps` memiliki spesifikasi sebagai berikut:
 
 ---
 
-### 1.3 Konfigurasi Tipe Runner (HTTP & RabbitMQ)
+### 1.3 Konfigurasi Tipe Step (HTTP, Message & Activity)
+
+Seluruh tipe dieksekusi oleh external worker. Field `config.queue` menentukan task queue Relay, bukan nama antrean RabbitMQ. Untuk `http` dan `message`, queue yang tidak diisi menggunakan `legacy`. Nama queue/activity menggunakan karakter `A-Z`, `a-z`, `0-9`, `.`, `_`, atau `-`, dengan panjang 1–128 karakter.
 
 #### Tipe 1: HTTP Step (`type: "http"`)
 Digunakan untuk memanggil REST API atau web service eksternal.
@@ -157,6 +170,25 @@ Digunakan untuk menerbitkan event asinkron ke antrean/exchange message broker Ra
 
 ---
 
+#### Tipe 3: Activity Step (`type: "activity"`)
+
+Digunakan untuk menjalankan handler bisnis yang terdaftar di external worker. `config.queue` dan `config.activity` wajib diisi.
+
+```json
+{
+  "id": "reserve-stock",
+  "type": "activity",
+  "config": {
+    "queue": "orders",
+    "activity": "inventory.reserve",
+    "input": {
+      "order_id": "{{context.order_id}}"
+    }
+  },
+  "timeout": 60
+}
+```
+
 ### 1.4 Dynamic Context & Parameter Interpolation (Data Dinamis User)
 
 Dalam sistem orkestrator seperti Relay, **Workflow Definition adalah Template (Blueprint)**. Kita **tidak pernah meng-hardcode** data transaksi dinamis (seperti `cart_id`, `user_id`, atau `amount`) di dalam definisi alur.
@@ -193,6 +225,7 @@ Saat client (misal NestJS Checkout Service) men-trigger eksekusi alur, sertakan 
 ```http
 POST http://localhost:8000/workflows/ecommerce.checkout_saga/execute
 Content-Type: application/json
+Idempotency-Key: checkout:CART-USER-9921
 
 {
   "context": {
@@ -388,7 +421,7 @@ Setiap node kondisi hanya boleh memilih satu bentuk: berupa leaf `{ref, op, valu
 Jika `enrich_user.output.profile` tidak ada, grup `all` langsung berhenti (*short-circuit*) pada kondisi pertama tanpa mencoba membaca path kedua, sehingga terhindar dari error missing path.
 
 #### Siklus Hidup & Perilaku Runtime
-Evaluasi kondisi dilakukan saat worker me-lease step (`ClaimPending`), setelah seluruh dependensi terpenuhi dan sebelum resolusi config payload:
+Evaluasi kondisi dilakukan saat worker meminta task (`ClaimTask`), setelah seluruh dependensi terpenuhi dan sebelum resolusi config payload:
 - **True**: Transisi ke status `RUNNING`, attempt bertambah, audit evaluasi dicatat, dan executor dijalankan normal.
 - **False (`SKIPPED`)**: Step bertransisi ke status `SKIPPED` dengan attempt tetap `0`. Tidak ada lease worker, output, `executed_at`, atau pemanggilan executor. Downstream dependencies yang bergantung pada step ini tetap terpenuhi (`COMPLETED` maupun `SKIPPED`).
 - **Error / Missing Anchor**: Evaluasi gagal (misal: path missing pada operator selain `exists` atau tipe data tidak kompatibel). Step bertransisi ke `FAILED` dengan attempt `0`, memicu alur kegagalan workflow dan rollback/kompensasi.
@@ -451,18 +484,16 @@ Endpoint ini dipanggil sekali saat inisialisasi aplikasi (atau pipeline CI/CD) u
   POST http://localhost:8000/workflows
   Content-Type: application/json
   ```
-  *(Body JSON seperti pada Bagian 1.6)*
+  *(Body JSON seperti pada Bagian 1.7)*
 
-- **Response:** `201 Created`
+- **Response:** `201 Created` (cuplikan metadata; response lengkap juga berisi `steps`)
   ```json
   {
     "id": "710d3e9f-0e4f-4f1e-9189-02c731e0672c",
     "name": "ecommerce.checkout_saga",
     "version": 1,
-    "status": "ACTIVE",
-    "hash": "8f8b3c6b2e1...",
     "created_at": "2026-09-23T23:30:00Z",
-    "steps": [ ... ]
+    "updated_at": "2026-09-23T23:30:00Z"
   }
   ```
 
@@ -480,6 +511,7 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
 - Response mengembalikan status `201 Created` dengan header `Idempotency-Replayed: false` untuk eksekusi baru dan `Idempotency-Replayed: true` untuk replay permintaan yang identik.
 - Jika key yang sama dikirimkan dengan input context berbeda, endpoint mengembalikan `409 Conflict`. Replay dengan key dan input context yang sama pada nama workflow yang sama akan selalu mengembalikan receipt awal meskipun versi baru workflow telah dibuat.
 - Request body `raw-context` maupun `wrapped-context` (`{"context": {...}}`) yang menghasilkan context sama dianggap setara. Context kosong, `null`, dan body kosong dinormalisasi menjadi `{}`.
+- Untuk memilih versi tertentu, gunakan wrapper `{"workflow_version": 2, "context": {...}}`. Jika versi tidak ditentukan, execution baru memakai versi terbaru. Replay dengan versi eksplisit yang berbeda dari target awal menghasilkan `409 Conflict`.
 
 - **Request (Memanggil langsung dengan Nama Workflow):**
   ```http
@@ -522,13 +554,11 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
 
 Dipanggil untuk polling atau mendapatkan status akhir tiket eksekusi.
 
-> **Fleksibel:** Parameter `{id}` dapat berupa **Execution Ticket UUID** spesifik (misal `afd70011-...`) ataupun **Nama Workflow** (misal `ecommerce.checkout_saga`, yang otomatis mengambil eksekusi terbaru dari alur tersebut).
+Parameter `{id}` adalah **Execution Ticket UUID** dari response execute. Endpoint ini tidak melakukan lookup berdasarkan nama workflow.
 
 - **Request:**
   ```http
   GET http://localhost:8000/executions/afd70011-56d5-45f6-a590-bf514bf2091d
-  # atau:
-  GET http://localhost:8000/executions/ecommerce.checkout_saga
   ```
 
 - **Response:** `200 OK`
@@ -655,215 +685,547 @@ func TriggerWorkflow(workflowID string, idempotencyKey string, payload map[strin
 
 ### 3.1 Arsitektur Sistem & Komponen Inti
 
-Relay dibangun atas 6 pilar arsitektur modular:
-1. **REST API Handler (`internal/api` & `internal/workflow`)**:
-   Menerima registrasi workflow dan permintaan eksekusi tiket.
-2. **DAG Validator (`internal/step`)**:
-   Memvalidasi topologi grafik (acyclic, dependency resolvable, config valid) sebelum data disimpan.
-3. **Transactional Database Queue (`MySQL 8.0`)**:
-   Menyimpan template definisi alur dan antrean stateful step executions. Menggunakan indeks `(locked_until, status)` dan `(workflow_execution_id)` untuk efisiensi query tinggi.
-4. **Worker Pool & Lease Manager (`internal/worker`)**:
-   Pool worker paralel (misal 3 concurrent workers) yang melakukan polling task atomic menggunakan `SELECT ... FOR UPDATE SKIP LOCKED`.
-5. **Heartbeat Manager**:
-   Goroutine periodik per worker yang memperpanjang sewa task (`locked_until`) selama proses berlangsung. Jika worker mati mendadak, lease kedaluwarsa dan task diambil alih secara otomatis oleh worker lain.
-6. **Executor Registry (`internal/executor`)**:
-   Penyedia implementasi runner eksekusi (`HTTPExecutor`, `RabbitMQExecutor`).
-
----
+| Komponen | Lokasi | Tanggung jawab |
+| :--- | :--- | :--- |
+| Bootstrap | `main.go`, `bootstrap/` | Memuat konfigurasi, membuka koneksi DB, menjalankan HTTP server dan Reaper. |
+| Workflow management | `internal/workflow/`, `internal/validator/` | Validasi DAG, registrasi definisi, versioning, dan diff versi. |
+| Execution engine | `internal/execution/`, `internal/condition/` | Snapshot step, evaluasi `when`, interpolasi payload, transisi status, retry, dan Saga. |
+| Worker protocol | `internal/worker/` | Autentikasi service, otorisasi queue, long polling, heartbeat, dan laporan hasil. |
+| Reaper | `internal/reaper/` | Menutup attempt kedaluwarsa dan menjalankan kebijakan recovery. |
+| Storage | MySQL 8.4, `migrations/` | Menyimpan definisi, execution, receipt idempotensi, dan riwayat attempt. |
+| External worker | Project terpisah, misalnya `relay-worker-node` | Mengambil task melalui HTTP dan menjalankan HTTP/message/activity executor. |
+| Dashboard | `web/src/`, `internal/web/` | Visualisasi workflow, execution, dan metrik; hasil build di-embed ke binary Go. |
 
 ### 3.2 Diagram Arsitektur Keseluruhan
 
-Berikut adalah bagan relasi antar-komponen di dalam ekosistem Relay:
-
 ```mermaid
-flowchart TD
-    subgraph Client["Client Applications"]
-        NestJS["NestJS / Backend Microservice"]
-        Curl["cURL / Postman / CLI"]
-        Browser["Web Browser (Dashboard & History)"]
-    end
-
-    subgraph RelayServer["Relay Engine (Port 8000)"]
-        Router["HTTP Router / ServeMux"]
-        WFHandler["Workflow & Execution Handler"]
-        WebHandler["Embedded Dashboard Handler"]
-        Validator["DAG Validator (Acyclic Checker)"]
-        
-        subgraph Workers["Worker Engine (Worker Pool)"]
-            Worker1["Worker 1 (Runner)"]
-            Worker2["Worker 2 (Runner)"]
-            Worker3["Worker 3 (Runner)"]
-            HB["Heartbeat Lease Extender"]
-        end
-
-        subgraph Executors["Executor Registry"]
-            HTTPExec["HTTP Executor"]
-            RMQExec["RabbitMQ Executor"]
-        end
-    end
-
-    subgraph Storage["Persistent Storage (MySQL 8.0)"]
-        T1[("workflow_definitions")]
-        T2[("step_definitions")]
-        T3[("workflow_executions")]
-        T4[("step_executions (Task Queue)")]
-    end
-
-    subgraph External["External Target Services"]
-        PaymentAPI["Payment Gateway API"]
-        InventoryAPI["Inventory Service"]
-        RabbitMQBroker["RabbitMQ Broker"]
-    end
-
-    NestJS -->|POST /workflows/:name/execute| Router
-    Curl -->|POST /workflows| Router
-    Browser -->|GET /dashboard, GET /history| Router
-
-    Router --> WebHandler
-    Router --> WFHandler
-    WFHandler --> Validator
-    WFHandler -->|Insert Tickets| T3
-    WFHandler -->|Insert Pending Steps| T4
-
-    Worker1 & Worker2 & Worker3 -->|SELECT ... FOR UPDATE SKIP LOCKED| T4
-    Worker1 & Worker2 & Worker3 --> HB
-    HB -->|Extend locked_until| T4
-
-    Worker1 --> HTTPExec
-    Worker2 --> RMQExec
-    HTTPExec --> PaymentAPI & InventoryAPI
-    RMQExec --> RabbitMQBroker
+flowchart LR
+    Client[Client service] -->|Register / execute| API[Relay Go API]
+    UI[React dashboard] -->|Read status| API
+    API <-->|Transactions| DB[(MySQL 8.4)]
+    Reaper[Go Reaper] -->|Recover expired attempts| DB
+    Worker[relay-worker-node] -->|Claim / heartbeat / complete / fail| API
+    Worker --> HTTP[HTTP services]
+    Worker --> MQ[RabbitMQ]
+    Worker --> Activity[Activity handlers]
 ```
 
----
+Worker tidak membutuhkan akses langsung ke database Relay. RabbitMQ hanya dibutuhkan ketika worker mengimplementasikan executor `message`; broker tersebut bukan antrean internal engine.
 
 ### 3.3 Diagram Alur Eksekusi & Siklus Hidup Worker
 
-Alur interaksi berurutan mulai dari pemicuan eksekusi oleh client hingga worker mengeksekusi step secara atomic:
-
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant Client as Client Application
-    participant API as Relay REST API
-    participant DB as MySQL Database
-    participant Worker as Worker Pool
-    participant Ext as Target Service (HTTP / RMQ)
-
-    Client->>API: POST /workflows/{name}/execute {context}
-    API->>DB: INSERT INTO workflow_executions (status='RUNNING')
-    API->>DB: INSERT INTO step_executions (status='PENDING')
-    API-->>Client: 202 Accepted (execution_id)
-
-    loop Background Worker Poll
-        Worker->>DB: SELECT step WHERE status='PENDING' AND depends_on COMPLETED<br/>FOR UPDATE SKIP LOCKED
-        DB-->>Worker: Claim Step (locked_by='worker-1', locked_until=NOW()+30s)
+    participant Client
+    participant API as Relay API
+    participant DB as MySQL
+    participant Worker as External worker
+    participant Target as Target service
+    Client->>API: POST /workflows/{name}/execute + Idempotency-Key
+    API->>DB: Save execution, step snapshots, receipt
+    API-->>Client: 201 Created, execution id
+    Worker->>API: POST /worker/tasks/claim + Bearer token
+    API->>DB: Claim matching PENDING task in transaction
+    API-->>Worker: 200 task + lease_token + resolved payload
+    par Execute
+        Worker->>Target: Execute HTTP / publish message / run activity
+        Target-->>Worker: Result
+    and Maintain lease
+        Worker->>API: POST /worker/tasks/{id}/heartbeat
+        API->>DB: Extend lease up to attempt deadline
+        API-->>Worker: 200 lease_expires_at
     end
-
-    par Heartbeat Active
-        loop Every Interval (e.g. 5s)
-            Worker->>DB: UPDATE step_executions SET locked_until=NOW()+30s
-        end
-    and Task Execution
-        Worker->>Ext: Invoke Step Runner (HTTP Request / RabbitMQ Publish)
-        Ext-->>Worker: HTTP 200 OK / ACK
-    end
-
-    Worker->>DB: UPDATE step_executions SET status='COMPLETED', locked_by=NULL
-    
-    alt All Steps Completed
-        Worker->>DB: UPDATE workflow_executions SET status='COMPLETED'
-    else Dependent Steps Unblocked
-        Note over Worker,DB: Downstream steps become eligible for claiming
-    end
+    Worker->>API: POST /worker/tasks/{id}/complete
+    API->>DB: Save output and reconcile DAG in transaction
+    API-->>Worker: 200 accepted=true
 ```
 
----
+Jika claim tidak menemukan task sampai budget long poll habis, response adalah `204 No Content` tanpa body. Worker kemudian melakukan claim berikutnya.
 
 ### 3.4 Diagram State Machine (Workflow & Step Lifecycle)
 
-Diagram status transisi untuk Step Execution dan Workflow Execution (termasuk alur Saga Compensation):
-
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING : Step Created
-
-    PENDING --> RUNNING : Worker claims task (Lease acquired)
-    
-    RUNNING --> COMPLETED : Execution Success
-    RUNNING --> PENDING : Execution Failed (Retries left, Exponential Backoff)
-    RUNNING --> FAILED : Execution Failed (Max Attempts Exceeded)
-
-    state Workflow_Execution {
-        [*] --> WF_RUNNING : Triggered
-        WF_RUNNING --> WF_COMPLETED : All steps COMPLETED
-        WF_RUNNING --> WF_COMPENSATING : Critical step FAILED & Compensations Exist
-        WF_RUNNING --> WF_FAILED : Critical step FAILED (No compensations)
-
-        WF_COMPENSATING --> WF_COMPENSATED : All compensation steps COMPLETED
-        WF_COMPENSATING --> WF_FAILED : Compensation step failed
-    }
-
-    state Compensation_Step {
-        [*] --> COMP_PENDING : Created for completed steps
-        COMP_PENDING --> COMP_RUNNING : Worker claims compensation
-        COMP_RUNNING --> COMPLETED_ROLLBACK : Success (Marked COMPENSATED)
-    }
+    [*] --> WAITING
+    WAITING --> PENDING: Dependencies COMPLETED or SKIPPED
+    PENDING --> RUNNING: Claim succeeds, condition true
+    PENDING --> SKIPPED: Condition false
+    PENDING --> FAILED: Condition evaluation error
+    RUNNING --> COMPLETED: Normal task complete
+    RUNNING --> COMPENSATED: Compensation task complete
+    RUNNING --> PENDING: Retryable failure / lease expiry, attempts remain
+    RUNNING --> FAILED: Normal task final failure
+    RUNNING --> COMPENSATION_FAILED: Compensation final failure
+    WAITING --> CANCELLED: Workflow failure / compensation unnecessary
+    PENDING --> CANCELLED: Workflow failure / compensation unnecessary
 ```
 
----
+Step tanpa dependency langsung dibuat `PENDING`. Workflow normal selesai sebagai `COMPLETED` ketika seluruh step normal `COMPLETED` atau `SKIPPED`. Kegagalan dapat memindahkan workflow ke `COMPENSATING`, lalu `COMPENSATED`, `COMPENSATION_FAILED`, atau `FAILED` sesuai hasil rekonsiliasi. Kompensasi yang sukses dicatat sebagai `COMPENSATED` pada step, sedangkan outcome attempt-nya `COMPLETED`.
 
 ### 3.5 Detail Mekanisme Kunci Engine
 
-#### 1. Atomic Locking Bebas Race Condition (`SKIP LOCKED`)
-Alih-alih menggunakan Redis distributed lock eksternal yang rawan desinkronisasi, Relay mengandalkan fitur bawaan storage engine MySQL InnoDB:
-```sql
-SELECT se.*
-FROM step_executions se
-JOIN workflow_executions we ON we.id = se.workflow_execution_id
-WHERE se.status = 'PENDING'
-  AND (se.locked_until IS NULL OR se.locked_until < NOW())
-  AND (se.next_retry_at IS NULL OR se.next_retry_at <= NOW())
-  AND (
-    (we.status = 'RUNNING' AND se.is_compensation = FALSE AND (se.depends_on IS NULL OR ...))
-    OR
-    (we.status = 'COMPENSATING' AND se.is_compensation = TRUE)
-  )
-ORDER BY se.is_compensation DESC, se.created_at ASC
-LIMIT 1 FOR UPDATE SKIP LOCKED;
-```
-Ketika ratusan worker berjalan paralel bersamaan, setiap worker langsung melompati baris yang sedang dikunci worker lain tanpa saling memblokir (*zero lock contention*).
+- **Atomic claim:** transaksi singkat dengan `FOR UPDATE SKIP LOCKED` mengunci workflow dan task kandidat. Lock database dilepas sebelum menunggu long poll atau menjalankan pekerjaan bisnis.
+- **Snapshot dan routing:** konfigurasi step disalin saat execution dibuat. Claim difilter berdasarkan `task_queue`, `executor_types`, dan daftar `activities` yang didukung worker.
+- **Lease dan deadline:** heartbeat memperpanjang lease sampai deadline attempt. Lease yang sudah habis tidak dapat dihidupkan kembali oleh worker lama.
+- **Recovery:** Reaper menandai attempt sebagai `ABANDONED` jika lease habis sebelum deadline, atau `TIMED_OUT` jika deadline sudah tercapai. Engine kemudian menentukan retry atau kegagalan final berdasarkan policy.
+- **Dependency dan kondisi:** dependency `COMPLETED`/`SKIPPED` membuka step downstream. Evaluasi `when` dan interpolasi config dilakukan backend sebelum task diberikan kepada worker.
+- **Saga:** workflow kompensasi diprioritaskan saat claim. Urutan kompensasi mengikuti dependensi balik; worker menjalankan payload kompensasi yang diberikan backend.
+- **Idempotensi:** pembuatan execution memakai `Idempotency-Key`. Report complete/fail memakai lease token dan hash payload pada riwayat attempt. Efek bisnis pada target service tetap memerlukan idempotensi tersendiri.
 
-#### 2. Crash Recovery & Lease Expired
-Setiap task yang di-claim memiliki batas kedaluwarsa sewa `locked_until`:
-- Worker yang sedang aktif secara rutin mengirimkan *heartbeat* untuk memperpanjang `locked_until`.
-- Jika node worker mengalami crash, listrik mati, atau hang, query polling otomatis menganggap sewa kedaluwarsa (`locked_until < NOW()`) dan worker lain yang masih sehat akan mengambil alih pengerjaan step tersebut tanpa intervensi manual.
+Dashboard disajikan bersama API di `http://localhost:8000/`. Untuk development frontend:
 
-#### 3. Resolusi Dependensi DAG Runtime
-Worker hanya dapat mengambil step bertipe normal jika:
-- Workflow berstatus `RUNNING`.
-- Seluruh `depends_on` dari step tersebut sudah berstatus `COMPLETED` atau `SKIPPED`.
-- Kondisi step `when` (jika ada) dievaluasi; jika false maka step beralih ke `SKIPPED` tanpa eksekusi dan membuka dependensi downstream berikutnya.
-Dengan mekanisme ini, step-step yang tidak saling bergantung (paralel) akan langsung dieksekusi bersamaan oleh worker yang tersedia.
-
-#### 4. Prioritas Darurat Kompensasi (`Emergency Priority`)
-Klausa `ORDER BY se.is_compensation DESC, se.created_at ASC` memastikan bahwa ketika sebuah alur kerja gagal dan beralih ke status `COMPENSATING`, worker akan memprioritaskan step-step rollback terlebih dahulu sebelum memproses task normal baru, guna meminimalisir inkonsistensi data bisnis.
-
-#### 5. Observability Web Dashboard & Execution History (React + Vite + Go Embed)
-Relay menyertakan dashboard internal berbasis **React, TypeScript, Vite, dan Tailwind CSS** yang dikompilasi dan di-embed langsung ke dalam single binary Go (`internal/web/dist`):
-- **`http://localhost:8000/`** atau **`http://localhost:8000/dashboard`**: Menampilkan katalog definisi workflow dan resep step DAG yang terdaftar (nama alur, versi, urutan step, dependensi, rollback action, dan retry policy) dalam bentuk visual pipeline bersih.
-- **`http://localhost:8000/history`**: Menampilkan tabel audit log riwayat eksekusi (`status`, `workflow_id`, `type`, `startedAt`, `endAt`) dilengkapi filter status, pencarian, dan tombol *Refresh*.
-- **Deep-linking & SPA Routing**: Mendukung navigasi langsung ke detail eksekusi (contoh: `#execution/{id}`) dengan visual trace DAG, status badge, error failure prompt, dan viewer payload JSON context.
-
-##### Frontend Development (Monorepo):
 ```bash
-# Masuk ke direktori frontend
 cd web
-
-# Menjalankan dev server Vite dengan HMR (Hot Module Replacement)
 npm run dev
-
-# Kompilasi frontend ke folder Go embed (internal/web/dist)
+# Build ke internal/web/dist sebelum membangun ulang binary Go:
 npm run build
 ```
-Hasil build secara otomatis di-embed ke dalam binary Go saat `go build`, menjaga proses deployment tetap **1 binary executable / 1 container**.
+
+Saat memakai Vite dev server, sesuaikan proxy di `web/vite.config.ts` dengan port backend. Konfigurasi saat ini menunjuk `8080`, sedangkan default Go adalah `8000`; tambahkan proxy `/system/metrics` untuk metrik dashboard saat development.
+
+---
+
+## 4. relay-worker-node — Panduan Implementasi
+
+Bagian ini adalah spesifikasi awal untuk membangun **project terpisah `relay-worker-node`** berdasarkan Worker API yang sudah tersedia di backend ini. Struktur folder, konfigurasi worker, dan API handler di bawah merupakan rancangan; runtime Node.js belum diimplementasikan dalam repo Relay ini.
+
+### 4.1 Scope dan Struktur Project
+
+`relay-worker-node` bertugas mengambil task, menjalankan executor, menjaga lease, dan melaporkan hasil. Backend Go tetap mengatur DAG, `when`, interpolasi, retry policy, versioning, dan kompensasi.
+
+Struktur yang dapat dipakai:
+
+```text
+relay-worker-node/
+  src/
+    index.ts                 # Bootstrap dan signal shutdown
+    config.ts                # Parsing dan validasi environment
+    client/relay-client.ts   # HTTP Worker API dan error terstruktur
+    runtime/poller.ts        # Claim sesuai kapasitas concurrency
+    runtime/task-runner.ts   # Eksekusi, heartbeat, deadline, dan report
+    executors/http.ts        # HTTP request executor
+    executors/message.ts     # RabbitMQ publisher
+    executors/activity.ts    # Dispatch activity registry
+    activities/index.ts     # Handler bisnis yang didaftarkan aplikasi
+    types.ts                 # Task, handler context, dan report
+  test/
+  .env.example
+  package.json
+  tsconfig.json
+  README.md
+```
+
+Implementasi awal dapat mendukung `activity` terlebih dahulu. Worker hanya mengiklankan executor dan activity yang sudah tersedia. Untuk concurrency `N`, jalankan maksimal `N` task aktif; ambil task baru ketika ada slot, tanpa menumpuk task yang lease-nya sudah berjalan di antrean lokal.
+
+### 4.2 Konfigurasi Backend dan Worker
+
+**Backend Relay Go:** terapkan seluruh migrasi `.up.sql` berurutan sampai `000008_add_external_worker_support` pada database yang dipakai. Startup aplikasi tidak menerapkan migrasi secara otomatis. Untuk database existing, terapkan hanya migrasi yang belum dijalankan.
+
+Tambahkan konfigurasi berikut pada environment backend, di samping konfigurasi database:
+
+```dotenv
+PORT=8000
+RELAY_WORKER_API_ENABLED=true
+RELAY_WORKER_CREDENTIALS='[{"id":"orders-service","token":"replace-with-worker-secret","queues":["orders"]}]'
+WORKER_LONG_POLL_TIMEOUT=25s
+DEFAULT_LEASE_DURATION=30s
+DEFAULT_HEARTBEAT_INTERVAL=10s
+DEFAULT_TIMEOUT=15s
+REAPER_INTERVAL=5s
+```
+
+Contoh menggunakan format `.env` yang dibaca `godotenv`. Saat menyuntikkan environment melalui deployment, nilai credentials adalah array JSON tersebut tanpa pembungkus petik shell. Worker API default **nonaktif**; mengisi credentials saja tidak mengaktifkannya. Saat diaktifkan, credentials wajib nonkosong dan setiap entry wajib memiliki `id` serta `token`. `queues` menentukan izin; `"*"` memberikan akses semua queue.
+
+`id` adalah identitas service hasil autentikasi Bearer token. `worker_id` adalah identitas instance/proses yang dikirim worker dan harus tetap sama selama claim, heartbeat, dan report task itu.
+
+**Konvensi environment yang diusulkan untuk `relay-worker-node`:**
+
+| Variable | Contoh/default rancangan | Fungsi |
+| :--- | :--- | :--- |
+| `RELAY_BASE_URL` | `http://localhost:8000` | Alamat API Go. |
+| `RELAY_WORKER_TOKEN` | Wajib diisi | Token yang cocok dengan credentials backend. |
+| `RELAY_WORKER_ID` | `orders-node-01` | ID unik per instance, misalnya hostname dan UUID proses. |
+| `RELAY_TASK_QUEUE` | `orders` | Satu queue per poller. |
+| `RELAY_EXECUTOR_TYPES` | `activity` | Daftar tipe dipisahkan koma. |
+| `RELAY_ACTIVITIES` | `inventory.reserve,inventory.release` | Daftar handler yang terdaftar. |
+| `RELAY_CONCURRENCY` | `1` | Maksimal task aktif. |
+| `RELAY_WAIT_TIMEOUT_MS` | `25000` | Tidak boleh melebihi batas long poll backend. |
+| `RELAY_REQUEST_TIMEOUT_MS` | `35000` | Timeout request claim, lebih panjang dari long poll. |
+| `RELAY_SHUTDOWN_TIMEOUT_MS` | `30000` | Budget drain task saat shutdown. |
+
+Nama environment worker di atas bukan environment yang otomatis dibaca backend. Validasi konfigurasi saat startup, termasuk queue, token, handler yang diiklankan, concurrency positif, dan hubungan timeout. Request heartbeat/report perlu timeout tersendiri yang muat dalam sisa lease/deadline.
+
+### 4.3 Kontrak HTTP Worker API
+
+Semua endpoint berikut menggunakan `POST`, header `Content-Type: application/json`, dan `Authorization: Bearer <RELAY_WORKER_TOKEN>`. Worker API tidak memakai header `Idempotency-Key`; kepemilikan attempt dibuktikan dengan `worker_id` dan `lease_token`.
+
+#### Claim task
+
+```http
+POST /worker/tasks/claim
+Authorization: Bearer replace-with-worker-secret
+Content-Type: application/json
+
+{
+  "worker_id": "orders-node-01",
+  "queue": "orders",
+  "executor_types": ["activity"],
+  "activities": ["inventory.reserve", "inventory.release"],
+  "wait_timeout_ms": 25000
+}
+```
+
+- `worker_id` wajib nonkosong. Queue kosong memakai `legacy` dan tetap diperiksa terhadap izin service.
+- `executor_types` kosong memakai filter backend `http`, `message`, `activity`. Kirim daftar eksplisit sesuai kemampuan worker.
+- **Activity hanya bisa diambil jika namanya ada di `activities`.** Daftar kosong tidak berarti semua activity.
+- `wait_timeout_ms` tidak diisi memakai default 25.000 ms, dibatasi konfigurasi backend. Nilai `0` berarti satu percobaan langsung; nilai negatif atau melebihi batas menghasilkan `400`.
+- `200 OK` berisi task; `204 No Content` berarti tidak ada task sampai budget tunggu habis. Jangan memanggil `response.json()` pada response `204`.
+
+Contoh response `200 OK` (UUID, waktu, dan token hanya ilustrasi):
+
+```json
+{
+  "step_execution_id": "2f6928f7-31cd-47bb-a5b1-980c1ff9914d",
+  "task_id": "2f6928f7-31cd-47bb-a5b1-980c1ff9914d",
+  "workflow_execution_id": "afd70011-56d5-45f6-a590-bf514bf2091d",
+  "step_id": "reserve-stock",
+  "type": "activity",
+  "task_queue": "orders",
+  "activity_name": "inventory.reserve",
+  "attempt": 1,
+  "is_compensation": false,
+  "timeout_seconds": 60,
+  "deadline": "2026-11-04T10:01:00Z",
+  "heartbeat_interval_ms": 10000,
+  "lease_token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "lease_expires_at": "2026-11-04T10:00:30Z",
+  "lease_duration_ms": 30000,
+  "payload": {
+    "queue": "orders",
+    "activity": "inventory.reserve",
+    "input": { "order_id": "ORD-1001" }
+  }
+}
+```
+
+`task_id` dan `step_execution_id` bernilai sama. Gunakan salah satunya sebagai `{id}` pada endpoint task. `payload` adalah **seluruh config yang sudah diinterpolasi backend**, bukan hanya `input`. Worker tidak perlu mengambil definisi workflow atau mengevaluasi ulang `when`.
+
+#### Heartbeat
+
+```http
+POST /worker/tasks/2f6928f7-31cd-47bb-a5b1-980c1ff9914d/heartbeat
+Authorization: Bearer replace-with-worker-secret
+Content-Type: application/json
+
+{
+  "worker_id": "orders-node-01",
+  "lease_token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "lease_duration_ms": 30000
+}
+```
+
+Response `200 OK`:
+
+```json
+{
+  "lease_expires_at": "2026-11-04T10:00:40Z",
+  "lease_duration_ms": 30000
+}
+```
+
+`lease_duration_ms` pada request opsional. Durasi yang diminta tidak dapat memperpanjang lease melebihi default backend, dan lease selalu dibatasi deadline attempt. Gunakan **`lease_expires_at` sebagai batas aktual**, karena durasi nominal pada response dapat lebih panjang daripada waktu yang tersisa sebelum deadline.
+
+Jadwalkan heartbeat tanpa request yang overlap, sebelum lease kedaluwarsa, dengan mengacu pada `heartbeat_interval_ms` dan sisa lease. Sisakan margin untuk latensi dan report akhir. Heartbeat tidak memperpanjang deadline. Timeout `0` pada definisi step tetap memakai default backend, bukan durasi tak terbatas.
+
+#### Complete
+
+```http
+POST /worker/tasks/2f6928f7-31cd-47bb-a5b1-980c1ff9914d/complete
+Authorization: Bearer replace-with-worker-secret
+Content-Type: application/json
+
+{
+  "worker_id": "orders-node-01",
+  "lease_token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "output": { "reservation_id": "RES-1001" }
+}
+```
+
+Response `200 OK`: `{"accepted": true}`. Output kosong atau `null` dinormalisasi backend menjadi `{}`. Output normal tersedia bagi step berikutnya melalui `steps.<step_id>.output`, misalnya `{{steps.reserve-stock.output.reservation_id}}`.
+
+#### Fail
+
+```http
+POST /worker/tasks/2f6928f7-31cd-47bb-a5b1-980c1ff9914d/fail
+Authorization: Bearer replace-with-worker-secret
+Content-Type: application/json
+
+{
+  "worker_id": "orders-node-01",
+  "lease_token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "error": {
+    "message": "Inventory service unavailable",
+    "retryable": true
+  }
+}
+```
+
+Response `200 OK`: `{"accepted": true}`. `retryable` default `true` jika tidak dikirim; kirim secara eksplisit. Backend memutuskan apakah masih ada attempt dan menghitung backoff. Worker tidak menjadwalkan ulang workflow sendiri. Untuk error permanen seperti input bisnis invalid atau handler tidak dikenal, gunakan `retryable: false`.
+
+#### Error dan replay report
+
+Format error: `{"error": "...", "code": "LOCK_LOST"}`.
+
+| HTTP / code | Arti dan tindakan worker |
+| :--- | :--- |
+| `400 BAD_REQUEST` | Payload atau wait timeout invalid; perbaiki request. |
+| `401 UNAUTHORIZED` | Bearer token tidak valid; hentikan polling sampai konfigurasi diperbaiki. |
+| `401 INVALID_LEASE_TOKEN` | Token attempt salah/tidak dikenal; jangan lanjutkan task dengan token tersebut. |
+| `403 WORKER_API_DISABLED` | Aktifkan API pada environment backend. |
+| `403 FORBIDDEN_QUEUE` / `FORBIDDEN_TASK` | Service tidak memiliki akses queue atau attempt itu. |
+| `404 NOT_FOUND` | Task tidak ditemukan. |
+| `409 LOCK_LOST` | Worker/attempt tidak lagi memiliki lease yang dapat dipakai; batalkan pekerjaan yang masih berjalan. |
+| `409 REPORT_CONFLICT` | Outcome sejenis sudah diterima dengan payload berbeda; jangan ubah report. |
+| `413 PAYLOAD_TOO_LARGE` | Body melebihi batas backend, default 5 MiB. |
+| `500 INTERNAL_ERROR` / gangguan jaringan | Retry request dengan backoff dan jitter sesuai budget operasi. |
+
+Complete/fail yang **sudah diterima** dapat dikirim ulang memakai service, worker ID, lease token, jenis report, dan payload yang sama, termasuk setelah lease berakhir. Backend mengembalikan `accepted: true` tanpa mengulang transisi. Perbedaan urutan key JSON tidak menjadi konflik. Report pertama yang belum diterima membutuhkan lease dan deadline aktif. Beralih dari complete ke fail atau sebaliknya pada attempt yang sudah selesai ditolak sebagai `LOCK_LOST`.
+
+### 4.4 Executor dan Activity Registry
+
+| Tipe | Input dari task | Perilaku worker yang perlu dibuat |
+| :--- | :--- | :--- |
+| `http` | `payload.method`, `url`, `headers`, `body` | Panggil target dengan abort/deadline. Tentukan klasifikasi status HTTP dan bentuk output secara eksplisit. |
+| `message` | `payload.exchange`, `routing_key`, `content_type`, `headers`, `payload` | Publish ke RabbitMQ. Gunakan publisher confirms sebagai dasar keberhasilan publish; ini tidak berarti consumer telah selesai. |
+| `activity` | `activity_name`, `payload.input` | Cari handler pada registry dan jalankan handler tersebut. |
+
+Bentuk output HTTP/message adalah kontrak project worker yang harus ditetapkan agar referensi output workflow konsisten. Misalnya, HTTP dapat mengembalikan body JSON secara langsung, sedangkan message mengembalikan metadata publish. Backend tidak memanggil target atau mendefinisikan output executor untuk worker.
+
+Contoh kontrak handler TypeScript yang diusulkan:
+
+```typescript
+type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+
+type ActivityContext = {
+  taskId: string;
+  workflowExecutionId: string;
+  stepId: string;
+  attempt: number;
+  isCompensation: boolean;
+  signal: AbortSignal;
+  idempotencyKey: string;
+};
+
+type ActivityHandler = (input: Json, ctx: ActivityContext) => Promise<Json>;
+type ActivityRegistry = Record<string, ActivityHandler>;
+```
+
+Activity registry mengiklankan seluruh handler normal **dan kompensasi** yang mampu dijalankan. Kompensasi diterima sebagai task biasa dengan `is_compensation: true`, payload kompensasi, dan lease sendiri. Pada definisi kompensasi, `{{original.output.reservation_id}}` dapat merujuk output step normal; backend sudah me-resolve nilainya sebelum claim.
+
+Efek bisnis dapat terulang setelah crash atau lease expiry, tergantung retry policy. Gunakan `task_id` sebagai dasar idempotency key yang stabil lintas attempt; jangan memasukkan `attempt` untuk operasi bisnis yang sama. Task kompensasi mempunyai ID terpisah. Jika target menggunakan key bisnis seperti `order_id`, koordinasikan scope key tersebut dengan kontrak target.
+
+ID numerik di atas `Number.MAX_SAFE_INTEGER` perlu dikirim sebagai string dalam kontrak aplikasi agar tidak dibulatkan saat JSON diparse Node.js. Output handler harus JSON-serializable; `BigInt` tidak dapat langsung dikirim dengan `JSON.stringify`.
+
+### 4.5 Lifecycle Worker dan Penanganan Kegagalan
+
+```text
+Saat ada slot concurrency:
+  claim task sesuai queue dan capabilities
+  jika 204: lanjutkan long poll berikutnya
+  jika task tersedia:
+    mulai pengawasan lease/deadline dan heartbeat tanpa overlap
+    dispatch executor dengan AbortSignal
+    jika pekerjaan sukses: bekukan report COMPLETE beserta output
+    jika pekerjaan gagal: bekukan report FAIL beserta error/retryable
+    kirim report; retry hanya pengiriman report yang sama jika respons tidak pasti
+    hentikan pengawasan setelah report diterima atau attempt tak dapat dilanjutkan
+    bebaskan slot
+```
+
+Aturan runtime:
+
+1. **Pisahkan error eksekusi dan error pengiriman report.** Jika pekerjaan sukses tetapi request complete timeout, ulangi complete yang sama. Jangan menjalankan ulang handler atau mengirim fail hanya karena request report bermasalah.
+2. **Bekukan report sekali.** Simpan body yang sudah diserialisasi agar retry tidak menambahkan timestamp/error baru. Jangan berpindah jenis report untuk attempt yang sama.
+3. **Jaga lease sampai report terselesaikan.** Heartbeat dan retry transport memakai budget sisa lease/deadline. Jika heartbeat mengembalikan `LOCK_LOST`, hentikan efek bisnis baru dan abort operasi yang mendukung pembatalan. Report yang responsnya tidak pasti masih dapat di-replay identik untuk mengecek apakah sebelumnya sudah diterima.
+4. **Gunakan batas waktu lokal.** Hentikan handler sebelum deadline dengan margin untuk report. Abort bersifat kooperatif; handler harus meneruskan signal ke operasi I/O. Pekerjaan CPU yang memblokir event loop perlu diisolasi agar heartbeat tidak terhambat.
+5. **Retry transport berbeda dari retry bisnis.** Gangguan claim/heartbeat/report dapat dicoba ulang dengan backoff pendek dan jitter. Retry bisnis tetap ditentukan Relay melalui report fail atau Reaper.
+6. **Jangan log Bearer token atau lease token.** Gunakan task ID, execution ID, attempt, worker ID, dan durasi sebagai metadata log.
+
+Saat `SIGINT`/`SIGTERM`, hentikan claim baru dan batalkan long poll yang menunggu. Jika respons claim sedang berpacu dengan shutdown, jangan mulai efek bisnis baru setelah mode drain aktif. Drain task yang sudah berjalan sambil mempertahankan heartbeat dan report sampai budget shutdown habis. Setelah itu abort pekerjaan dan hentikan heartbeat; Reaper menangani lease kedaluwarsa sesuai retry policy. Tidak ada endpoint release/nack pada protokol saat ini. Claim yang responsnya hilang juga dapat meninggalkan lease sementara yang dipulihkan Reaper.
+
+### 4.6 Contoh HTTP Client Node.js
+
+Contoh ESM berikut memakai `fetch` bawaan Node.js. Simpan sebagai `relay-client.mjs` di project worker. Ini adalah lapisan transport; poller, executor, heartbeat loop, retry, dan shutdown dibuat terpisah mengikuti lifecycle di atas.
+
+```javascript
+export class RelayApiError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export class RelayClient {
+  constructor({ baseUrl, token, workerId }) {
+    if (!baseUrl || !token || !workerId) {
+      throw new Error('baseUrl, token, dan workerId wajib diisi');
+    }
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.token = token;
+    this.workerId = workerId;
+  }
+
+  // string body juga diterima untuk replay report yang sudah dibekukan.
+  async post(path, body, { signal, timeoutMs = 5000 } = {}) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
+    });
+
+    if (response.status === 204) return null;
+    const raw = await response.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // Tetap pertahankan status saat proxy mengembalikan body non-JSON.
+      throw new RelayApiError(response.status, 'INVALID_RESPONSE', 'Expected JSON response');
+    }
+    if (!response.ok) {
+      throw new RelayApiError(response.status, data.code, data.error);
+    }
+    return data;
+  }
+
+  claim({ queue, executorTypes, activities, waitTimeoutMs = 25000 }, options = {}) {
+    return this.post('/worker/tasks/claim', {
+      worker_id: this.workerId,
+      queue,
+      executor_types: executorTypes,
+      activities,
+      wait_timeout_ms: waitTimeoutMs,
+    }, { timeoutMs: waitTimeoutMs + 10000, ...options });
+  }
+
+  heartbeat(task, options) {
+    return this.post(`/worker/tasks/${encodeURIComponent(task.task_id)}/heartbeat`, {
+      worker_id: this.workerId,
+      lease_token: task.lease_token,
+    }, options);
+  }
+
+  // Buat sekali setelah eksekusi, lalu simpan dan kirim ulang objek report ini.
+  prepareReport(task, type, result) {
+    if (type !== 'complete' && type !== 'fail') {
+      throw new Error('Report type harus complete atau fail');
+    }
+    return Object.freeze({
+      path: `/worker/tasks/${encodeURIComponent(task.task_id)}/${type}`,
+      body: JSON.stringify({
+        worker_id: this.workerId,
+        lease_token: task.lease_token,
+        ...(type === 'complete' ? { output: result } : { error: result }),
+      }),
+    });
+  }
+
+  report(prepared, options) {
+    return this.post(prepared.path, prepared.body, options);
+  }
+}
+```
+
+Contoh pemakaian oleh runtime setelah handler berhasil:
+
+```javascript
+const report = client.prepareReport(task, 'complete', { reservation_id: 'RES-1001' });
+await client.report(report, { timeoutMs: 3000 });
+// Jika respons hilang, retry client.report(report) dengan body yang sama.
+```
+
+Untuk kegagalan handler, result report fail berbentuk `{ message: '...', retryable: true }`. Sesuaikan timeout tiap request dengan sisa lease/deadline; contoh client tidak menghitung budget itu secara otomatis.
+
+### 4.7 Smoke Test Integrasi
+
+Jalankan backend dengan konfigurasi di Bagian 4.2, lalu daftarkan handler `inventory.reserve` dan `inventory.release` pada worker queue `orders`. Contoh berikut memakai Bash/cURL; pada PowerShell gunakan `curl.exe` dan sesuaikan quoting shell.
+
+**1. Daftarkan workflow activity dengan kompensasi:**
+
+```bash
+curl -X POST http://localhost:8000/workflows \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "orders.reserve",
+    "version": 1,
+    "steps": [{
+      "id": "reserve-stock",
+      "type": "activity",
+      "timeout": 60,
+      "config": {
+        "queue": "orders",
+        "activity": "inventory.reserve",
+        "input": { "order_id": "{{context.order_id}}" }
+      },
+      "retry": { "max_attempts": 3, "backoff": 2, "multiplier": 2, "max_backoff": 30 },
+      "compensation": {
+        "type": "activity",
+        "timeout": 60,
+        "config": {
+          "queue": "orders",
+          "activity": "inventory.release",
+          "input": { "reservation_id": "{{original.output.reservation_id}}" }
+        }
+      }
+    }]
+  }'
+```
+
+**2. Jalankan versi eksplisit:**
+
+```bash
+curl -X POST http://localhost:8000/workflows/orders.reserve/execute \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: orders.reserve:ORD-1001' \
+  -d '{"workflow_version":1,"context":{"order_id":"ORD-1001"}}'
+```
+
+Gunakan nama baru atau versi yang dikembalikan saat registrasi jika workflow tersebut sudah ada dengan definisi lain. Gunakan idempotency key baru untuk setiap execution uji yang baru.
+
+**3. Jalankan worker yang dibuat**, dengan filter claim `executor_types: ["activity"]`, `activities: ["inventory.reserve", "inventory.release"]`, dan queue `orders`. Untuk pemeriksaan manual tanpa runtime Node, gunakan kontrak claim/complete di Bagian 4.3, salin task ID dan lease token dari respons aktual, lalu laporkan hasil sebelum lease habis.
+
+**4. Periksa execution:**
+
+```bash
+curl http://localhost:8000/executions/<execution-id-dari-response>
+```
+
+Handler reserve untuk smoke test dapat mengembalikan `{"reservation_id":"RES-1001"}`. Hasil yang diharapkan: workflow `COMPLETED`, step normal `COMPLETED`, dan satu entry `attempts` dengan outcome `COMPLETED`. Kompensasi menjadi `CANCELLED` karena tidak diperlukan.
+
+Untuk menguji Saga, tambahkan step downstream yang bergantung pada `reserve-stock` lalu buat handler downstream gagal dengan `retryable: false`. Daftarkan juga activity downstream di worker. Hasil yang diharapkan: `inventory.release` menerima reservation ID dari output awal dan workflow berakhir `COMPENSATED` jika kompensasi berhasil.
+
+Detail execution mengekspos riwayat attempt seperti `service_id`, `worker_id`, waktu, deadline, outcome, dan error. Lease token serta hash token tidak diekspos pada endpoint detail execution.
+
+### 4.8 Kriteria Penerimaan
+
+- Claim idle menangani `204` tanpa parse JSON; timeout HTTP lebih panjang dari long poll.
+- Queue yang tidak diizinkan ditolak; activity yang tidak diiklankan tidak diambil.
+- Dua instance tidak mendapatkan lease aktif yang sama untuk satu attempt.
+- Task yang berjalan lama mengirim heartbeat tanpa overlap, dan berhenti sebelum deadline.
+- Concurrency dibatasi sebelum claim, sehingga tidak ada task leased yang menunggu slot lokal.
+- Complete/fail identik dapat di-replay; payload berbeda ditolak tanpa mengubah hasil awal.
+- Timeout complete tidak menjalankan ulang handler dan tidak mengirim fail pengganti.
+- Handler yang kehilangan lease menghentikan pekerjaan kooperatif; Reaper menentukan recovery.
+- Retry bisnis mengikuti policy backend, dan idempotensi target mencegah efek bisnis ganda.
+- Task kompensasi masuk ke handler yang benar dan melaporkan complete/fail dengan lease sendiri.
+- Shutdown menghentikan claim, melakukan drain terbatas, dan membersihkan timer/heartbeat.
+- Pengujian transport memakai fake server; pengujian lifecycle dan konkurensi memakai backend Relay serta database tes terisolasi.
+
+Referensi implementasi backend: [`internal/worker/model.go`](internal/worker/model.go), [`internal/worker/handler.go`](internal/worker/handler.go), [`internal/worker/logic.go`](internal/worker/logic.go), [`internal/execution/repository_lease.go`](internal/execution/repository_lease.go), dan [`internal/execution/repository_lifecycle.go`](internal/execution/repository_lifecycle.go).
