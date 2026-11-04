@@ -18,7 +18,7 @@ type DBConfig struct {
 
 func NewMySql(cfg DBConfig) (*sql.DB, error) {
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?parseTime=true&clientFoundRows=true",
+		"%s:%s@tcp(%s:%s)/%s?parseTime=true&clientFoundRows=true&tls=preferred",
 		cfg.User,
 		cfg.Password,
 		cfg.Host,
