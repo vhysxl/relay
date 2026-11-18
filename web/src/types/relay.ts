@@ -1,4 +1,4 @@
-export type StepType = 'http' | 'message' | string
+export type StepType = 'http' | 'message' | 'activity'
 
 export type ExecutionStatus =
   | 'PENDING'
@@ -13,14 +13,13 @@ export type ExecutionStatus =
 
 export interface RetryPolicy {
   max_attempts?: number
-  initial_interval?: number
-  max_interval?: number
-  backoff_coefficient?: number
+  backoff?: number
+  max_backoff?: number
+  multiplier?: number
 }
 
 export interface ConditionCheckDetail {
   ref: string
-  anchor?: string
   op: string
   expected?: any
   actual?: any
@@ -107,7 +106,7 @@ export interface StepExecution {
   depends_on?: string[]
   config?: any
   when?: any
-  condition_evaluation?: ConditionEvaluationAudit | any
+  condition_evaluation?: ConditionEvaluationAudit
   output?: any
   error_message?: string
   is_compensation?: boolean
@@ -120,8 +119,6 @@ export interface Execution {
   id: string
   workflow_id: string
   workflow_name?: string
-  name?: string
-  type?: string
   status: ExecutionStatus
   context?: any
   error_message?: string

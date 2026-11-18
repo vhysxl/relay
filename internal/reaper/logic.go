@@ -14,11 +14,6 @@ type reaper struct {
 
 // New creates a new Reaper instance.
 func New(repo Repository, interval time.Duration) Reaper {
-	return NewReaper(repo, interval)
-}
-
-// NewReaper creates a new Reaper instance with explicit naming.
-func NewReaper(repo Repository, interval time.Duration) Reaper {
 	if interval <= 0 {
 		panic("reaper: interval must be positive")
 	}

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
@@ -17,8 +16,8 @@ type stepRepository struct {
 	db *sql.DB
 }
 
-// NewStepRepository creates a StepRepository with database connection and optional injected config.
-func NewStepRepository(db *sql.DB, _ ...*config.Config) StepRepository {
+// NewStepRepository creates a StepRepository with a database connection.
+func NewStepRepository(db *sql.DB) StepRepository {
 	return &stepRepository{
 		db: db,
 	}
@@ -308,4 +307,3 @@ func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, ste
 
 	return &s, nil
 }
-

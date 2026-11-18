@@ -72,24 +72,26 @@ func (h *ExecutionHandler) ExecuteWorkflow(w http.ResponseWriter, r *http.Reques
 		if len(bodyBytes) > 0 {
 			trimmed := strings.TrimSpace(string(bodyBytes))
 			if trimmed != "" && trimmed != "null" {
-				var wrapper map[string]json.RawMessage
-				if err := json.Unmarshal(bodyBytes, &wrapper); err == nil {
-					if ctxRaw, ok := wrapper["context"]; ok {
-						req.Context = ctxRaw
-						if vRaw, ok := wrapper["workflow_version"]; ok {
-							var v int
-							if err := json.Unmarshal(vRaw, &v); err != nil || v < 1 {
-								h.writeError(w, errdefs.ErrInvalidWorkflowVersion)
-								return
-							}
-							req.WorkflowVersion = v
-						}
-					} else {
-						req.Context = json.RawMessage(bodyBytes)
-					}
-				} else {
-					util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json request body"})
+				var envelope struct {
+					Context json.RawMessage `json:"context"`
+					Version json.RawMessage `json:"workflow_version"`
+				}
+				decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&envelope); err != nil {
+					util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid execute request"})
 					return
+				}
+				if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+					util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid execute request"})
+					return
+				}
+				req.Context = envelope.Context
+				if len(envelope.Version) > 0 {
+					if err := json.Unmarshal(envelope.Version, &req.WorkflowVersion); err != nil || req.WorkflowVersion < 1 {
+						util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "workflow_version must be a positive integer"})
+						return
+					}
 				}
 			}
 		}
@@ -150,7 +152,7 @@ func (h *ExecutionHandler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errdefs.ErrWorkflowNotFound), errors.Is(err, errdefs.ErrExecutionNotFound):
 		status, message = http.StatusNotFound, err.Error()
-	case errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID),
+	case errors.Is(err, errdefs.ErrEmptyQueueName), errors.Is(err, errdefs.ErrInvalidQueueName), errors.Is(err, errdefs.ErrInvalidStepConfig), errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID),
 		errors.Is(err, errdefs.ErrIdempotencyKeyRequired), errors.Is(err, errdefs.ErrInvalidIdempotencyKey):
 		status, message = http.StatusBadRequest, err.Error()
 	case errors.Is(err, errdefs.ErrIdempotencyConflict):

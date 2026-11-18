@@ -37,7 +37,7 @@ func TestStepRepository_CreateAndGetSteps(t *testing.T) {
 			WorkflowID: wfDefID,
 			Name:       "First Step",
 			Type:       step.StepTypeHTTP,
-			Config:     json.RawMessage(`{"url":"https://example.com"}`),
+			Config:     json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
 			Timeout:    30,
 			Retry: &step.RetryPolicy{
 				MaxAttempts: 3,
@@ -49,7 +49,7 @@ func TestStepRepository_CreateAndGetSteps(t *testing.T) {
 			WorkflowID: wfDefID,
 			Name:       "Second Step",
 			Type:       step.StepTypeHTTP,
-			Config:     json.RawMessage(`{"url":"https://example.com/2"}`),
+			Config:     json.RawMessage(`{"queue":"orders","url":"https://example.com/2"}`),
 			DependsOn:  []string{"step-1"},
 			Timeout:    15,
 		},

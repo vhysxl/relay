@@ -22,9 +22,6 @@ func NewQueueNotifier() QueueNotifier {
 }
 
 func (n *queueNotifier) Notify(queue string) {
-	if queue == "" {
-		queue = "legacy"
-	}
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -37,9 +34,6 @@ func (n *queueNotifier) Notify(queue string) {
 }
 
 func (n *queueNotifier) Subscribe(queue string) (<-chan struct{}, func()) {
-	if queue == "" {
-		queue = "legacy"
-	}
 	ch := make(chan struct{}, 1)
 
 	n.mu.Lock()

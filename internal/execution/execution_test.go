@@ -87,14 +87,14 @@ func (workflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.W
 	if name == "unknown-wf" {
 		return nil, errdefs.ErrWorkflowNotFound
 	}
-	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}}, nil
 }
 
 func (workflowReader) GetWorkflowVersion(ctx context.Context, name string, version int) (*workflow.Workflow, error) {
 	if name == "unknown-wf" {
 		return nil, errdefs.ErrWorkflowNotFound
 	}
-	return &workflow.Workflow{ID: fmt.Sprintf("%s-v%d", name, version), Name: name, Version: version, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+	return &workflow.Workflow{ID: fmt.Sprintf("%s-v%d", name, version), Name: name, Version: version, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}}, nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
@@ -288,8 +288,8 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	recRaw := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recRaw, reqRaw)
-	if recRaw.Code != http.StatusCreated {
-		t.Fatalf("expected status 201 for raw body, got %d", recRaw.Code)
+	if recRaw.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for raw body, got %d", recRaw.Code)
 	}
 
 	// 3. Trigger with empty body

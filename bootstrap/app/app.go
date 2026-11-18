@@ -48,7 +48,7 @@ func InitApp() (*Application, error) {
 	queueNotifier := worker.NewQueueNotifier()
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, conf.ConcurrentRetryLimit)
 	executionLogic := execution.NewExecutionLogic(executionRepo, workflowRepo)
-	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration, conf, queueNotifier)
+	workerLogic := worker.NewWorkerLogic(executionRepo, conf, queueNotifier)
 
 	reaperSvc := reaper.New(executionRepo, conf.ReaperInterval)
 

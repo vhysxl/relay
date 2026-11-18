@@ -66,7 +66,9 @@ func (h *WorkerHandler) writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errdefs.ErrInvalidLeaseToken):
 		status = http.StatusUnauthorized
 		code = "INVALID_LEASE_TOKEN"
-	case errors.Is(err, errdefs.ErrEmptyWorkerID),
+	case errors.Is(err, errdefs.ErrEmptyQueueName),
+		errors.Is(err, errdefs.ErrInvalidQueueName),
+		errors.Is(err, errdefs.ErrEmptyWorkerID),
 		errors.Is(err, errdefs.ErrEmptyStepExecutionID),
 		errors.Is(err, errdefs.ErrInvalidWaitTimeout),
 		errors.Is(err, errdefs.ErrInvalidStepOutput):
@@ -154,9 +156,11 @@ func (h *WorkerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 	}
 
 	queue := strings.TrimSpace(req.Queue)
-	if queue == "" {
-		queue = "legacy"
+	if err := util.ValidateQueueName(queue); err != nil {
+		h.writeError(w, err)
+		return
 	}
+	req.Queue = queue
 	if !cred.HasQueueAccess(queue) {
 		h.writeError(w, errdefs.ErrForbiddenQueue)
 		return

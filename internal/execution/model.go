@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
@@ -186,7 +185,6 @@ type ClaimFilter struct {
 }
 
 type ClaimResult struct {
-	StepDefinition *step.Step
 	StepExecution  *StepExecution
 	LeaseToken     string
 	LeaseDuration  time.Duration
@@ -198,14 +196,10 @@ type ClaimResult struct {
 // smaller interfaces they need, rather than this wiring interface.
 type Repository interface {
 	ExecutionRepository
-	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error)
 	ClaimTask(ctx context.Context, filter ClaimFilter) (*ClaimResult, error)
 	HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
 	CompleteTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
 	FailTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
 	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
 	ReapExpiredSteps(ctx context.Context) (int64, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }

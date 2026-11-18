@@ -21,7 +21,7 @@ type WorkerCredential struct {
 
 func (c WorkerCredential) HasQueueAccess(queue string) bool {
 	if queue == "" {
-		queue = "legacy"
+		return false
 	}
 	for _, q := range c.Queues {
 		if q == "*" || q == queue {
@@ -36,12 +36,10 @@ type Config struct {
 	DB                       *sql.DB
 	DefaultLeaseDuration     time.Duration
 	DefaultHeartBeatInterval time.Duration
-	DefaultPoolInterval      time.Duration
 	ReaperInterval           time.Duration
 	DefaultTimeout           time.Duration
 	MaxPayloadSize           int
 	ConcurrentRetryLimit     int
-	WorkerCount              int
 	ConditionMaxDepth        int
 	ConditionMaxNodes        int
 	WorkerAPIEnabled         bool
@@ -65,11 +63,6 @@ func Init() (*Config, error) {
 		return nil, err
 	}
 
-	poolInterval, err := parseDuration("DEFAULT_POOL_INTERVAL", 5*time.Second)
-	if err != nil {
-		return nil, err
-	}
-
 	reaperInterval, err := parseDuration("REAPER_INTERVAL", 5*time.Second)
 	if err != nil {
 		return nil, err
@@ -86,11 +79,6 @@ func Init() (*Config, error) {
 	}
 
 	concurrentRetryLimit, err := getIntEnv("CONCURRENT_RETRY_LIMIT", 3)
-	if err != nil {
-		return nil, err
-	}
-
-	workerCount, err := getIntEnv("WORKER_COUNT", 3)
 	if err != nil {
 		return nil, err
 	}
@@ -129,12 +117,10 @@ func Init() (*Config, error) {
 		DB:                       DB,
 		DefaultLeaseDuration:     lease,
 		DefaultHeartBeatInterval: heartbeat,
-		DefaultPoolInterval:      poolInterval,
 		ReaperInterval:           reaperInterval,
 		DefaultTimeout:           defaultTimeout,
 		MaxPayloadSize:           maxPayloadSize,
 		ConcurrentRetryLimit:     concurrentRetryLimit,
-		WorkerCount:              workerCount,
 		ConditionMaxDepth:        conditionMaxDepth,
 		ConditionMaxNodes:        conditionMaxNodes,
 		WorkerAPIEnabled:         workerAPIEnabled,

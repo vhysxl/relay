@@ -361,19 +361,19 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
                       {selectedStep.retry.max_attempts}x
                     </span>
                   </div>
-                  {selectedStep.retry.initial_interval && (
+                  {selectedStep.retry.backoff && (
                     <div className="flex justify-between">
                       <span className="text-neutral-400">Initial Interval:</span>
                       <span className="text-neutral-300">
-                        {selectedStep.retry.initial_interval}s
+                        {selectedStep.retry.backoff}s
                       </span>
                     </div>
                   )}
-                  {selectedStep.retry.backoff_coefficient && (
+                  {selectedStep.retry.multiplier && (
                     <div className="flex justify-between">
                       <span className="text-neutral-400">Backoff Coeff:</span>
                       <span className="text-neutral-300">
-                        {selectedStep.retry.backoff_coefficient}x
+                        {selectedStep.retry.multiplier}x
                       </span>
                     </div>
                   )}

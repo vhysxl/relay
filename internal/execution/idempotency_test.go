@@ -17,11 +17,11 @@ import (
 )
 
 type memoryIdempotencyRepo struct {
-	executions       map[string]*execution.WorkflowExecution
-	requests         map[string]*execution.ExecutionRequestRecord
-	failStepInsert   bool
-	simulateRaceWin  bool
-	insertHook       func(exec *execution.WorkflowExecution, rec *execution.ExecutionRequestRecord) error
+	executions      map[string]*execution.WorkflowExecution
+	requests        map[string]*execution.ExecutionRequestRecord
+	failStepInsert  bool
+	simulateRaceWin bool
+	insertHook      func(exec *execution.WorkflowExecution, rec *execution.ExecutionRequestRecord) error
 }
 
 func newMemoryIdempotencyRepo() *memoryIdempotencyRepo {
@@ -141,7 +141,7 @@ func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
@@ -180,7 +180,7 @@ func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 	}
 }
 
-func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
+func TestIdempotency_ContextNormalization(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
@@ -189,7 +189,7 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 				Name:    "checkout",
 				Version: 1,
 				Context: json.RawMessage(`{"currency":"USD"}`),
-				Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}},
+				Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
 			},
 		},
 	}
@@ -211,8 +211,8 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 	var resp1 execution.ExecuteWorkflowResponse
 	_ = json.Unmarshal(w1.Body.Bytes(), &resp1)
 
-	// 2. Replay with raw context (equivalent)
-	r2 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"items":["apple"],"order_id":"ORD-1"}`))
+	// 2. Replay with reordered wrapped context (equivalent)
+	r2 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"context":{"items":["apple"],"order_id":"ORD-1"}}`))
 	r2.SetPathValue("name", "checkout")
 	r2.Header.Set("Idempotency-Key", "key-ctx-1")
 	w2 := httptest.NewRecorder()
@@ -240,7 +240,7 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 	}
 
 	// 4. Large number distinction vs same key
-	r4 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"val":9007199254740992}`))
+	r4 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"context":{"val":9007199254740992}}`))
 	r4.SetPathValue("name", "checkout")
 	r4.Header.Set("Idempotency-Key", "key-large-num")
 	w4 := httptest.NewRecorder()
@@ -250,7 +250,7 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 	}
 
 	// 4b. Mutate integer above 2^53 with same key -> 409 Conflict
-	r4b := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"val":9007199254740993}`))
+	r4b := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"context":{"val":9007199254740993}}`))
 	r4b.SetPathValue("name", "checkout")
 	r4b.Header.Set("Idempotency-Key", "key-large-num")
 	w4b := httptest.NewRecorder()
@@ -260,7 +260,7 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 	}
 
 	// 5. Number vs string distinction
-	r5 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"amount":42}`))
+	r5 := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"context":{"amount":42}}`))
 	r5.SetPathValue("name", "checkout")
 	r5.Header.Set("Idempotency-Key", "key-type-check")
 	w5 := httptest.NewRecorder()
@@ -269,7 +269,7 @@ func TestIdempotency_ContextCompatibilityAndNormalization(t *testing.T) {
 		t.Fatalf("expected 201, got %d", w5.Code)
 	}
 
-	r5b := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"amount":"42"}`))
+	r5b := httptest.NewRequest(http.MethodPost, "/workflows/checkout/execute", strings.NewReader(`{"context":{"amount":"42"}}`))
 	r5b.SetPathValue("name", "checkout")
 	r5b.Header.Set("Idempotency-Key", "key-type-check")
 	w5b := httptest.NewRecorder()
@@ -305,14 +305,14 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 		Name:    "order-flow",
 		Version: 1,
 		Context: json.RawMessage(`{"region":"US"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
 	}
 	wfV2 := &workflow.Workflow{
 		ID:      "wf-v2",
 		Name:    "order-flow",
 		Version: 2,
 		Context: json.RawMessage(`{"region":"EU","v2":true}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}, {ID: "s2", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}, {ID: "s2", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
 	}
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{wfV1},
@@ -321,7 +321,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Initial execution created on v1
-	r1 := httptest.NewRequest(http.MethodPost, "/workflows/order-flow/execute", strings.NewReader(`{"user":"alice"}`))
+	r1 := httptest.NewRequest(http.MethodPost, "/workflows/order-flow/execute", strings.NewReader(`{"context":{"user":"alice"}}`))
 	r1.SetPathValue("name", "order-flow")
 	r1.Header.Set("Idempotency-Key", "key-ver-1")
 	w1 := httptest.NewRecorder()
@@ -345,7 +345,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 	reader.workflows = append(reader.workflows, wfV2)
 
 	// 4. Replay via workflow name "order-flow"
-	r2 := httptest.NewRequest(http.MethodPost, "/workflows/order-flow/execute", strings.NewReader(`{"user":"alice"}`))
+	r2 := httptest.NewRequest(http.MethodPost, "/workflows/order-flow/execute", strings.NewReader(`{"context":{"user":"alice"}}`))
 	r2.SetPathValue("name", "order-flow")
 	r2.Header.Set("Idempotency-Key", "key-ver-1")
 	w2 := httptest.NewRecorder()
@@ -371,7 +371,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 	}
 
 	// 5. Attempt execute targeting explicit version ID wf-v1 or wf-v2 without matching workflow name -> 404 Not Found
-	r3 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v1/execute", strings.NewReader(`{"user":"alice"}`))
+	r3 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v1/execute", strings.NewReader(`{"context":{"user":"alice"}}`))
 	r3.SetPathValue("name", "wf-v1")
 	r3.Header.Set("Idempotency-Key", "key-ver-1")
 	w3 := httptest.NewRecorder()
@@ -380,7 +380,7 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 		t.Fatalf("expected 404 Not Found when executing by ID without matching name, got %d: %s", w3.Code, w3.Body.String())
 	}
 
-	r4 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v2/execute", strings.NewReader(`{"user":"alice"}`))
+	r4 := httptest.NewRequest(http.MethodPost, "/workflows/wf-v2/execute", strings.NewReader(`{"context":{"user":"alice"}}`))
 	r4.SetPathValue("name", "wf-v2")
 	r4.Header.Set("Idempotency-Key", "key-ver-1")
 	w4 := httptest.NewRecorder()
@@ -396,7 +396,7 @@ func TestIdempotency_AtomicRollbackOnStepFailure(t *testing.T) {
 
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
@@ -439,8 +439,8 @@ func TestIdempotency_SameKeyDifferentWorkflows(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
-			{ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)
@@ -472,8 +472,8 @@ func TestIdempotency_ExplicitWorkflowVersion(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-id-v1", Name: "order-flow", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
-			{ID: "wf-id-v2", Name: "order-flow", Version: 2, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}},
+			{ID: "wf-id-v1", Name: "order-flow", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "wf-id-v2", Name: "order-flow", Version: 2, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
 		},
 	}
 	logic := execution.NewExecutionLogic(repo, reader)

@@ -110,7 +110,7 @@ func reconcile(status WorkflowStatus, steps []StepExecution) (WorkflowStatus, []
 		if !exists || original.Status == StatusFailed || original.Status == StatusCancelled || original.Status == StatusSkipped {
 			result[i].Status = StatusCancelled
 		} else {
-			// Re-evaluate legacy PENDING tickets too: a running original is unsafe.
+			// Check readiness before claiming compensation: a running original is unsafe.
 			result[i].Status = StatusWaiting
 		}
 	}

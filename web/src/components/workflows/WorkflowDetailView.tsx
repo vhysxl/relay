@@ -31,19 +31,17 @@ import { sortStepsTopologically } from '../../utils/dag'
 import { WorkflowDagCanvas } from './WorkflowDagCanvas'
 
 interface WorkflowDetailViewProps {
-  workflowName?: string
-  workflowId?: string
+  workflowName: string
   onBack: () => void
   onNavigateToExecution?: (executionId: string) => void
 }
 
 export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   workflowName,
-  workflowId,
   onBack,
   onNavigateToExecution,
 }) => {
-  const targetName = workflowName || workflowId || ''
+  const targetName = workflowName
 
   // Latest workflow definition and executions
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
@@ -129,7 +127,6 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
             ? execs.filter(
                 (e) =>
                   e.workflow_name === targetName ||
-                  e.workflow_id === targetName ||
                   (data && (e.workflow_id === data.id || e.workflow_name === data.name))
               )
             : []

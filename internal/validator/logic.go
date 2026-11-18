@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -15,44 +14,16 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-var routingIdentifierRegex = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-func validateRoutingIdentifier(val string) bool {
-	if len(val) < 1 || len(val) > 128 {
-		return false
-	}
-	return routingIdentifierRegex.MatchString(val)
-}
-
 func validateStepConfig(stepType step.StepType, config json.RawMessage) error {
 	var cfgMap map[string]json.RawMessage
 	if err := json.Unmarshal(config, &cfgMap); err != nil {
 		return errdefs.ErrInvalidStepConfig
 	}
 
-	if qRaw, ok := cfgMap["queue"]; ok {
-		var q string
-		if err := json.Unmarshal(qRaw, &q); err != nil {
-			return errdefs.ErrInvalidQueueName
-		}
-		if q != "" && !validateRoutingIdentifier(q) {
-			return errdefs.ErrInvalidQueueName
-		}
+	if _, err := util.QueueFromConfig(config); err != nil {
+		return err
 	}
-
 	if stepType == step.StepTypeActivity {
-		qRaw, ok := cfgMap["queue"]
-		if !ok {
-			return errdefs.ErrEmptyQueueName
-		}
-		var q string
-		if err := json.Unmarshal(qRaw, &q); err != nil || strings.TrimSpace(q) == "" {
-			return errdefs.ErrEmptyQueueName
-		}
-		if !validateRoutingIdentifier(q) {
-			return errdefs.ErrInvalidQueueName
-		}
-
 		actRaw, ok := cfgMap["activity"]
 		if !ok {
 			return errdefs.ErrEmptyActivityName
@@ -61,7 +32,7 @@ func validateStepConfig(stepType step.StepType, config json.RawMessage) error {
 		if err := json.Unmarshal(actRaw, &act); err != nil || strings.TrimSpace(act) == "" {
 			return errdefs.ErrEmptyActivityName
 		}
-		if !validateRoutingIdentifier(act) {
+		if !util.IsRoutingIdentifier(act) {
 			return errdefs.ErrInvalidActivityName
 		}
 	}

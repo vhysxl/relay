@@ -60,7 +60,7 @@ func TestReaper_ReapOnce_Error(t *testing.T) {
 		reapErr: expectedErr,
 	}
 
-	r := reaper.NewReaper(mockRepo, time.Second)
+	r := reaper.New(mockRepo, time.Second)
 	_, err := r.ReapOnce(context.Background())
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected error %v, got %v", expectedErr, err)

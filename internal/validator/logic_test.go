@@ -28,18 +28,18 @@ func TestValidateSteps_LinearDAG(t *testing.T) {
 		{
 			ID:     "step-1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{"url":"https://example.com"}`),
+			Config: json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
 		},
 		{
 			ID:        "step-2",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{"url":"https://example.com"}`),
+			Config:    json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
 			DependsOn: []string{"step-1"},
 		},
 		{
 			ID:        "step-3",
 			Type:      step.StepTypeMessage,
-			Config:    json.RawMessage(`{"exchange":"events"}`),
+			Config:    json.RawMessage(`{"queue":"orders","exchange":"events"}`),
 			DependsOn: []string{"step-2"},
 		},
 	}
@@ -56,24 +56,24 @@ func TestValidateSteps_BranchingDAG(t *testing.T) {
 		{
 			ID:     "step-a",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 		},
 		{
 			ID:        "step-b",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-a"},
 		},
 		{
 			ID:        "step-c",
 			Type:      step.StepTypeMessage,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-a"},
 		},
 		{
 			ID:        "step-d",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-b", "step-c"},
 		},
 	}
@@ -89,7 +89,7 @@ func TestValidateSteps_SelfDependency(t *testing.T) {
 		{
 			ID:        "step-1",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-1"},
 		},
 	}
@@ -106,13 +106,13 @@ func TestValidateSteps_CyclicDependency_Direct(t *testing.T) {
 		{
 			ID:        "step-1",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-2"},
 		},
 		{
 			ID:        "step-2",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-1"},
 		},
 	}
@@ -129,19 +129,19 @@ func TestValidateSteps_CyclicDependency_Indirect(t *testing.T) {
 		{
 			ID:        "step-1",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-3"},
 		},
 		{
 			ID:        "step-2",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-1"},
 		},
 		{
 			ID:        "step-3",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"step-2"},
 		},
 	}
@@ -158,7 +158,7 @@ func TestValidateSteps_MissingDependency(t *testing.T) {
 		{
 			ID:        "step-1",
 			Type:      step.StepTypeHTTP,
-			Config:    json.RawMessage(`{}`),
+			Config:    json.RawMessage(`{"queue":"orders"}`),
 			DependsOn: []string{"non-existent-step"},
 		},
 	}
@@ -175,12 +175,12 @@ func TestValidateSteps_DuplicateID(t *testing.T) {
 		{
 			ID:     "step-1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 		},
 		{
 			ID:     "step-1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 		},
 	}
 
@@ -196,7 +196,7 @@ func TestValidateSteps_InvalidType(t *testing.T) {
 		{
 			ID:     "step-1",
 			Type:   "unknown_type",
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 		},
 	}
 
@@ -240,7 +240,7 @@ func TestValidateSteps_RetryPolicy(t *testing.T) {
 		{
 			ID:     "step-1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 			Retry: &step.RetryPolicy{
 				MaxAttempts: 0,
 			},
@@ -270,10 +270,10 @@ func TestValidateSteps_Compensation(t *testing.T) {
 		{
 			ID:     "step-1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 			Compensation: &step.Compensation{
 				Type:   "invalid",
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 			},
 		},
 	}
@@ -286,7 +286,7 @@ func TestValidateSteps_Compensation(t *testing.T) {
 	// Valid compensation
 	steps[0].Compensation = &step.Compensation{
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://example.com/rollback"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://example.com/rollback"}`),
 	}
 	if err := logic.ValidateSteps(steps); err != nil {
 		t.Fatalf("expected valid compensation, got %v", err)
@@ -299,11 +299,11 @@ func TestValidateSteps_IrreversibleWithCompensation(t *testing.T) {
 		{
 			ID:           "step-1",
 			Type:         step.StepTypeHTTP,
-			Config:       json.RawMessage(`{"url":"https://example.com"}`),
+			Config:       json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
 			Irreversible: true,
 			Compensation: &step.Compensation{
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://example.com/rollback"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://example.com/rollback"}`),
 			},
 		},
 	}
@@ -326,7 +326,7 @@ func TestValidateSteps_NegativeTimeout(t *testing.T) {
 		{
 			ID:      "step-1",
 			Type:    step.StepTypeHTTP,
-			Config:  json.RawMessage(`{}`),
+			Config:  json.RawMessage(`{"queue":"orders"}`),
 			Timeout: -5,
 		},
 	}
@@ -340,7 +340,7 @@ func TestValidateSteps_NegativeTimeout(t *testing.T) {
 	steps[0].Timeout = 5
 	steps[0].Compensation = &step.Compensation{
 		Type:    step.StepTypeHTTP,
-		Config:  json.RawMessage(`{}`),
+		Config:  json.RawMessage(`{"queue":"orders"}`),
 		Timeout: -1,
 	}
 	err = logic.ValidateSteps(steps)
@@ -366,7 +366,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	// Name too long
 	req = &workflow.WorkflowRequest{
 		Name:  string(make([]byte, 256)),
-		Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+		Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrWorkflowNameTooLong {
 		t.Fatalf("expected errdefs.ErrWorkflowNameTooLong, got %v", err)
@@ -376,7 +376,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	req = &workflow.WorkflowRequest{
 		Name:    "valid-name",
 		Version: -1,
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowVersion {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowVersion, got %v", err)
@@ -396,7 +396,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	req = &workflow.WorkflowRequest{
 		Name:    "valid-name",
 		Version: 1,
-		Steps:   []step.Step{{ID: "   ", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+		Steps:   []step.Step{{ID: "   ", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrEmptyID {
 		t.Fatalf("expected errdefs.ErrEmptyID, got %v", err)
@@ -406,7 +406,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	req = &workflow.WorkflowRequest{
 		Name:    "valid-name",
 		Context: json.RawMessage(`invalid`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowContext {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
@@ -416,7 +416,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 	req = &workflow.WorkflowRequest{
 		Name:    "valid-name",
 		Context: json.RawMessage(`[1, 2, 3]`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrInvalidWorkflowContext {
 		t.Fatalf("expected errdefs.ErrInvalidWorkflowContext, got %v", err)
@@ -428,8 +428,8 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Version: 0,
 		Context: json.RawMessage(`{"key": "val"}`),
 		Steps: []step.Step{
-			{ID: "dep1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{" dep1 "}},
+			{ID: "dep1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
+			{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`), DependsOn: []string{" dep1 "}},
 		},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != nil {
@@ -453,7 +453,7 @@ func TestValidateAndNormalizeWorkflow_Validation(t *testing.T) {
 		Name:    "flow-self-dep",
 		Version: 1,
 		Steps: []step.Step{
-			{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"s1"}},
+			{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`), DependsOn: []string{"s1"}},
 		},
 	}
 	if err := v.ValidateAndNormalizeWorkflow(req); err != errdefs.ErrSelfDependency {
@@ -466,11 +466,11 @@ func TestValidateSteps_Conditions(t *testing.T) {
 
 	t.Run("valid ancestor reference", func(t *testing.T) {
 		steps := []step.Step{
-			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
 			{
 				ID:        "b",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{}`),
+				Config:    json.RawMessage(`{"queue":"orders"}`),
 				DependsOn: []string{"a"},
 				When:      json.RawMessage(`{"ref":"steps.a.output.user.tier","op":"eq","value":"diamond"}`),
 			},
@@ -482,12 +482,12 @@ func TestValidateSteps_Conditions(t *testing.T) {
 
 	t.Run("non-ancestor reference returns ErrConditionNonAncestor", func(t *testing.T) {
 		steps := []step.Step{
-			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
+			{ID: "b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
 			{
 				ID:        "c",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{}`),
+				Config:    json.RawMessage(`{"queue":"orders"}`),
 				DependsOn: []string{"a"}, // depends on a, but references b (not an ancestor)
 				When:      json.RawMessage(`{"ref":"steps.b.output.user.tier","op":"eq","value":"diamond"}`),
 			},
@@ -499,11 +499,11 @@ func TestValidateSteps_Conditions(t *testing.T) {
 
 	t.Run("ambiguous context anchor colliding with step ID returns ErrConditionAmbiguousAnchor", func(t *testing.T) {
 		steps := []step.Step{
-			{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
 			{
 				ID:        "b",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{}`),
+				Config:    json.RawMessage(`{"queue":"orders"}`),
 				DependsOn: []string{"user"},
 				When:      json.RawMessage(`{"ref":"user.tier","op":"eq","value":"diamond"}`),
 			},
@@ -518,7 +518,7 @@ func TestValidateSteps_Conditions(t *testing.T) {
 			{
 				ID:     "a",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 				When:   json.RawMessage(`{"all":[{"all":[{"all":[{"ref":"context.flag","op":"exists"}]}]}]}`), // depth 4 > 3
 			},
 		}
@@ -534,7 +534,7 @@ func TestValidateSteps_Conditions(t *testing.T) {
 			s := step.Step{
 				ID:     fmt.Sprintf("s%d", i),
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 			}
 			if i > 0 {
 				s.DependsOn = []string{fmt.Sprintf("s%d", i-1)}
@@ -553,7 +553,7 @@ func TestIsWorkflowEqual_WhenCondition(t *testing.T) {
 		{
 			ID:     "a",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 			When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"true"}`),
 		},
 	}
@@ -563,7 +563,7 @@ func TestIsWorkflowEqual_WhenCondition(t *testing.T) {
 			{
 				ID:     "a",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 				When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"true"}`),
 			},
 		},
@@ -577,7 +577,7 @@ func TestIsWorkflowEqual_WhenCondition(t *testing.T) {
 			{
 				ID:     "a",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 				When:   json.RawMessage(`{"ref":"flag","op":"eq","value":"false"}`),
 			},
 		},
@@ -593,7 +593,7 @@ func TestIsWorkflowEqual_WhenCondition_LargeNumbers(t *testing.T) {
 		{
 			ID:     "a",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{}`),
+			Config: json.RawMessage(`{"queue":"orders"}`),
 			When:   json.RawMessage(`{"ref":"val","op":"eq","value":9007199254740992}`),
 		},
 	}
@@ -603,7 +603,7 @@ func TestIsWorkflowEqual_WhenCondition_LargeNumbers(t *testing.T) {
 			{
 				ID:     "a",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{}`),
+				Config: json.RawMessage(`{"queue":"orders"}`),
 				When:   json.RawMessage(`{"ref":"val","op":"eq","value":9007199254740993}`),
 			},
 		},
@@ -731,7 +731,7 @@ func TestValidateSteps_Compensation_Activity(t *testing.T) {
 		{
 			ID:     "s1",
 			Type:   step.StepTypeHTTP,
-			Config: json.RawMessage(`{"url":"https://example.com"}`),
+			Config: json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
 			Compensation: &step.Compensation{
 				Type:   step.StepTypeActivity,
 				Config: json.RawMessage(`{"queue":"comp-queue","activity":"rollbackAction"}`),

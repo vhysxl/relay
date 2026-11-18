@@ -21,7 +21,7 @@ var (
 	ErrInvalidStepConfig           = errors.New("step config must be valid non-empty JSON")
 	ErrInvalidQueueName            = errors.New("queue name is invalid: must match [A-Za-z0-9._-]+ and be 1-128 characters")
 	ErrInvalidActivityName         = errors.New("activity name is invalid: must match [A-Za-z0-9._-]+ and be 1-128 characters")
-	ErrEmptyQueueName              = errors.New("queue name cannot be empty for activity step")
+	ErrEmptyQueueName              = errors.New("queue name cannot be empty")
 	ErrEmptyActivityName           = errors.New("activity name cannot be empty for activity step")
 	ErrDuplicateStepID             = errors.New("duplicate step id in workflow")
 	ErrDependencyNotFound          = errors.New("dependency step not found in workflow")

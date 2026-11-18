@@ -208,7 +208,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     {compensation && (
                       <span
                         className={`px-2.5 py-1 rounded text-xs font-mono font-semibold uppercase hidden sm:inline-flex items-center gap-1.5 ${
-                          compensation.status === 'COMPENSATED' || compensation.status === 'REVERTED'
+                          compensation.status === 'COMPENSATED'
                             ? 'bg-amber-950/60 text-amber-400 border border-amber-800/60'
                             : compensation.status === 'COMPENSATING'
                             ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60 animate-pulse'
@@ -312,7 +312,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                             <tbody className="divide-y divide-neutral-800/80 text-[11px]">
                               {step.condition_evaluation.checks.map((c: any, i: number) => (
                                 <tr key={i} className="hover:bg-neutral-800/20">
-                                  <td className="py-1.5 px-3 text-neutral-300 font-semibold">{c.ref || c.anchor}</td>
+                                  <td className="py-1.5 px-3 text-neutral-300 font-semibold">{c.ref}</td>
                                   <td className="py-1.5 px-3 font-bold text-neutral-200">{c.op}</td>
                                   <td className="py-1.5 px-3 text-neutral-400">{c.expected !== undefined ? JSON.stringify(c.expected) : '—'}</td>
                                   <td className="py-1.5 px-3 text-neutral-200">{JSON.stringify(c.actual)}</td>

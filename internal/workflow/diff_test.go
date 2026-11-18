@@ -19,7 +19,7 @@ func TestCompareWorkflows_FirstVersionOrIdentical(t *testing.T) {
 				ID:        "step-1",
 				Name:      "Step One",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/1","amount":100}`),
+				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/1","amount":100}`),
 				DependsOn: []string{"step-a", "step-b"},
 			},
 		},
@@ -36,7 +36,7 @@ func TestCompareWorkflows_FirstVersionOrIdentical(t *testing.T) {
 				ID:        "step-1",
 				Name:      "Step One",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"amount":100,"url":"https://api.test/1"}`),
+				Config:    json.RawMessage(`{"queue":"orders","amount":100,"url":"https://api.test/1"}`),
 				DependsOn: []string{"step-b", "step-a"},
 			},
 		},
@@ -88,14 +88,14 @@ func TestCompareWorkflows_ContextChanges(t *testing.T) {
 func TestCompareWorkflows_StepAddedAndRemoved(t *testing.T) {
 	wf1 := &workflow.Workflow{
 		Steps: []step.Step{
-			{ID: "step-deleted", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "step-deleted", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
+			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
 		},
 	}
 	wf2 := &workflow.Workflow{
 		Steps: []step.Step{
-			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "step/added~one", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
+			{ID: "step/added~one", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)},
 		},
 	}
 
@@ -128,11 +128,11 @@ func TestCompareWorkflows_StepFieldModifications(t *testing.T) {
 				ID:           "step-1",
 				Name:         "Old Name",
 				Type:         step.StepTypeHTTP,
-				Config:       json.RawMessage(`{"url":"https://old.com","num":9007199254740992}`),
+				Config:       json.RawMessage(`{"queue":"orders","url":"https://old.com","num":9007199254740992}`),
 				DependsOn:    []string{"dep-a"},
 				Timeout:      10,
 				Retry:        &step.RetryPolicy{MaxAttempts: 2, Backoff: 1},
-				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://refund.old"}`)},
+				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders","url":"https://refund.old"}`)},
 				Irreversible: false,
 				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"gold"}`),
 			},
@@ -145,11 +145,11 @@ func TestCompareWorkflows_StepFieldModifications(t *testing.T) {
 				ID:           "step-1",
 				Name:         "New Name",
 				Type:         step.StepTypeMessage,
-				Config:       json.RawMessage(`{"url":"https://old.com","num":9007199254740993}`),
+				Config:       json.RawMessage(`{"queue":"orders","url":"https://old.com","num":9007199254740993}`),
 				DependsOn:    []string{"dep-a", "dep-b"},
 				Timeout:      30,
 				Retry:        &step.RetryPolicy{MaxAttempts: 5, Backoff: 1},
-				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://refund.new"}`)},
+				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders","url":"https://refund.new"}`)},
 				Irreversible: true,
 				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"platinum"}`),
 			},
@@ -189,7 +189,7 @@ func TestCompareWorkflows_ArrayOrderSignificanceInConfig(t *testing.T) {
 			{
 				ID:     "s1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"items":[1, 2, 3]}`),
+				Config: json.RawMessage(`{"queue":"orders","items":[1, 2, 3]}`),
 			},
 		},
 	}
@@ -198,7 +198,7 @@ func TestCompareWorkflows_ArrayOrderSignificanceInConfig(t *testing.T) {
 			{
 				ID:     "s1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"items":[3, 2, 1]}`),
+				Config: json.RawMessage(`{"queue":"orders","items":[3, 2, 1]}`),
 			},
 		},
 	}
@@ -277,4 +277,3 @@ func TestWorkflowChange_JSONSerialization_PreservesNullFalseZero(t *testing.T) {
 		t.Fatalf("expected 'after' to be false, got %v", val)
 	}
 }
-

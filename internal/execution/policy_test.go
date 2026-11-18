@@ -90,7 +90,7 @@ func TestReconcileTerminalAndRetryPolicies(t *testing.T) {
 	}
 }
 
-func TestContextPreservesNumbersAndAliases(t *testing.T) {
+func TestContextPreservesNumbersAndCanonicalOutput(t *testing.T) {
 	raw, err := mergeContext(json.RawMessage(`{"id":9007199254740993,"nested":{"a":1}}`), json.RawMessage(`{"nested":{"b":2}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestContextPreservesNumbersAndAliases(t *testing.T) {
 	if string(obj["id"]) != "9007199254740993" || string(obj["nested"]) != `{"b":2}` {
 		t.Fatalf("context changed: %s", raw)
 	}
-	resolved, err := resolveConfig(json.RawMessage(`{"body":"{{payment.compensation.output}}","original":"{{original.output}}"}`), raw, json.RawMessage(`{"id":123}`), true)
+	resolved, err := resolveConfig(json.RawMessage(`{"body":"{{steps.payment.compensation.output}}","original":"{{this.output}}"}`), raw, json.RawMessage(`{"id":123}`), true)
 	if err != nil || !json.Valid(resolved) {
 		t.Fatalf("resolve: %s %v", resolved, err)
 	}
@@ -178,4 +178,3 @@ func TestReconcileSkippedSteps(t *testing.T) {
 		t.Fatalf("expected step a compensation to be PENDING, got %s", rollNext[3].Status)
 	}
 }
-

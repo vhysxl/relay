@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
 )
 
 type Repository interface {
@@ -15,11 +14,6 @@ type Repository interface {
 	CompleteTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
 	FailTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
 	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
-
-	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }
 
 type ClaimRequest struct {
@@ -31,7 +25,6 @@ type ClaimRequest struct {
 }
 
 type ClaimTaskResponse struct {
-	StepExecutionID     string          `json:"step_execution_id"`
 	TaskID              string          `json:"task_id"`
 	WorkflowExecutionID string          `json:"workflow_execution_id"`
 	StepID              string          `json:"step_id"`
@@ -92,10 +85,4 @@ type WorkerLogic interface {
 	FailTask(ctx context.Context, serviceID, taskID string, req FailRequest) (*FailResponse, error)
 	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
 	NotifyQueue(queue string)
-
-	ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error
-	StartHeartbeat(ctx context.Context, stepExecutionID string, workerID string, interval time.Duration) (stop func(), errChan <-chan error)
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }

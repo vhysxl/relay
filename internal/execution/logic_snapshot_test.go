@@ -49,8 +49,8 @@ func (r snapshotReader) GetWorkflowVersion(_ context.Context, name string, _ int
 
 func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 	wf := &workflow.Workflow{ID: "wf-id", Context: json.RawMessage(`{"tier":"diamond","nested":{"base":true}}`), Steps: []step.Step{
-		{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"/{{tier}}"}`), Compensation: &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{}`), Timeout: 7, Retry: &step.RetryPolicy{MaxAttempts: 4, Backoff: 2, Multiplier: 2}}},
-		{ID: "checkout", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"user"}},
+		{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders","url":"/{{tier}}"}`), Compensation: &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{"queue":"orders"}`), Timeout: 7, Retry: &step.RetryPolicy{MaxAttempts: 4, Backoff: 2, Multiplier: 2}}},
+		{ID: "checkout", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`), DependsOn: []string{"user"}},
 	}}
 	called := false
 	logic := NewExecutionLogic(snapshotRepository{create: func(exec *WorkflowExecution) error {
@@ -62,7 +62,7 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 			t.Fatalf("steps: %+v", exec.Steps)
 		}
 		normal, comp, dependent := exec.Steps[0], exec.Steps[1], exec.Steps[2]
-		if normal.Status != StatusPending || normal.MaxAttempts != 1 || normal.Multiplier != 1 || string(normal.Config) != `{"url":"/diamond"}` {
+		if normal.Status != StatusPending || normal.MaxAttempts != 1 || normal.Multiplier != 1 || string(normal.Config) != `{"queue":"orders","url":"/diamond"}` {
 			t.Fatalf("normal: %+v", normal)
 		}
 		if !comp.IsCompensation || comp.Status != StatusWaiting || comp.Type != "message" || comp.TimeoutSeconds != 7 || comp.MaxAttempts != 4 || len(comp.DependsOn) != 1 || comp.DependsOn[0] != "checkout" {
@@ -94,7 +94,7 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 	if err != nil || !called {
 		t.Fatalf("execute: %v", err)
 	}
-	if wf.Steps[1].DependsOn[0] != "user" || string(wf.Steps[0].Config) != `{"url":"/{{tier}}"}` {
+	if wf.Steps[1].DependsOn[0] != "user" || string(wf.Steps[0].Config) != `{"queue":"orders","url":"/{{tier}}"}` {
 		t.Fatal("mutated workflow definition")
 	}
 }

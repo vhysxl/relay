@@ -88,7 +88,7 @@ func TestWorkflowLogic_CreateWorkflow_Success(t *testing.T) {
 	validStep := step.Step{
 		ID:     "step-1",
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	// Test success & defaults
@@ -122,12 +122,12 @@ func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 			{
 				ID:        "step-2",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
+				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/payment"}`),
 				DependsOn: []string{"step-1"},
 			},
 		},
@@ -175,7 +175,7 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 		},
 	})
@@ -215,7 +215,7 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 			{
 				ID:        "step-1",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{}`),
+				Config:    json.RawMessage(`{"queue":"orders"}`),
 				DependsOn: []string{"step-1"}, // Self dependency
 			},
 		},
@@ -242,11 +242,11 @@ func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.
 			{
 				ID:           "step-1",
 				Type:         step.StepTypeHTTP,
-				Config:       json.RawMessage(`{}`),
+				Config:       json.RawMessage(`{"queue":"orders"}`),
 				Irreversible: true,
 				Compensation: &step.Compensation{
 					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{}`),
+					Config: json.RawMessage(`{"queue":"orders"}`),
 				},
 			},
 		},
@@ -284,8 +284,8 @@ func TestWorkflowHandler_CreateWorkflow_Validation(t *testing.T) {
 		Name:    "cyclic-flow",
 		Version: 1,
 		Steps: []step.Step{
-			{ID: "step-a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"step-b"}},
-			{ID: "step-b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"step-a"}},
+			{ID: "step-a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`), DependsOn: []string{"step-b"}},
+			{ID: "step-b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`), DependsOn: []string{"step-a"}},
 		},
 	})
 	req = httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
@@ -307,7 +307,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 				ID:         "step-1",
 				WorkflowID: "test-uuid-1234",
 				Type:       step.StepTypeHTTP,
-				Config:     json.RawMessage(`{"url":"https://example.test","body":{"amount":100}}`),
+				Config:     json.RawMessage(`{"queue":"orders","url":"https://example.test","body":{"amount":100}}`),
 			},
 		},
 	}
@@ -387,12 +387,12 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 			{
 				ID:        "step-2",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
+				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/payment"}`),
 				DependsOn: []string{"step-1"},
 			},
 		},
@@ -422,12 +422,12 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 			{
 				ID:        "step-2",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
+				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/payment"}`),
 				DependsOn: []string{"step-1"},
 			},
 		},
@@ -457,7 +457,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 		},
 	}
@@ -486,7 +486,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 		},
 	})
@@ -514,7 +514,7 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 		},
 	}
@@ -542,12 +542,12 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 			},
 			{
 				ID:        "step-2",
 				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
+				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/payment"}`),
 				DependsOn: []string{"step-1"},
 			},
 		},
@@ -573,7 +573,7 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/v1"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/v1"}`),
 			},
 		},
 	}
@@ -600,7 +600,7 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 			{
 				ID:     "step-1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/v2"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/v2"}`),
 			},
 		},
 	})
@@ -769,7 +769,7 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryIdempotent(t *testing.T
 	validStep := step.Step{
 		ID:     "step-1",
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	concurrentlyCreatedWf := &workflow.Workflow{
@@ -827,13 +827,13 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryAutoIncrement(t *testin
 	validStep := step.Step{
 		ID:     "step-1",
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	differentStep := step.Step{
 		ID:     "step-different",
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/other"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/other"}`),
 	}
 
 	concurrentlyCreatedWf := &workflow.Workflow{
@@ -902,7 +902,7 @@ func TestWorkflowLogic_ConcurrentRetryLimit(t *testing.T) {
 	validStep := step.Step{
 		ID:     "step-1",
 		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	_, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -936,7 +936,7 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 			{
 				ID:     "s1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	}
@@ -958,7 +958,7 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 			{
 				ID:     "s1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	}
@@ -1010,7 +1010,7 @@ func TestWorkflowHandler_CreateWorkflow_InternalServerError(t *testing.T) {
 			{
 				ID:     "s1",
 				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				Config: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	})
@@ -1385,14 +1385,14 @@ func TestWorkflowLogic_VersionHistoryAndChanges(t *testing.T) {
 		Name:    "order-flow",
 		Version: 1,
 		Context: json.RawMessage(`{"region":"US"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://v1"}`)}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders","url":"https://v1"}`)}},
 	}
 	wfV3 := &workflow.Workflow{
 		ID:      "id-3",
 		Name:    "order-flow",
 		Version: 3, // Notice gap: v1 then v3
 		Context: json.RawMessage(`{"region":"EU"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://v3"}`)}},
+		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders","url":"https://v3"}`)}},
 	}
 
 	repo := &mockRepository{

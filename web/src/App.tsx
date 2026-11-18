@@ -30,11 +30,6 @@ export const App: React.FC = () => {
   const [selectedWorkflowName, setSelectedWorkflowName] = useState<string | null>(null)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
 
-  // Clear any legacy mock mode preference
-  useEffect(() => {
-    localStorage.removeItem('relay_mock_mode')
-  }, [])
-
   // Fetch real-time system metrics (CPU, RAM, Goroutines)
   const fetchSystemMetrics = useCallback(async () => {
     try {
@@ -84,15 +79,6 @@ export const App: React.FC = () => {
       setCurrentView('execution-detail')
     } else if (hash.startsWith('workflows/')) {
       const raw = hash.replace('workflows/', '')
-      try {
-        setSelectedWorkflowName(decodeURIComponent(raw))
-      } catch {
-        setSelectedWorkflowName(raw)
-      }
-      setSelectedExecutionId(null)
-      setCurrentView('workflow-detail')
-    } else if (hash.startsWith('workflow/')) {
-      const raw = hash.replace('workflow/', '')
       try {
         setSelectedWorkflowName(decodeURIComponent(raw))
       } catch {

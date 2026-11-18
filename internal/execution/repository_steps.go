@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 const stepColumns = `id, workflow_execution_id, step_id, name, type, config, task_queue, activity_name, depends_on,
@@ -16,20 +18,18 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanStep(row rowScanner) (StepExecution, error) {
 	var s StepExecution
-	var name, deps, output, message, owner, condStr, condEvalStr, taskQueue, activityName sql.NullString
+	var name, deps, output, message, owner, condStr, condEvalStr, activityName sql.NullString
 	var config string
 	var until, executed, retry sql.NullTime
-	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &taskQueue, &activityName, &deps,
+	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &s.TaskQueue, &activityName, &deps,
 		&s.Status, &output, &message, &s.Attempt, &s.MaxAttempts, &s.TimeoutSeconds, &s.BackoffSeconds,
 		&s.Multiplier, &s.MaxBackoffSeconds, &owner, &until, &s.IsCompensation, &condStr, &condEvalStr, &executed, &retry, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
 	s.Name, s.Config = name.String, json.RawMessage(config)
-	if taskQueue.Valid && taskQueue.String != "" {
-		s.TaskQueue = taskQueue.String
-	} else {
-		s.TaskQueue = "legacy"
+	if err := util.ValidateQueueName(s.TaskQueue); err != nil {
+		return s, err
 	}
 	if activityName.Valid && activityName.String != "" {
 		s.ActivityName = &activityName.String

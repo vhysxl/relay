@@ -217,7 +217,7 @@ export const ExecutionStepNode: React.FC<ExecutionStepNodeProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {step.condition_evaluation.checks.map((c: any, i: number) => (
                       <tr key={i} className="text-slate-700">
-                        <td className="py-1 pr-2 text-indigo-700 font-semibold">{c.ref || c.anchor}</td>
+                        <td className="py-1 pr-2 text-indigo-700 font-semibold">{c.ref}</td>
                         <td className="py-1 px-2 font-bold">{c.op}</td>
                         <td className="py-1 px-2 text-slate-600">
                           {c.expected !== undefined ? JSON.stringify(c.expected) : '—'}

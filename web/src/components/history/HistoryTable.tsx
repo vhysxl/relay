@@ -64,12 +64,10 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               </tr>
             ) : (
               executions.map((item) => {
-                let execType = 'http'
+                let execType = '—'
                 if (item.steps && item.steps.length > 0) {
                   const distinct = [...new Set(item.steps.map((s) => s.type).filter(Boolean))]
                   if (distinct.length > 0) execType = distinct.join(', ')
-                } else if (item.type && item.type !== 'execution') {
-                  execType = item.type
                 }
 
                 const startedAt = formatTimestamp(item.created_at)
@@ -82,7 +80,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                 ].includes(item.status)
                 const isFailed = item.status === 'FAILED' || item.status === 'COMPENSATION_FAILED'
 
-                const displayName = item.workflow_name || item.name || ''
+                const displayName = item.workflow_name || item.workflow_id
 
                 return (
                   <tr

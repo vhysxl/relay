@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/vhysxl/relay/internal/condition"
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
 	"github.com/vhysxl/relay/pkg/util"
 )
@@ -22,33 +21,6 @@ func (r *executionRepository) leaseSeconds(duration time.Duration) int64 {
 	}
 	// TIMESTAMP stores whole seconds. Round up rather than granting a zero lease.
 	return int64((duration-1)/time.Second) + 1
-}
-
-func (r *executionRepository) Heartbeat(ctx context.Context, id, worker string, duration time.Duration) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE step_executions
-		SET locked_until = DATE_ADD(NOW(3), INTERVAL ? SECOND), updated_at = NOW(3)
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3)`, r.leaseSeconds(duration), id, worker)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n > 0 {
-		return nil
-	}
-	// Support DSNs without clientFoundRows when a same-second heartbeat is a no-op.
-	var exists bool
-	err = r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM step_executions
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3))`, id, worker).Scan(&exists)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return errdefs.ErrLockLost
-	}
-	return nil
 }
 
 func (r *executionRepository) HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
@@ -113,12 +85,8 @@ func buildRoutingClause(prefix string, filter ClaimFilter) (string, []any) {
 	var clauses []string
 	var args []any
 
-	q := filter.Queue
-	if q == "" {
-		q = "legacy"
-	}
 	clauses = append(clauses, prefix+"task_queue = ?")
-	args = append(args, q)
+	args = append(args, filter.Queue)
 
 	execTypes := filter.ExecutorTypes
 	if len(execTypes) == 0 {
@@ -163,9 +131,13 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 	}
 	serviceID := strings.TrimSpace(filter.ServiceID)
 	if serviceID == "" {
-		serviceID = "default"
+		return nil, errdefs.ErrUnauthorized
 	}
 
+	filter.Queue = strings.TrimSpace(filter.Queue)
+	if err := util.ValidateQueueName(filter.Queue); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return nil, err
@@ -318,7 +290,7 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 
 	timeoutSec := s.TimeoutSeconds
 	if timeoutSec <= 0 && filter.DefaultTimeout > 0 {
-		timeoutSec = int((filter.DefaultTimeout - 1) / time.Second) + 1
+		timeoutSec = int((filter.DefaultTimeout-1)/time.Second) + 1
 	}
 	if timeoutSec <= 0 {
 		timeoutSec = 15
@@ -373,31 +345,11 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 		return nil, err
 	}
 
-	definition := &step.Step{ID: s.StepID, WorkflowID: workflowID, Name: s.Name, Type: step.StepType(s.Type), Config: s.Config,
-		DependsOn: s.DependsOn, Timeout: s.TimeoutSeconds, CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
-		Retry: &step.RetryPolicy{MaxAttempts: s.MaxAttempts, Backoff: s.BackoffSeconds, Multiplier: s.Multiplier, MaxBackoff: s.MaxBackoffSeconds}}
-
 	return &ClaimResult{
-		StepDefinition: definition,
 		StepExecution:  &s,
 		LeaseToken:     leaseToken,
 		LeaseDuration:  time.Duration(leaseSec) * time.Second,
 		LeaseExpiresAt: lockedUntil,
 		Deadline:       deadline,
 	}, nil
-}
-
-// ClaimPending maintains backward compatibility with internal worker pool and existing tests.
-func (r *executionRepository) ClaimPending(ctx context.Context, worker string, duration time.Duration) (*step.Step, *StepExecution, error) {
-	res, err := r.ClaimTask(ctx, ClaimFilter{
-		ServiceID:     "legacy",
-		WorkerID:      worker,
-		Queue:         "legacy",
-		ExecutorTypes: []string{"http", "message", "activity"},
-		LeaseDuration: duration,
-	})
-	if err != nil || res == nil {
-		return nil, nil, err
-	}
-	return res.StepDefinition, res.StepExecution, nil
 }

@@ -90,15 +90,6 @@ func accumulateOutput(raw json.RawMessage, s StepExecution, output json.RawMessa
 			return nil, err
 		}
 	} else {
-		var aliases map[string]json.RawMessage
-		// Output may also be an array, scalar, or null.
-		if json.Unmarshal(output, &aliases) == nil {
-			for k, v := range aliases {
-				if k != "output" {
-					entry[k] = v
-				}
-			}
-		}
 		entry["output"] = output
 	}
 	encoded, err := json.Marshal(entry)
@@ -106,8 +97,6 @@ func accumulateOutput(raw json.RawMessage, s StepExecution, output json.RawMessa
 		return nil, err
 	}
 	steps[s.StepID] = encoded
-	// Keep the root alias synchronized after normal and compensation output.
-	obj[s.StepID] = encoded
 	obj["steps"], err = json.Marshal(steps)
 	if err != nil {
 		return nil, err
@@ -121,15 +110,10 @@ func resolveConfig(raw, context, original json.RawMessage, compensation bool) (j
 		return nil, err
 	}
 	if compensation && len(original) > 0 {
-		var aliases map[string]json.RawMessage
 		if !json.Valid(original) {
 			return nil, errdefs.ErrInvalidStepOutput
 		}
-		if json.Unmarshal(original, &aliases) != nil || aliases == nil {
-			aliases = make(map[string]json.RawMessage)
-		}
-		aliases["output"] = original
-		obj["original"], err = json.Marshal(aliases)
+		obj["this"], err = json.Marshal(map[string]json.RawMessage{"output": original})
 		if err != nil {
 			return nil, err
 		}

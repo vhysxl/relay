@@ -46,7 +46,7 @@ type RetryPolicy struct {
 }
 
 type HTTPConfig struct {
-	Queue   string            `json:"queue,omitempty"`   // Routing queue target (default: "legacy")
+	Queue   string            `json:"queue"`             // Required routing queue target
 	Method  string            `json:"method"`            // "GET", "POST", "PUT", dll.
 	URL     string            `json:"url"`               // Endpoint target
 	Headers map[string]string `json:"headers,omitempty"` // Header kustom seperti Authorization
@@ -54,7 +54,7 @@ type HTTPConfig struct {
 }
 
 type RabbitMQConfig struct {
-	Queue       string          `json:"queue,omitempty"`       // Routing queue target (default: "legacy")
+	Queue       string          `json:"queue"`                  // Required routing queue target
 	Exchange    string          `json:"exchange"`               // Nama exchange
 	RoutingKey  string          `json:"routing_key"`            // Routing key / Queue tujuan
 	ContentType string          `json:"content_type,omitempty"` // Default: "application/json"

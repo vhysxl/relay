@@ -87,7 +87,10 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	exec.Steps = snapshotSteps(exec.ID, wf.Steps, merged, now)
+	exec.Steps, err = snapshotSteps(exec.ID, wf.Steps, merged, now)
+	if err != nil {
+		return nil, false, err
+	}
 
 	receipt := ExecuteWorkflowResponse{
 		ID:         exec.ID,

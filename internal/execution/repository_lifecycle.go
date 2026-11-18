@@ -20,72 +20,6 @@ func lockWorkflow(ctx context.Context, tx *sql.Tx, id string) (WorkflowStatus, j
 	return status, json.RawMessage(raw.String), err
 }
 
-// Read the immutable parent ID first, then always acquire workflow before step.
-// Claim, completion, failure, and recovery use the same lock order.
-func (r *executionRepository) ownedStepTx(ctx context.Context, tx *sql.Tx, id, worker string) (StepExecution, WorkflowStatus, json.RawMessage, error) {
-	var execID string
-	err := tx.QueryRowContext(ctx, `SELECT workflow_execution_id FROM step_executions WHERE id = ?`, id).Scan(&execID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return StepExecution{}, "", nil, errdefs.ErrLockLost
-	}
-	if err != nil {
-		return StepExecution{}, "", nil, err
-	}
-	status, raw, err := lockWorkflow(ctx, tx, execID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return StepExecution{}, "", nil, errdefs.ErrLockLost
-	}
-	if err != nil {
-		return StepExecution{}, "", nil, err
-	}
-	s, err := scanStep(tx.QueryRowContext(ctx, `SELECT `+stepColumns+` FROM step_executions
-		WHERE id = ? AND locked_by = ? AND status = 'RUNNING' AND locked_until > NOW(3) FOR UPDATE`, id, worker))
-	if errors.Is(err, sql.ErrNoRows) {
-		err = errdefs.ErrLockLost
-	}
-	return s, status, raw, err
-}
-
-func (r *executionRepository) CompleteStep(ctx context.Context, id, worker string, output json.RawMessage) error {
-	output = bytes.TrimSpace(output)
-	if len(output) == 0 || bytes.Equal(output, []byte("null")) {
-		output = json.RawMessage(`{}`)
-	}
-	if !json.Valid(output) {
-		return errdefs.ErrInvalidStepOutput
-	}
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	s, status, raw, err := r.ownedStepTx(ctx, tx, id, worker)
-	if err != nil {
-		return err
-	}
-	next := StatusCompleted
-	if s.IsCompensation {
-		next = StatusCompensated
-	}
-	merged, err := accumulateOutput(raw, s, output)
-	if err != nil {
-		return fmt.Errorf("accumulate output: %w", err)
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE step_executions SET status = ?, output = ?,
-		locked_by = NULL, locked_until = NULL, next_retry_at = NULL, updated_at = NOW(3) WHERE id = ?`, next, string(output), id)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE workflow_executions SET context = ?, updated_at = NOW(3) WHERE id = ?`, string(merged), s.WorkflowExecutionID)
-	if err != nil {
-		return err
-	}
-	if err := reconcileTx(ctx, tx, s.WorkflowExecutionID, status); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func (r *executionRepository) GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error) {
 	var queue string
 	err := r.db.QueryRowContext(ctx, `SELECT task_queue FROM step_executions WHERE id = ?`, stepExecID).Scan(&queue)
@@ -370,25 +304,6 @@ func (r *executionRepository) FailTask(ctx context.Context, serviceID, stepExecI
 		return err
 	}
 
-	if err := reconcileTx(ctx, tx, s.WorkflowExecutionID, status); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func (r *executionRepository) FailStep(ctx context.Context, id, worker, message string) error {
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	s, status, _, err := r.ownedStepTx(ctx, tx, id, worker)
-	if err != nil {
-		return err
-	}
-	if err := recordFailureTx(ctx, tx, s, status, message); err != nil {
-		return err
-	}
 	if err := reconcileTx(ctx, tx, s.WorkflowExecutionID, status); err != nil {
 		return err
 	}

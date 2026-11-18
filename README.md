@@ -103,6 +103,7 @@ Setiap elemen dalam array `steps` memiliki spesifikasi sebagai berikut:
 {
   "type": "http",
   "config": {
+    "queue": "orders",
     "method": "POST",
     "url": "https://payment.internal/refund",
     "body": { "reason": "saga_rollback" }
@@ -119,7 +120,7 @@ Setiap elemen dalam array `steps` memiliki spesifikasi sebagai berikut:
 
 ### 1.3 Konfigurasi Tipe Step (HTTP, Message & Activity)
 
-Seluruh tipe dieksekusi oleh external worker. Field `config.queue` menentukan task queue Relay, bukan nama antrean RabbitMQ. Untuk `http` dan `message`, queue yang tidak diisi menggunakan `legacy`. Nama queue/activity menggunakan karakter `A-Z`, `a-z`, `0-9`, `.`, `_`, atau `-`, dengan panjang 1–128 karakter.
+Seluruh tipe dieksekusi oleh external worker. Field `config.queue` menentukan task queue Relay, bukan nama antrean RabbitMQ. `config.queue` wajib diisi untuk semua tipe step dan kompensasi; tidak ada default queue. Nama queue/activity menggunakan karakter `A-Z`, `a-z`, `0-9`, `.`, `_`, atau `-`, dengan panjang 1–128 karakter.
 
 #### Tipe 1: HTTP Step (`type: "http"`)
 Digunakan untuk memanggil REST API atau web service eksternal.
@@ -130,6 +131,7 @@ Digunakan untuk memanggil REST API atau web service eksternal.
   "name": "Charge Credit Card",
   "type": "http",
   "config": {
+    "queue": "orders",
     "method": "POST",
     "url": "https://api.payment.com/v1/charge",
     "headers": {
@@ -153,6 +155,7 @@ Digunakan untuk menerbitkan event asinkron ke antrean/exchange message broker Ra
   "name": "Notify Warehouse System",
   "type": "message",
   "config": {
+    "queue": "orders",
     "exchange": "logistics_topic",
     "routing_key": "warehouse.orders.prepare",
     "content_type": "application/json",
@@ -204,6 +207,7 @@ Sebagai gantinya, gunakan placeholder template:
   "name": "Validate Cart Items",
   "type": "http",
   "config": {
+    "queue": "orders",
     "method": "POST",
     "url": "http://cart-service.internal/carts/{{context.cart_id}}/validate",
     "headers": {
@@ -283,6 +287,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "name": "Validate Cart Items",
       "type": "http",
       "config": {
+        "queue": "orders",
         "method": "POST",
         "url": "http://cart-service.internal/validate",
         "body": { "cart_id": "CART-12345" }
@@ -295,6 +300,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "type": "http",
       "depends_on": ["validate-cart"],
       "config": {
+        "queue": "orders",
         "method": "POST",
         "url": "http://inventory.internal/reserve",
         "body": { "item_id": "VOUCHER-100K", "qty": 1 }
@@ -306,6 +312,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "compensation": {
         "type": "http",
         "config": {
+          "queue": "orders",
           "method": "POST",
           "url": "http://inventory.internal/release",
           "body": { "item_id": "VOUCHER-100K", "qty": 1 }
@@ -318,6 +325,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "type": "http",
       "depends_on": ["reserve-inventory"],
       "config": {
+        "queue": "orders",
         "method": "POST",
         "url": "http://payment.internal/charge",
         "body": { "amount": 100000, "method": "EWALLET" }
@@ -330,6 +338,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "compensation": {
         "type": "http",
         "config": {
+          "queue": "orders",
           "method": "POST",
           "url": "http://payment.internal/refund",
           "body": { "reason": "saga_failure" }
@@ -342,6 +351,7 @@ Berikut adalah contoh lengkap definisi alur **Checkout Saga**:
       "type": "http",
       "depends_on": ["charge-payment"],
       "config": {
+        "queue": "orders",
         "method": "POST",
         "url": "http://voucher-engine.internal/issue",
         "body": { "voucher_code": "DISC100K" }
@@ -510,7 +520,7 @@ Dipanggil oleh client service (misal NestJS Checkout Service) saat ada permintaa
 - Key berlaku dalam scope **nama workflow logis** lintas versi.
 - Response mengembalikan status `201 Created` dengan header `Idempotency-Replayed: false` untuk eksekusi baru dan `Idempotency-Replayed: true` untuk replay permintaan yang identik.
 - Jika key yang sama dikirimkan dengan input context berbeda, endpoint mengembalikan `409 Conflict`. Replay dengan key dan input context yang sama pada nama workflow yang sama akan selalu mengembalikan receipt awal meskipun versi baru workflow telah dibuat.
-- Request body `raw-context` maupun `wrapped-context` (`{"context": {...}}`) yang menghasilkan context sama dianggap setara. Context kosong, `null`, dan body kosong dinormalisasi menjadi `{}`.
+- Request body memakai envelope `{"context": {...}, "workflow_version": 1}`. Field top-level lain ditolak dengan `400 Bad Request`. `context` dan `workflow_version` opsional; body kosong, `null`, `{}`, dan context null memakai context kosong. Versi eksplisit wajib integer positif.
 - Untuk memilih versi tertentu, gunakan wrapper `{"workflow_version": 2, "context": {...}}`. Jika versi tidak ditentukan, execution baru memakai versi terbaru. Replay dengan versi eksplisit yang berbeda dari target awal menghasilkan `409 Conflict`.
 
 - **Request (Memanggil langsung dengan Nama Workflow):**
@@ -875,7 +885,7 @@ Content-Type: application/json
 }
 ```
 
-- `worker_id` wajib nonkosong. Queue kosong memakai `legacy` dan tetap diperiksa terhadap izin service.
+- `worker_id` dan `queue` wajib nonkosong. Queue kosong atau tidak valid menghasilkan `400 BAD_REQUEST` sebelum pemeriksaan izin queue.
 - `executor_types` kosong memakai filter backend `http`, `message`, `activity`. Kirim daftar eksplisit sesuai kemampuan worker.
 - **Activity hanya bisa diambil jika namanya ada di `activities`.** Daftar kosong tidak berarti semua activity.
 - `wait_timeout_ms` tidak diisi memakai default 25.000 ms, dibatasi konfigurasi backend. Nilai `0` berarti satu percobaan langsung; nilai negatif atau melebihi batas menghasilkan `400`.
@@ -885,7 +895,6 @@ Contoh response `200 OK` (UUID, waktu, dan token hanya ilustrasi):
 
 ```json
 {
-  "step_execution_id": "2f6928f7-31cd-47bb-a5b1-980c1ff9914d",
   "task_id": "2f6928f7-31cd-47bb-a5b1-980c1ff9914d",
   "workflow_execution_id": "afd70011-56d5-45f6-a590-bf514bf2091d",
   "step_id": "reserve-stock",
@@ -908,7 +917,7 @@ Contoh response `200 OK` (UUID, waktu, dan token hanya ilustrasi):
 }
 ```
 
-`task_id` dan `step_execution_id` bernilai sama. Gunakan salah satunya sebagai `{id}` pada endpoint task. `payload` adalah **seluruh config yang sudah diinterpolasi backend**, bukan hanya `input`. Worker tidak perlu mengambil definisi workflow atau mengevaluasi ulang `when`.
+Gunakan `task_id` sebagai `{id}` pada endpoint task. `payload` adalah **seluruh config yang sudah diinterpolasi backend**, bukan hanya `input`. Worker tidak perlu mengambil definisi workflow atau mengevaluasi ulang `when`.
 
 #### Heartbeat
 
@@ -951,7 +960,7 @@ Content-Type: application/json
 }
 ```
 
-Response `200 OK`: `{"accepted": true}`. Output kosong atau `null` dinormalisasi backend menjadi `{}`. Output normal tersedia bagi step berikutnya melalui `steps.<step_id>.output`, misalnya `{{steps.reserve-stock.output.reservation_id}}`.
+Response `200 OK`: `{"accepted": true}`. Output kosong atau `null` dinormalisasi backend menjadi `{}`. Output normal tersedia hanya melalui `steps.<step_id>.output`, misalnya `{{steps.reserve-stock.output.reservation_id}}`.
 
 #### Fail
 
@@ -1020,7 +1029,7 @@ type ActivityHandler = (input: Json, ctx: ActivityContext) => Promise<Json>;
 type ActivityRegistry = Record<string, ActivityHandler>;
 ```
 
-Activity registry mengiklankan seluruh handler normal **dan kompensasi** yang mampu dijalankan. Kompensasi diterima sebagai task biasa dengan `is_compensation: true`, payload kompensasi, dan lease sendiri. Pada definisi kompensasi, `{{original.output.reservation_id}}` dapat merujuk output step normal; backend sudah me-resolve nilainya sebelum claim.
+Activity registry mengiklankan seluruh handler normal **dan kompensasi** yang mampu dijalankan. Kompensasi diterima sebagai task biasa dengan `is_compensation: true`, payload kompensasi, dan lease sendiri. Pada definisi kompensasi, `{{this.output.reservation_id}}` merujuk output step normal yang sedang dikompensasi; backend sudah me-resolve nilainya sebelum claim.
 
 Efek bisnis dapat terulang setelah crash atau lease expiry, tergantung retry policy. Gunakan `task_id` sebagai dasar idempotency key yang stabil lintas attempt; jangan memasukkan `attempt` untuk operasi bisnis yang sama. Task kompensasi mempunyai ID terpisah. Jika target menggunakan key bisnis seperti `order_id`, koordinasikan scope key tersebut dengan kontrak target.
 
@@ -1181,7 +1190,7 @@ curl -X POST http://localhost:8000/workflows \
         "config": {
           "queue": "orders",
           "activity": "inventory.release",
-          "input": { "reservation_id": "{{original.output.reservation_id}}" }
+          "input": { "reservation_id": "{{this.output.reservation_id}}" }
         }
       }
     }]
@@ -1229,3 +1238,9 @@ Detail execution mengekspos riwayat attempt seperti `service_id`, `worker_id`, w
 - Pengujian transport memakai fake server; pengujian lifecycle dan konkurensi memakai backend Relay serta database tes terisolasi.
 
 Referensi implementasi backend: [`internal/worker/model.go`](internal/worker/model.go), [`internal/worker/handler.go`](internal/worker/handler.go), [`internal/worker/logic.go`](internal/worker/logic.go), [`internal/execution/repository_lease.go`](internal/execution/repository_lease.go), dan [`internal/execution/repository_lifecycle.go`](internal/execution/repository_lifecycle.go).
+
+### Breaking contract cleanup
+
+Queue harus eksplisit pada definisi normal, kompensasi, dan request claim. Bentuk execute raw-context, alias output root step, namespace kompensasi `original`, serta alias claim `step_execution_id` sudah dihapus. Gunakan `steps.<id>.output`, `this.output`, dan `task_id`.
+
+Migrasi `000009` menghapus default `step_executions.task_queue` tanpa mengubah data lama. Selesaikan execution yang memakai kontrak lama sebelum cutover engine, SDK, dan definisi workflow baru. Tidak ada konversi otomatis workflow atau data.
