@@ -15,17 +15,9 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-func (r *executionRepository) leaseSeconds(duration time.Duration) int64 {
-	if duration <= 0 {
-		duration = r.defaultLeaseDuration
-	}
-	// TIMESTAMP stores whole seconds. Round up rather than granting a zero lease.
-	return int64((duration-1)/time.Second) + 1
-}
-
 func (r *executionRepository) HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
 	tokenHash := util.HashLeaseToken(leaseToken)
-	leaseSec := r.leaseSeconds(duration)
+	leaseSec := util.DurationSeconds(duration)
 
 	res, err := r.db.ExecContext(ctx, `UPDATE step_executions s
 		JOIN step_execution_attempts a ON s.id = a.step_execution_id AND s.attempt = a.attempt
@@ -81,48 +73,6 @@ func (r *executionRepository) HeartbeatTask(ctx context.Context, serviceID, step
 	return lockedUntil.Time, time.Duration(leaseSec) * time.Second, nil
 }
 
-func buildRoutingClause(prefix string, filter ClaimFilter) (string, []any) {
-	var clauses []string
-	var args []any
-
-	clauses = append(clauses, prefix+"task_queue = ?")
-	args = append(args, filter.Queue)
-
-	execTypes := filter.ExecutorTypes
-	if len(execTypes) == 0 {
-		execTypes = []string{"http", "message", "activity"}
-	}
-	typePlaceholders := make([]string, len(execTypes))
-	for i, t := range execTypes {
-		typePlaceholders[i] = "?"
-		args = append(args, t)
-	}
-	clauses = append(clauses, fmt.Sprintf("%stype IN (%s)", prefix, strings.Join(typePlaceholders, ",")))
-
-	hasActivity := false
-	for _, t := range execTypes {
-		if t == "activity" {
-			hasActivity = true
-			break
-		}
-	}
-
-	if hasActivity {
-		if len(filter.Activities) > 0 {
-			actPlaceholders := make([]string, len(filter.Activities))
-			for i, a := range filter.Activities {
-				actPlaceholders[i] = "?"
-				args = append(args, a)
-			}
-			clauses = append(clauses, fmt.Sprintf("(%stype != 'activity' OR %sactivity_name IN (%s))", prefix, prefix, strings.Join(actPlaceholders, ",")))
-		} else {
-			clauses = append(clauses, fmt.Sprintf("%stype != 'activity'", prefix))
-		}
-	}
-
-	return strings.Join(clauses, " AND "), args
-}
-
 // ClaimTask claims the next runnable step matching the worker's routing filter.
 func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter) (*ClaimResult, error) {
 	worker := strings.TrimSpace(filter.WorkerID)
@@ -144,23 +94,21 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 	}
 	defer tx.Rollback()
 
-	routingClause, routingArgs := buildRoutingClause("se.", filter)
-
-	var execID, workflowID string
+	var execID string
 	var status WorkflowStatus
 	var raw sql.NullString
-	wfQuery := fmt.Sprintf(`SELECT we.id, we.workflow_id, we.status, we.context
+	wfQuery := `SELECT we.id, we.status, we.context
  FROM workflow_executions we WHERE we.status IN ('RUNNING','COMPENSATING')
  AND EXISTS (SELECT 1 FROM step_executions se WHERE se.workflow_execution_id=we.id
-   AND %s
+   AND se.queue = ?
    AND se.status='PENDING' AND (se.next_retry_at IS NULL OR se.next_retry_at<=NOW(3))
    AND (se.locked_until IS NULL OR se.locked_until<=NOW(3))
    AND ((we.status='RUNNING' AND se.is_compensation=FALSE)
      OR (we.status='COMPENSATING' AND se.is_compensation=TRUE)))
  ORDER BY CASE WHEN we.status='COMPENSATING' THEN 0 ELSE 1 END, we.created_at, we.id
- LIMIT 1 FOR UPDATE SKIP LOCKED`, routingClause)
+ LIMIT 1 FOR UPDATE SKIP LOCKED`
 
-	err = tx.QueryRowContext(ctx, wfQuery, routingArgs...).Scan(&execID, &workflowID, &status, &raw)
+	err = tx.QueryRowContext(ctx, wfQuery, filter.Queue).Scan(&execID, &status, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -174,19 +122,12 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 		}
 	}
 
-	stepRoutingClause, stepRoutingArgs := buildRoutingClause("", filter)
-	var stepArgs []any
-	stepArgs = append(stepArgs, execID, status == StatusCompensating)
-	stepArgs = append(stepArgs, stepRoutingArgs...)
+	stepQuery := "SELECT " + stepColumns + ` FROM step_executions
+ WHERE workflow_execution_id=? AND is_compensation=? AND queue=? AND status='PENDING'
+ AND (next_retry_at IS NULL OR next_retry_at<=NOW(3)) AND (locked_until IS NULL OR locked_until<=NOW(3))
+ ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
 
-	stepQuery := fmt.Sprintf(`SELECT `+stepColumns+` FROM step_executions
- WHERE workflow_execution_id=? AND is_compensation=?
-   AND %s
-   AND status='PENDING'
-   AND (next_retry_at IS NULL OR next_retry_at<=NOW(3)) AND (locked_until IS NULL OR locked_until<=NOW(3))
- ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`, stepRoutingClause)
-
-	s, err := scanStep(tx.QueryRowContext(ctx, stepQuery, stepArgs...))
+	s, err := scanStep(tx.QueryRowContext(ctx, stepQuery, execID, status == StatusCompensating, filter.Queue))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
@@ -273,7 +214,7 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 		}
 	}
 
-	resolved, err := resolveConfig(s.Config, json.RawMessage(raw.String), json.RawMessage(original.String), s.IsCompensation)
+	resolved, err := resolveInput(s.Input, json.RawMessage(raw.String), json.RawMessage(original.String), s.IsCompensation)
 	if err != nil {
 		return nil, err
 	}
@@ -289,20 +230,7 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 	leaseTokenHash := util.HashLeaseToken(leaseToken)
 
 	timeoutSec := s.TimeoutSeconds
-	if timeoutSec <= 0 && filter.DefaultTimeout > 0 {
-		timeoutSec = int((filter.DefaultTimeout-1)/time.Second) + 1
-	}
-	if timeoutSec <= 0 {
-		timeoutSec = 15
-	}
-
-	leaseSec := int(r.leaseSeconds(filter.LeaseDuration))
-	if leaseSec <= 0 {
-		leaseSec = 30
-	}
-	if leaseSec > timeoutSec {
-		leaseSec = timeoutSec
-	}
+	leaseSec := min(int(util.DurationSeconds(filter.LeaseDuration)), timeoutSec)
 
 	nextAttempt := s.Attempt + 1
 
@@ -321,9 +249,9 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 		JOIN step_execution_attempts a ON s.id = a.step_execution_id AND a.attempt = ?
 		SET s.status = 'RUNNING', s.attempt = a.attempt,
 		    s.locked_by = ?, s.locked_until = LEAST(DATE_ADD(NOW(3), INTERVAL ? SECOND), a.deadline),
-		    s.config = ?, s.condition_evaluation = ?, s.executed_at = NOW(3), s.next_retry_at = NULL, s.updated_at = NOW(3)
+		    s.condition_evaluation = ?, s.executed_at = NOW(3), s.next_retry_at = NULL, s.updated_at = NOW(3)
 		WHERE s.id = ?`,
-		nextAttempt, worker, leaseSec, string(resolved), condEvalVal, id)
+		nextAttempt, worker, leaseSec, condEvalVal, id)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +273,7 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 		return nil, err
 	}
 
+	s.Input = resolved
 	return &ClaimResult{
 		StepExecution:  &s,
 		LeaseToken:     leaseToken,

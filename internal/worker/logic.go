@@ -19,57 +19,22 @@ type workerLogic struct {
 	leaseDuration      time.Duration
 	defaultWaitTimeout time.Duration
 	maxLongPollTimeout time.Duration
-	defaultTimeout     time.Duration
 	heartbeatInterval  time.Duration
-	notifier           QueueNotifier
 }
 
 // NewWorkerLogic creates a new WorkerLogic for external worker operations.
-func NewWorkerLogic(execRepo Repository, cfg *config.Config, notifier QueueNotifier) WorkerLogic {
-	leaseDuration := 30 * time.Second
-	maxLongPollTimeout := 25 * time.Second
-	defaultTimeout := 15 * time.Second
-	heartbeatInterval := 10 * time.Second
-	if cfg != nil {
-		if cfg.DefaultLeaseDuration > 0 {
-			leaseDuration = cfg.DefaultLeaseDuration
-		}
-		if cfg.WorkerLongPollTimeout > 0 {
-			maxLongPollTimeout = cfg.WorkerLongPollTimeout
-		}
-		if cfg.DefaultTimeout > 0 {
-			defaultTimeout = cfg.DefaultTimeout
-		}
-		if cfg.DefaultHeartBeatInterval > 0 {
-			heartbeatInterval = cfg.DefaultHeartBeatInterval
-		}
-	}
-	if notifier == nil {
-		notifier = NewQueueNotifier()
-	}
-	defaultWaitTimeout := 25 * time.Second
-	if defaultWaitTimeout > maxLongPollTimeout {
-		defaultWaitTimeout = maxLongPollTimeout
-	}
+func NewWorkerLogic(execRepo Repository, cfg *config.Config) WorkerLogic {
 	return &workerLogic{
 		execRepo:           execRepo,
-		leaseDuration:      leaseDuration,
-		defaultWaitTimeout: defaultWaitTimeout,
-		maxLongPollTimeout: maxLongPollTimeout,
-		defaultTimeout:     defaultTimeout,
-		heartbeatInterval:  heartbeatInterval,
-		notifier:           notifier,
+		leaseDuration:      cfg.DefaultLeaseDuration,
+		defaultWaitTimeout: min(config.DefaultConfig().WorkerLongPollTimeout, cfg.WorkerLongPollTimeout),
+		maxLongPollTimeout: cfg.WorkerLongPollTimeout,
+		heartbeatInterval:  cfg.DefaultHeartBeatInterval,
 	}
 }
 
-func (l *workerLogic) NotifyQueue(queue string) {
-	if l.notifier != nil {
-		l.notifier.Notify(queue)
-	}
-}
-
-func (l *workerLogic) GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error) {
-	return l.execRepo.GetStepTaskQueue(ctx, stepExecID)
+func (l *workerLogic) GetStepQueue(ctx context.Context, stepExecID string) (string, error) {
+	return l.execRepo.GetStepQueue(ctx, stepExecID)
 }
 
 func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req ClaimRequest) (*ClaimTaskResponse, error) {
@@ -87,7 +52,7 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 	waitTimeout := l.defaultWaitTimeout
 	if req.WaitTimeoutMS != nil {
 		ms := *req.WaitTimeoutMS
-		if ms < 0 || time.Duration(ms)*time.Millisecond > l.maxLongPollTimeout {
+		if ms < 0 || ms > int(l.maxLongPollTimeout/time.Millisecond) {
 			return nil, errdefs.ErrInvalidWaitTimeout
 		}
 		waitTimeout = time.Duration(ms) * time.Millisecond
@@ -96,18 +61,11 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 	}
 
 	claimFilter := execution.ClaimFilter{
-		ServiceID:      serviceID,
-		WorkerID:       workerID,
-		Queue:          queue,
-		ExecutorTypes:  req.ExecutorTypes,
-		Activities:     req.Activities,
-		LeaseDuration:  l.leaseDuration,
-		DefaultTimeout: l.defaultTimeout,
+		ServiceID:     serviceID,
+		WorkerID:      workerID,
+		Queue:         queue,
+		LeaseDuration: l.leaseDuration,
 	}
-
-	// Subscribe for in-memory queue wakeups
-	notifyCh, cancelSub := l.notifier.Subscribe(queue)
-	defer cancelSub()
 
 	deadline := time.Now().Add(waitTimeout)
 
@@ -118,35 +76,21 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 			return nil, err
 		}
 		if res != nil {
-			var actName string
-			if res.StepExecution.ActivityName != nil {
-				actName = *res.StepExecution.ActivityName
-			}
-			stepType := string(res.StepExecution.Type)
-			payload := res.StepExecution.Config
-			timeoutSec := res.StepExecution.TimeoutSeconds
-			if timeoutSec <= 0 && l.defaultTimeout > 0 {
-				timeoutSec = int((l.defaultTimeout-1)/time.Second) + 1
-			}
-			if timeoutSec <= 0 {
-				timeoutSec = 15
-			}
 			return &ClaimTaskResponse{
 				TaskID:              res.StepExecution.ID,
 				WorkflowExecutionID: res.StepExecution.WorkflowExecutionID,
 				StepID:              res.StepExecution.StepID,
-				Type:                stepType,
-				TaskQueue:           res.StepExecution.TaskQueue,
-				ActivityName:        actName,
+				Queue:               res.StepExecution.Queue,
+				Activity:            res.StepExecution.Activity,
 				Attempt:             res.StepExecution.Attempt,
 				IsCompensation:      res.StepExecution.IsCompensation,
-				TimeoutSeconds:      timeoutSec,
+				TimeoutSeconds:      res.StepExecution.TimeoutSeconds,
 				Deadline:            res.Deadline.UTC().Format(time.RFC3339Nano),
 				HeartbeatIntervalMS: l.heartbeatInterval.Milliseconds(),
 				LeaseToken:          res.LeaseToken,
 				LeaseExpiresAt:      res.LeaseExpiresAt.UTC().Format(time.RFC3339Nano),
 				LeaseDurationMS:     res.LeaseDuration.Milliseconds(),
-				Payload:             payload,
+				Input:               res.StepExecution.Input,
 			}, nil
 		}
 
@@ -170,9 +114,6 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 		case <-ctx.Done():
 			timer.Stop()
 			return nil, ctx.Err()
-		case <-notifyCh:
-			timer.Stop()
-			// Immediate wakeup on queue activity! Loop around and claim.
 		case <-timer.C:
 			// Interval elapsed, loop and try claiming.
 		}

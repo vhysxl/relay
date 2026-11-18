@@ -4,12 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/vhysxl/relay/pkg/errdefs"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 type stepRepository struct {
@@ -28,7 +27,7 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 		return nil
 	}
 
-	// 1000 steps * 13 params = 13.000 placeholders (limit batch mysql 65.535) -> rarely change so hardcoded
+	// 1000 steps * 14 params = 14.000 placeholders (limit batch mysql 65.535) -> rarely change so hardcoded
 	const batchSize = 1000
 	now := time.Now().UTC()
 
@@ -41,21 +40,21 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 
 		var (
 			b    strings.Builder
-			args = make([]any, 0, len(batch)*13)
+			args = make([]any, 0, len(batch)*14)
 		)
 
 		b.WriteString(`
 			INSERT INTO step_definitions (
-				id, workflow_id, name, type, config, depends_on,
+				id, workflow_id, name, queue, activity, input, depends_on,
 				timeout, retry, compensation, irreversible, ` + "`condition`" + `, created_at, updated_at
-			) VALUES 
+			) VALUES
 		`)
 
 		for i, s := range batch {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			b.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
 			stepCreatedAt := s.CreatedAt
 			if stepCreatedAt.IsZero() {
@@ -66,10 +65,7 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 				stepUpdatedAt = now
 			}
 
-			var configVal any
-			if len(s.Config) > 0 {
-				configVal = string(s.Config)
-			}
+			inputVal := string(util.NormalizeInput(s.Input))
 
 			var dependsOnVal any
 			if len(s.DependsOn) > 0 {
@@ -107,8 +103,9 @@ func (r *stepRepository) CreateStepsTx(ctx context.Context, tx *sql.Tx, workflow
 				s.ID,
 				workflowID,
 				s.Name,
-				string(s.Type),
-				configVal,
+				s.Queue,
+				s.Activity,
+				inputVal,
 				dependsOnVal,
 				s.Timeout,
 				retryVal,
@@ -152,7 +149,7 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, workflow_id, name, type, config, depends_on,
+		SELECT id, workflow_id, name, queue, activity, input, depends_on,
 		       timeout, retry, compensation, irreversible, `+"`condition`"+`, created_at, updated_at
 		FROM step_definitions
 		WHERE workflow_id IN (%s)
@@ -168,8 +165,9 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 	for rows.Next() {
 		var (
 			s            Step
-			typeStr      string
-			configStr    string
+			queue        string
+			activity     string
+			inputStr     string
 			dependsOnStr sql.NullString
 			retryStr     sql.NullString
 			compStr      sql.NullString
@@ -180,8 +178,9 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 			&s.ID,
 			&s.WorkflowID,
 			&s.Name,
-			&typeStr,
-			&configStr,
+			&queue,
+			&activity,
+			&inputStr,
 			&dependsOnStr,
 			&s.Timeout,
 			&retryStr,
@@ -195,9 +194,9 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 			return nil, err
 		}
 
-		s.Type = StepType(typeStr)
-		if len(configStr) > 0 {
-			s.Config = json.RawMessage(configStr)
+		s.Queue, s.Activity = queue, activity
+		if len(inputStr) > 0 {
+			s.Input = json.RawMessage(inputStr)
 		}
 
 		if conditionStr.Valid && len(conditionStr.String) > 0 {
@@ -233,77 +232,4 @@ func (r *stepRepository) GetStepsByWorkflowIDs(ctx context.Context, workflowIDs 
 	}
 
 	return result, nil
-}
-
-func (r *stepRepository) GetStepByID(ctx context.Context, workflowID string, stepID string) (*Step, error) {
-	query := `
-		SELECT id, workflow_id, name, type, config, depends_on,
-		       timeout, retry, compensation, irreversible, ` + "`condition`" + `, created_at, updated_at
-		FROM step_definitions
-		WHERE workflow_id = ? AND id = ?
-	`
-
-	var (
-		s            Step
-		typeStr      string
-		configStr    string
-		dependsOnStr sql.NullString
-		retryStr     sql.NullString
-		compStr      sql.NullString
-		conditionStr sql.NullString
-	)
-
-	err := r.db.QueryRowContext(ctx, query, workflowID, stepID).Scan(
-		&s.ID,
-		&s.WorkflowID,
-		&s.Name,
-		&typeStr,
-		&configStr,
-		&dependsOnStr,
-		&s.Timeout,
-		&retryStr,
-		&compStr,
-		&s.Irreversible,
-		&conditionStr,
-		&s.CreatedAt,
-		&s.UpdatedAt,
-	)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errdefs.ErrStepNotFound
-		}
-		return nil, err
-	}
-
-	s.Type = StepType(typeStr)
-	if len(configStr) > 0 {
-		s.Config = json.RawMessage(configStr)
-	}
-
-	if conditionStr.Valid && len(conditionStr.String) > 0 {
-		s.When = json.RawMessage(conditionStr.String)
-	}
-
-	if dependsOnStr.Valid && len(dependsOnStr.String) > 0 {
-		var deps []string
-		if err := json.Unmarshal([]byte(dependsOnStr.String), &deps); err == nil {
-			s.DependsOn = deps
-		}
-	}
-
-	if retryStr.Valid && len(retryStr.String) > 0 {
-		var rp RetryPolicy
-		if err := json.Unmarshal([]byte(retryStr.String), &rp); err == nil {
-			s.Retry = &rp
-		}
-	}
-
-	if compStr.Valid && len(compStr.String) > 0 {
-		var comp Compensation
-		if err := json.Unmarshal([]byte(compStr.String), &comp); err == nil {
-			s.Compensation = &comp
-		}
-	}
-
-	return &s, nil
 }

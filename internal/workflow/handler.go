@@ -41,6 +41,7 @@ func (h *WorkflowHandler) CreateWorkflow(w http.ResponseWriter, r *http.Request)
 	}
 
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 
 	var req WorkflowRequest
 	if err := dec.Decode(&req); err != nil {

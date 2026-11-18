@@ -60,7 +60,7 @@ const StepCustomNode: React.FC<{ data: StepNodeData }> = ({ data }) => {
       <div className="flex items-center justify-between gap-1 mb-1.5">
         <div className="flex items-center space-x-1">
           <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
-            {step.type}
+            {step.activity}
           </span>
           {step.when && (
             <span
@@ -164,7 +164,7 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
   workflowName,
 }) => {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
-  const [copiedConfig, setCopiedConfig] = useState<boolean>(false)
+  const [copiedInput, setCopiedInput] = useState<boolean>(false)
 
   // Construct raw nodes and edges from Relay Step definitions
   const { initialNodes, initialEdges } = useMemo(() => {
@@ -227,11 +227,11 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
     return steps.find((s) => s.id === selectedStepId) || null
   }, [selectedStepId, steps])
 
-  const copyConfigToClipboard = () => {
-    if (!selectedStep?.config) return
-    navigator.clipboard.writeText(formatJSON(selectedStep.config))
-    setCopiedConfig(true)
-    setTimeout(() => setCopiedConfig(false), 2000)
+  const copyInputToClipboard = () => {
+    if (!selectedStep || selectedStep.input === undefined) return
+    navigator.clipboard.writeText(formatJSON(selectedStep.input))
+    setCopiedInput(true)
+    setTimeout(() => setCopiedInput(false), 2000)
   }
 
   return (
@@ -315,10 +315,14 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-neutral-400">Type:</span>
+                <span className="text-neutral-400">Activity:</span>
                 <span className="px-2 py-0.5 rounded text-[11px] font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
-                  {selectedStep.type}
+                  {selectedStep.activity}
                 </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-neutral-400">Queue:</span>
+                <span className="font-mono text-neutral-200">{selectedStep.queue}</span>
               </div>
               {selectedStep.timeout && (
                 <div className="flex items-center justify-between">
@@ -386,24 +390,24 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
               <div className="pt-2 border-t border-neutral-800 space-y-1.5">
                 <div className="flex items-center gap-1.5 font-medium text-amber-400">
                   <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Rollback: {selectedStep.compensation.name}</span>
+                  <span>Rollback: {selectedStep.compensation.activity}</span>
                 </div>
                 <div className="bg-neutral-900 p-2.5 rounded-md border border-neutral-700/80 space-y-1 font-mono text-[11px]">
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Action ID:</span>
+                    <span className="text-neutral-400">Queue:</span>
                     <span className="text-neutral-200 font-medium">
-                      {selectedStep.compensation.id}
+                      {selectedStep.compensation.queue}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-neutral-400">Type:</span>
+                    <span className="text-neutral-400">Activity:</span>
                     <span className="uppercase text-neutral-200">
-                      {selectedStep.compensation.type}
+                      {selectedStep.compensation.activity}
                     </span>
                   </div>
-                  {selectedStep.compensation.config && (
+                  {selectedStep.compensation.input !== undefined && (
                     <pre className="mt-1.5 p-2 bg-[#0c0c0c] border border-neutral-800 rounded font-mono text-neutral-300 text-[10px] overflow-x-auto">
-                      {formatJSON(selectedStep.compensation.config)}
+                      {formatJSON(selectedStep.compensation.input)}
                     </pre>
                   )}
                 </div>
@@ -423,17 +427,17 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
               </div>
             )}
 
-            {/* Step Config */}
-            {selectedStep.config && (
+            {/* Step Input Template */}
+            {selectedStep.input !== undefined && (
               <div className="pt-2 border-t border-neutral-800 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-neutral-400 font-medium">Configuration:</span>
+                  <span className="text-neutral-400 font-medium">Input Template:</span>
                   <button
-                    onClick={copyConfigToClipboard}
+                    onClick={copyInputToClipboard}
                     className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-[10px]"
                     title="Copy JSON"
                   >
-                    {copiedConfig ? (
+                    {copiedInput ? (
                       <>
                         <Check className="w-3 h-3 text-emerald-400" />
                         <span className="text-emerald-400">Copied</span>
@@ -447,7 +451,7 @@ export const WorkflowDagCanvas: React.FC<WorkflowDagCanvasProps> = ({
                   </button>
                 </div>
                 <pre className="p-2.5 bg-[#0c0c0c] border border-neutral-800 rounded-md font-mono text-neutral-300 text-[11px] overflow-x-auto max-h-48">
-                  {formatJSON(selectedStep.config)}
+                  {formatJSON(selectedStep.input)}
                 </pre>
               </div>
             )}

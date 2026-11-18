@@ -14,14 +14,16 @@ import (
 )
 
 type executionLogic struct {
-	repo      ExecutionRepository
-	workflows WorkflowReader
+	repo                  ExecutionRepository
+	workflows             WorkflowReader
+	defaultTimeoutSeconds int
 }
 
-func NewExecutionLogic(repo ExecutionRepository, workflows WorkflowReader) ExecutionLogic {
+func NewExecutionLogic(repo ExecutionRepository, workflows WorkflowReader, defaultTimeout time.Duration) ExecutionLogic {
 	return &executionLogic{
-		repo:      repo,
-		workflows: workflows,
+		repo:                  repo,
+		workflows:             workflows,
+		defaultTimeoutSeconds: int(util.DurationSeconds(defaultTimeout)),
 	}
 }
 
@@ -38,10 +40,7 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		return nil, false, errdefs.ErrInvalidWorkflowName
 	}
 
-	var rawInput json.RawMessage
-	if req != nil {
-		rawInput = req.Context
-	}
+	rawInput := req.Context
 	normalizedInput, err := normalizeInputContext(rawInput)
 	if err != nil {
 		return nil, false, err
@@ -87,7 +86,7 @@ func (l *executionLogic) ExecuteWorkflow(ctx context.Context, name string, req *
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	exec.Steps, err = snapshotSteps(exec.ID, wf.Steps, merged, now)
+	exec.Steps, err = snapshotSteps(exec.ID, wf.Steps, l.defaultTimeoutSeconds, now)
 	if err != nil {
 		return nil, false, err
 	}

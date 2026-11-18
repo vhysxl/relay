@@ -9,7 +9,7 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-const stepColumns = `id, workflow_execution_id, step_id, name, type, config, task_queue, activity_name, depends_on,
+const stepColumns = `id, workflow_execution_id, step_id, name, queue, activity, input, depends_on,
 	status, output, error_message, attempt, max_attempts, timeout_seconds, backoff_seconds,
 	multiplier, max_backoff_seconds, locked_by, locked_until, is_compensation,
 	` + "`condition`" + `, condition_evaluation, executed_at, next_retry_at, created_at, updated_at`
@@ -18,21 +18,18 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanStep(row rowScanner) (StepExecution, error) {
 	var s StepExecution
-	var name, deps, output, message, owner, condStr, condEvalStr, activityName sql.NullString
-	var config string
+	var name, deps, output, message, owner, condStr, condEvalStr sql.NullString
+	var input string
 	var until, executed, retry sql.NullTime
-	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Type, &config, &s.TaskQueue, &activityName, &deps,
+	err := row.Scan(&s.ID, &s.WorkflowExecutionID, &s.StepID, &name, &s.Queue, &s.Activity, &input, &deps,
 		&s.Status, &output, &message, &s.Attempt, &s.MaxAttempts, &s.TimeoutSeconds, &s.BackoffSeconds,
 		&s.Multiplier, &s.MaxBackoffSeconds, &owner, &until, &s.IsCompensation, &condStr, &condEvalStr, &executed, &retry, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return s, err
 	}
-	s.Name, s.Config = name.String, json.RawMessage(config)
-	if err := util.ValidateQueueName(s.TaskQueue); err != nil {
+	s.Name, s.Input = name.String, json.RawMessage(input)
+	if err := util.ValidateQueueName(s.Queue); err != nil {
 		return s, err
-	}
-	if activityName.Valid && activityName.String != "" {
-		s.ActivityName = &activityName.String
 	}
 	if condStr.Valid && len(condStr.String) > 0 {
 		s.When = json.RawMessage(condStr.String)

@@ -110,7 +110,7 @@ func TestContextPreservesNumbersAndCanonicalOutput(t *testing.T) {
 	if string(obj["id"]) != "9007199254740993" || string(obj["nested"]) != `{"b":2}` {
 		t.Fatalf("context changed: %s", raw)
 	}
-	resolved, err := resolveConfig(json.RawMessage(`{"body":"{{steps.payment.compensation.output}}","original":"{{this.output}}"}`), raw, json.RawMessage(`{"id":123}`), true)
+	resolved, err := resolveInput(json.RawMessage(`{"body":"{{steps.payment.compensation.output}}","original":"{{this.output}}"}`), raw, json.RawMessage(`{"id":123}`), true)
 	if err != nil || !json.Valid(resolved) {
 		t.Fatalf("resolve: %s %v", resolved, err)
 	}

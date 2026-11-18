@@ -104,7 +104,7 @@ func accumulateOutput(raw json.RawMessage, s StepExecution, output json.RawMessa
 	return json.Marshal(obj)
 }
 
-func resolveConfig(raw, context, original json.RawMessage, compensation bool) (json.RawMessage, error) {
+func resolveInput(raw, context, original json.RawMessage, compensation bool) (json.RawMessage, error) {
 	obj, err := contextObject(context)
 	if err != nil {
 		return nil, err
@@ -123,11 +123,11 @@ func resolveConfig(raw, context, original json.RawMessage, compensation bool) (j
 		return nil, err
 	}
 	if len(raw) == 0 {
-		raw = json.RawMessage(`{}`)
+		raw = util.NormalizeInput(raw)
 	}
 	resolved := util.InterpolateContext(raw, ctxBytes)
 	if !json.Valid(resolved) {
-		return nil, errdefs.ErrInvalidStepConfig
+		return nil, errdefs.ErrInvalidStepInput
 	}
 	return resolved, nil
 }

@@ -15,7 +15,7 @@ func getExecutionTestDB(t *testing.T) *sql.DB { return testutil.OpenMySQL(t) }
 
 func TestRepository_ReapExpiredSteps(t *testing.T) {
 	db := getExecutionTestDB(t)
-	repo := execution.NewExecutionRepository(db, nil)
+	repo := execution.NewExecutionRepository(db)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -41,11 +41,11 @@ func TestRepository_ReapExpiredSteps(t *testing.T) {
 	// 1. Insert an expired RUNNING step (attempt 1 of 3)
 	expiredLockedUntil := time.Now().UTC().Add(-10 * time.Minute)
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status,
 			attempt, max_attempts, locked_by, locked_until, is_compensation, created_at, updated_at
-		) VALUES ('orders',
-			?, ?, 'step-1', 'Test Step', 'http', '{}', '[]', 'RUNNING',
+		) VALUES (60, 'orders',
+			?, ?, 'step-1', 'Test Step', 'http.call', '{}', '[]', 'RUNNING',
 			1, 3, 'crashed-worker', ?, FALSE, NOW(), NOW()
 		)
 	`, stepExecID, wfExecID, expiredLockedUntil)
@@ -86,7 +86,7 @@ func TestRepository_ReapExpiredSteps(t *testing.T) {
 
 func TestRepository_WakeUpDependents_And_ClaimTask(t *testing.T) {
 	db := getExecutionTestDB(t)
-	repo := execution.NewExecutionRepository(db, nil)
+	repo := execution.NewExecutionRepository(db)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -106,11 +106,11 @@ func TestRepository_WakeUpDependents_And_ClaimTask(t *testing.T) {
 		_, _ = db.ExecContext(ctx, "DELETE FROM workflow_definitions WHERE id = ?", wfDefID)
 	}()
 
-	_, err = db.ExecContext(ctx, "INSERT INTO step_definitions (id, workflow_id, name, type, config, depends_on) VALUES ('step-A', ?, 'Step A', 'http', '{}', '[]')", wfDefID)
+	_, err = db.ExecContext(ctx, "INSERT INTO step_definitions (id, workflow_id, name, queue, activity, input, depends_on) VALUES ('step-A', ?, 'Step A', 'orders', 'http.call', '{}', '[]')", wfDefID)
 	if err != nil {
 		t.Fatalf("failed to insert step A definition: %v", err)
 	}
-	_, err = db.ExecContext(ctx, "INSERT INTO step_definitions (id, workflow_id, name, type, config, depends_on) VALUES ('step-B', ?, 'Step B', 'http', '{}', '[\"step-A\"]')", wfDefID)
+	_, err = db.ExecContext(ctx, "INSERT INTO step_definitions (id, workflow_id, name, queue, activity, input, depends_on) VALUES ('step-B', ?, 'Step B', 'orders', 'http.call', '{}', '[\"step-A\"]')", wfDefID)
 	if err != nil {
 		t.Fatalf("failed to insert step B definition: %v", err)
 	}
@@ -122,16 +122,16 @@ func TestRepository_WakeUpDependents_And_ClaimTask(t *testing.T) {
 	}
 
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue, id, workflow_execution_id, step_id, name, type, config, depends_on, status, is_compensation)
-		VALUES ('orders', ?, ?, 'step-A', 'Step A', 'http', '{}', '[]', 'COMPLETED', FALSE)
+		INSERT INTO step_executions (timeout_seconds,queue, id, workflow_execution_id, step_id, name, activity, input, depends_on, status, is_compensation)
+		VALUES (60, 'orders', ?, ?, 'step-A', 'Step A', 'http.call', '{}', '[]', 'COMPLETED', FALSE)
 	`, seAID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert step execution A: %v", err)
 	}
 
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue, id, workflow_execution_id, step_id, name, type, config, depends_on, status, is_compensation)
-		VALUES ('orders', ?, ?, 'step-B', 'Step B', 'http', '{}', '["step-A"]', 'WAITING', FALSE)
+		INSERT INTO step_executions (timeout_seconds,queue, id, workflow_execution_id, step_id, name, activity, input, depends_on, status, is_compensation)
+		VALUES (60, 'orders', ?, ?, 'step-B', 'Step B', 'http.call', '{}', '["step-A"]', 'WAITING', FALSE)
 	`, seBID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert step execution B: %v", err)
@@ -179,7 +179,7 @@ func TestRepository_WakeUpDependents_And_ClaimTask(t *testing.T) {
 
 func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
 	db := getExecutionTestDB(t)
-	repo := execution.NewExecutionRepository(db, nil)
+	repo := execution.NewExecutionRepository(db)
 	ctx := context.Background()
 
 	wfDefID := uuid.NewString()
@@ -205,11 +205,11 @@ func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
 	expiredTime := time.Now().UTC().Add(-10 * time.Minute)
 	// Step 1: RUNNING, attempt = 1, max_attempts = 1, expired
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status,
 			attempt, max_attempts, locked_by, locked_until, is_compensation, created_at, updated_at
-		) VALUES ('orders',
-			?, ?, 'step-1', 'Step 1', 'http', '{}', '[]', 'RUNNING',
+		) VALUES (60, 'orders',
+			?, ?, 'step-1', 'Step 1', 'http.call', '{}', '[]', 'RUNNING',
 			1, 1, 'crashed-worker-1', ?, FALSE, NOW(), NOW()
 		)
 	`, stepExec1, wfExecID, expiredTime)
@@ -219,11 +219,11 @@ func TestRepository_ReapExpiredSteps_ExhaustedAttempts(t *testing.T) {
 
 	// Step 2: PENDING downstream step
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status,
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status,
 			attempt, max_attempts, is_compensation, created_at, updated_at
-		) VALUES ('orders',
-			?, ?, 'step-2', 'Step 2', 'http', '{}', '["step-1"]', 'PENDING',
+		) VALUES (60, 'orders',
+			?, ?, 'step-2', 'Step 2', 'http.call', '{}', '["step-1"]', 'PENDING',
 			0, 1, FALSE, NOW(), NOW()
 		)
 	`, stepExec2, wfExecID)

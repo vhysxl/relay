@@ -1,5 +1,3 @@
-export type StepType = 'http' | 'message' | 'activity'
-
 export type ExecutionStatus =
   | 'PENDING'
   | 'RUNNING'
@@ -35,16 +33,20 @@ export interface ConditionEvaluationAudit {
   checks?: ConditionCheckDetail[]
 }
 
-export interface Step {
-  id: string
-  name: string
-  type: StepType
-  depends_on?: string[]
-  config?: any
-  when?: any
-  compensation?: Step
+export interface TaskDefinition {
+  queue: string
+  activity: string
+  input?: any
   retry?: RetryPolicy
   timeout?: number
+}
+
+export interface Step extends TaskDefinition {
+  id: string
+  name?: string
+  depends_on?: string[]
+  when?: any
+  compensation?: TaskDefinition
 }
 
 interface WorkflowMetadata {
@@ -95,16 +97,15 @@ export interface StepExecution {
   id?: string
   step_id: string
   name?: string
-  type: StepType
+  queue: string
+  activity: string
   status: ExecutionStatus
-  task_queue?: string
-  activity_name?: string
   attempt?: number
   max_attempts?: number
   attempts?: StepExecutionAttempt[]
   timeout_seconds?: number
   depends_on?: string[]
-  config?: any
+  input?: any
   when?: any
   condition_evaluation?: ConditionEvaluationAudit
   output?: any

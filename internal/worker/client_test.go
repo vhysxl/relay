@@ -30,12 +30,10 @@ func NewTestWorkerClient(baseURL, token, workerID, queue string) *TestWorkerClie
 	}
 }
 
-func (c *TestWorkerClient) Claim(ctx context.Context, executorTypes, activities []string, waitTimeoutMS int) (*ClaimTaskResponse, error) {
+func (c *TestWorkerClient) Claim(ctx context.Context, waitTimeoutMS int) (*ClaimTaskResponse, error) {
 	reqBody := ClaimRequest{
 		WorkerID:      c.WorkerID,
 		Queue:         c.Queue,
-		ExecutorTypes: executorTypes,
-		Activities:    activities,
 		WaitTimeoutMS: &waitTimeoutMS,
 	}
 	data, err := json.Marshal(reqBody)

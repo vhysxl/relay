@@ -152,7 +152,7 @@ func (h *ExecutionHandler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errdefs.ErrWorkflowNotFound), errors.Is(err, errdefs.ErrExecutionNotFound):
 		status, message = http.StatusNotFound, err.Error()
-	case errors.Is(err, errdefs.ErrEmptyQueueName), errors.Is(err, errdefs.ErrInvalidQueueName), errors.Is(err, errdefs.ErrInvalidStepConfig), errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID),
+	case errors.Is(err, errdefs.ErrEmptyActivity), errors.Is(err, errdefs.ErrInvalidActivity), errors.Is(err, errdefs.ErrEmptyQueueName), errors.Is(err, errdefs.ErrInvalidQueueName), errors.Is(err, errdefs.ErrInvalidStepInput), errors.Is(err, errdefs.ErrInvalidWorkflowName), errors.Is(err, errdefs.ErrInvalidWorkflowContext), errors.Is(err, errdefs.ErrEmptyExecutionID),
 		errors.Is(err, errdefs.ErrIdempotencyKeyRequired), errors.Is(err, errdefs.ErrInvalidIdempotencyKey):
 		status, message = http.StatusBadRequest, err.Error()
 	case errors.Is(err, errdefs.ErrIdempotencyConflict):

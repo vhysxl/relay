@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -34,8 +33,8 @@ func conditionalRuntimeDB(t *testing.T, steps []step.Step, contextJSON json.RawM
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
-	logic := execution.NewExecutionLogic(repo, wfRepo)
+	repo := execution.NewExecutionRepository(db)
+	logic := execution.NewExecutionLogic(repo, wfRepo, 15*time.Second)
 	resp, _, err := logic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -190,8 +189,8 @@ func TestRuntimeConditional_MissingAnchorFailsWithoutExecutionAttempt(t *testing
 
 func TestRuntimeConditional_SkippedStepCompensationCancelledAndRollbackSucceeds(t *testing.T) {
 	a, b, c := basicStep("a"), basicStep("b"), basicStep("c")
-	a.Compensation = &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}
-	b.Compensation = &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}
+	a.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
+	b.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
 	b.When = json.RawMessage(`{"ref":"run_b","op":"eq","value":true}`)
 	b.DependsOn = []string{"a"}
 	c.DependsOn = []string{"b"}

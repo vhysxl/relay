@@ -36,7 +36,7 @@ func TestIntegration_Workflow_Steps_And_ClaimTask(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// 1. CREATE WORKFLOW + STEPS
@@ -50,18 +50,14 @@ func TestIntegration_Workflow_Steps_And_ClaimTask(t *testing.T) {
 		Context: json.RawMessage(`{"environment":"integration-test"}`),
 		Steps: []step.Step{
 			{
-				ID:     stepAID,
-				Name:   "Create Order",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","method":"POST","url":"https://api.test/orders"}`),
-			},
+				ID:   stepAID,
+				Name: "Create Order", Queue: "orders",
+				Input: json.RawMessage("{\"method\":\"POST\",\"url\":\"https://api.test/orders\"}"), Activity: "http.call"},
 			{
-				ID:        stepBID,
-				Name:      "Process Payment",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","method":"POST","url":"https://api.test/payments"}`),
-				DependsOn: []string{stepAID},
-			},
+				ID:   stepBID,
+				Name: "Process Payment", Queue: "orders",
+				Input:     json.RawMessage("{\"method\":\"POST\",\"url\":\"https://api.test/payments\"}"),
+				DependsOn: []string{stepAID}, Activity: "http.call"},
 		},
 	}
 
@@ -97,9 +93,9 @@ func TestIntegration_Workflow_Steps_And_ClaimTask(t *testing.T) {
 
 	// Step A execution (no dependencies)
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status, attempt, created_at, updated_at
-		) VALUES ('orders', ?, ?, ?, ?, 'http', '{"method":"POST"}', NULL, 'PENDING', 0, NOW(), NOW())
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status, attempt, created_at, updated_at
+		) VALUES (60, 'orders', ?, ?, ?, ?, 'http.call', '{"method":"POST"}', NULL, 'PENDING', 0, NOW(), NOW())
 	`, stepExecAID, wfExecID, stepAID, "Create Order")
 	if err != nil {
 		t.Fatalf("failed to insert step execution A: %v", err)
@@ -108,9 +104,9 @@ func TestIntegration_Workflow_Steps_And_ClaimTask(t *testing.T) {
 	// Step B execution (depends on Step A)
 	dependsOnJSON, _ := json.Marshal([]string{stepAID})
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status, attempt, created_at, updated_at
-		) VALUES ('orders', ?, ?, ?, ?, 'http', '{"method":"POST"}', ?, 'WAITING', 0, NOW(), NOW())
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status, attempt, created_at, updated_at
+		) VALUES (60, 'orders', ?, ?, ?, ?, 'http.call', '{"method":"POST"}', ?, 'WAITING', 0, NOW(), NOW())
 	`, stepExecBID, wfExecID, stepBID, "Process Payment", string(dependsOnJSON))
 	if err != nil {
 		t.Fatalf("failed to insert step execution B: %v", err)
@@ -180,17 +176,17 @@ func TestIntegration_Workflow_Steps_And_ClaimTask(t *testing.T) {
 	otherWfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'RUNNING', NOW(), NOW())", otherWfExecID, wf.ID)
 	otherNormalStepExecID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, `INSERT INTO step_executions (task_queue, id, workflow_execution_id, step_id, name, type, config, status, is_compensation, created_at, updated_at) VALUES ('orders', ?, ?, 'step-normal', 'Normal Step', 'http', '{}', 'PENDING', FALSE, NOW(), NOW())`, otherNormalStepExecID, otherWfExecID)
+	_, _ = db.ExecContext(ctx, `INSERT INTO step_executions (timeout_seconds,queue, id, workflow_execution_id, step_id, name, activity, input, status, is_compensation, created_at, updated_at) VALUES (60, 'orders', ?, ?, 'step-normal', 'Normal Step', 'http.call', '{}', 'PENDING', FALSE, NOW(), NOW())`, otherNormalStepExecID, otherWfExecID)
 
 	// Create emergency compensating workflow step
 	compWfExecID := uuid.NewString()
 	_, _ = db.ExecContext(ctx, "INSERT INTO workflow_executions (id, workflow_id, status, created_at, updated_at) VALUES (?, ?, 'COMPENSATING', NOW(), NOW())", compWfExecID, wf.ID)
 	compStepExecID := uuid.NewString()
-	_, _ = db.ExecContext(ctx, `INSERT INTO step_executions (task_queue, id, workflow_execution_id, step_id, name, type, config, status, is_compensation, created_at, updated_at) VALUES ('orders', ?, ?, 'step-rollback', 'Rollback Payment', 'http', '{}', 'PENDING', TRUE, NOW(), NOW())`, compStepExecID, compWfExecID)
+	_, _ = db.ExecContext(ctx, `INSERT INTO step_executions (timeout_seconds,queue, id, workflow_execution_id, step_id, name, activity, input, status, is_compensation, created_at, updated_at) VALUES (60, 'orders', ?, ?, 'step-rollback', 'Rollback Payment', 'http.call', '{}', 'PENDING', TRUE, NOW(), NOW())`, compStepExecID, compWfExecID)
 
 	// Compensation requires a successfully completed original.
-	if _, err := db.ExecContext(ctx, `INSERT INTO step_executions (task_queue, id, workflow_execution_id, step_id, type, config, status, is_compensation)
- VALUES ('orders', ?, ?, 'step-rollback', 'http', '{}', 'COMPLETED', FALSE)`, uuid.NewString(), compWfExecID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO step_executions (timeout_seconds,queue, id, workflow_execution_id, step_id, activity, input, status, is_compensation)
+ VALUES (60, 'orders', ?, ?, 'step-rollback', 'http.call', '{}', 'COMPLETED', FALSE)`, uuid.NewString(), compWfExecID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -215,7 +211,7 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	workflowRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// 1. Create test workflow and step definition
@@ -227,11 +223,9 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     stepID,
-				Name:   "Heartbeat Test Step",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","method":"GET","url":"https://api.test/heartbeat"}`),
-			},
+				ID:   stepID,
+				Name: "Heartbeat Test Step", Queue: "orders",
+				Input: json.RawMessage("{\"method\":\"GET\",\"url\":\"https://api.test/heartbeat\"}"), Activity: "http.call"},
 		},
 	}
 
@@ -255,9 +249,9 @@ func TestIntegration_Heartbeat_ExtendLease(t *testing.T) {
 
 	stepExecID := uuid.NewString()
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, status, attempt, created_at, updated_at
-		) VALUES ('orders', ?, ?, ?, 'Heartbeat Test Step', 'http', '{"method":"GET"}', 'PENDING', 0, NOW(), NOW())
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, status, attempt, created_at, updated_at
+		) VALUES (60, 'orders', ?, ?, ?, 'Heartbeat Test Step', 'http.call', '{"method":"GET"}', 'PENDING', 0, NOW(), NOW())
 	`, stepExecID, wfExecID, stepID)
 	if err != nil {
 		t.Fatalf("failed to insert step execution: %v", err)
@@ -326,7 +320,7 @@ func TestIntegration_CompleteTask(t *testing.T) {
 
 	ctx := context.Background()
 
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// 1. Create test workflow and execution
@@ -347,11 +341,11 @@ func TestIntegration_CompleteTask(t *testing.T) {
 	stepExecBID := uuid.NewString()
 
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, depends_on, status, max_attempts, is_compensation, created_at, updated_at
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, depends_on, status, max_attempts, is_compensation, created_at, updated_at
 		) VALUES 
-		('orders', ?, ?, 'step-a', 'Step A', 'http', '{}', '[]', 'PENDING', 1, FALSE, NOW(), NOW()),
-		('orders', ?, ?, 'step-b', 'Step B', 'http', '{}', '["step-a"]', 'WAITING', 1, FALSE, NOW(), NOW())
+		(60, 'orders', ?, ?, 'step-a', 'Step A', 'http.call', '{}', '[]', 'PENDING', 1, FALSE, NOW(), NOW()),
+		(60, 'orders', ?, ?, 'step-b', 'Step B', 'http.call', '{}', '["step-a"]', 'WAITING', 1, FALSE, NOW(), NOW())
 	`, stepExecAID, wfExecID, stepExecBID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert step_executions: %v", err)
@@ -435,7 +429,7 @@ func TestIntegration_FailTask_Retry(t *testing.T) {
 
 	ctx := context.Background()
 
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	wfID := uuid.NewString()
@@ -446,9 +440,9 @@ func TestIntegration_FailTask_Retry(t *testing.T) {
 
 	stepExecID := uuid.NewString()
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, backoff_seconds, multiplier, max_backoff_seconds, is_compensation, created_at, updated_at
-		) VALUES ('orders', ?, ?, 'step-retry', 'Retry Step', 'http', '{}', 'PENDING', 0, 3, 2, 2.0, 10, FALSE, NOW(), NOW())
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, status, attempt, max_attempts, backoff_seconds, multiplier, max_backoff_seconds, is_compensation, created_at, updated_at
+		) VALUES (60, 'orders', ?, ?, 'step-retry', 'Retry Step', 'http.call', '{}', 'PENDING', 0, 3, 2, 2.0, 10, FALSE, NOW(), NOW())
 	`, stepExecID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert step_execution: %v", err)
@@ -511,7 +505,7 @@ func TestIntegration_FailTask_ExhaustedAndCompensation(t *testing.T) {
 
 	ctx := context.Background()
 
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	wfID := uuid.NewString()
@@ -532,15 +526,15 @@ func TestIntegration_FailTask_ExhaustedAndCompensation(t *testing.T) {
 	// - Step 2 (step-reserve): PENDING with max_attempts=1. Will fail. Its compensation (step-cancel-reserve) is PENDING.
 	// - Step 3 (step-ship): PENDING. Will never run. Its compensation (step-cancel-ship) is PENDING.
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, is_compensation, created_at, updated_at
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, status, attempt, max_attempts, is_compensation, created_at, updated_at
 		) VALUES 
-		('orders', ?, ?, 'step-charge', 'Charge Card', 'http', '{}', 'COMPLETED', 1, 1, FALSE, NOW(), NOW()),
-		('orders', ?, ?, 'step-charge', 'Refund Card', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
-		('orders', ?, ?, 'step-reserve', 'Reserve Inventory', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
-		('orders', ?, ?, 'step-reserve', 'Cancel Inventory Reservation', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
-		('orders', ?, ?, 'step-ship', 'Ship Package', 'http', '{}', 'PENDING', 0, 1, FALSE, DATE_ADD(NOW(), INTERVAL 2 SECOND), DATE_ADD(NOW(), INTERVAL 2 SECOND)),
-		('orders', ?, ?, 'step-ship', 'Cancel Shipping', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 3 SECOND), DATE_ADD(NOW(), INTERVAL 3 SECOND))
+		(60, 'orders', ?, ?, 'step-charge', 'Charge Card', 'http.call', '{}', 'COMPLETED', 1, 1, FALSE, NOW(), NOW()),
+		(60, 'orders', ?, ?, 'step-charge', 'Refund Card', 'http.call', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
+		(60, 'orders', ?, ?, 'step-reserve', 'Reserve Inventory', 'http.call', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(60, 'orders', ?, ?, 'step-reserve', 'Cancel Inventory Reservation', 'http.call', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND)),
+		(60, 'orders', ?, ?, 'step-ship', 'Ship Package', 'http.call', '{}', 'PENDING', 0, 1, FALSE, DATE_ADD(NOW(), INTERVAL 2 SECOND), DATE_ADD(NOW(), INTERVAL 2 SECOND)),
+		(60, 'orders', ?, ?, 'step-ship', 'Cancel Shipping', 'http.call', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 3 SECOND), DATE_ADD(NOW(), INTERVAL 3 SECOND))
 	`, stepChargeID, wfExecID, stepRefundID, wfExecID,
 		stepReserveID, wfExecID, stepCancelReserveID, wfExecID,
 		stepShipID, wfExecID, stepCancelShipID, wfExecID)
@@ -625,7 +619,7 @@ func TestIntegration_FailTask_FirstStepFails_TransitionsDirectlyToFailed(t *test
 
 	ctx := context.Background()
 
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	wfID := uuid.NewString()
@@ -639,11 +633,11 @@ func TestIntegration_FailTask_FirstStepFails_TransitionsDirectlyToFailed(t *test
 
 	// Step 1 fails on first attempt and has a compensation defined
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO step_executions (task_queue,
-			id, workflow_execution_id, step_id, name, type, config, status, attempt, max_attempts, is_compensation, created_at, updated_at
+		INSERT INTO step_executions (timeout_seconds,queue,
+			id, workflow_execution_id, step_id, name, activity, input, status, attempt, max_attempts, is_compensation, created_at, updated_at
 		) VALUES 
-		('orders', ?, ?, 'step-1', 'Step 1', 'http', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
-		('orders', ?, ?, 'step-1', 'Comp 1', 'http', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
+		(60, 'orders', ?, ?, 'step-1', 'Step 1', 'http.call', '{}', 'PENDING', 0, 1, FALSE, NOW(), NOW()),
+		(60, 'orders', ?, ?, 'step-1', 'Comp 1', 'http.call', '{}', 'PENDING', 0, 1, TRUE, DATE_ADD(NOW(), INTERVAL 1 SECOND), DATE_ADD(NOW(), INTERVAL 1 SECOND))
 	`, stepMainID, wfExecID, stepCompID, wfExecID)
 	if err != nil {
 		t.Fatalf("failed to insert steps: %v", err)
@@ -685,8 +679,8 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
-	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
+	execRepo := execution.NewExecutionRepository(db)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// 1. Create a workflow definition with 1 step
@@ -696,10 +690,10 @@ func TestIntegration_EndToEnd_TriggerClaimComplete(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:      "step-first",
-				Name:    "First Step",
-				Type:    step.StepTypeHTTP,
-				Config:  json.RawMessage(`{"queue":"orders","url":"https://api.example.com/data","method":"GET"}`),
+				ID:    "step-first",
+				Name:  "First Step",
+				Queue: "orders", Activity: "http.call",
+				Input:   json.RawMessage(`{"queue":"orders","url":"https://api.example.com/data","method":"GET"}`),
 				Timeout: 15,
 			},
 		},
@@ -770,7 +764,7 @@ func TestIntegration_Worker_ConcurrentProcessing(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// 1. Create a workflow definition with 3 parallel tasks (no dependencies)
@@ -780,22 +774,22 @@ func TestIntegration_Worker_ConcurrentProcessing(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     "task-1",
-				Name:   "Task 1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/1"}`),
+				ID:    "task-1",
+				Name:  "Task 1",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/1"}`),
 			},
 			{
-				ID:     "task-2",
-				Name:   "Task 2",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/2"}`),
+				ID:    "task-2",
+				Name:  "Task 2",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/2"}`),
 			},
 			{
-				ID:     "task-3",
-				Name:   "Task 3",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/3"}`),
+				ID:    "task-3",
+				Name:  "Task 3",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/3"}`),
 			},
 		},
 	})
@@ -836,7 +830,7 @@ func TestIntegration_Worker_ConcurrentProcessing(t *testing.T) {
 	}()
 
 	// 3. Trigger workflow execution
-	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second)
 	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 		Context:        json.RawMessage(`{"batch_id":"batch-123"}`),
@@ -883,7 +877,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// Workflow: Step A -> (Step B & Step C in parallel) -> Step D
@@ -899,46 +893,46 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     stepAID,
-				Name:   "Step A (Order)",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/a"}`),
+				ID:    stepAID,
+				Name:  "Step A (Order)",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/a"}`),
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/a-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/a-rollback"}`),
 				},
 			},
 			{
-				ID:        stepBID,
-				Name:      "Step B (Payment)",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/b"}`),
+				ID:    stepBID,
+				Name:  "Step B (Payment)",
+				Queue: "orders", Activity: "http.call",
+				Input:     json.RawMessage(`{"queue":"orders","url":"https://api.test/b"}`),
 				DependsOn: []string{stepAID},
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/b-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/b-rollback"}`),
 				},
 			},
 			{
-				ID:        stepCID,
-				Name:      "Step C (Stock)",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/c"}`),
+				ID:    stepCID,
+				Name:  "Step C (Stock)",
+				Queue: "orders", Activity: "http.call",
+				Input:     json.RawMessage(`{"queue":"orders","url":"https://api.test/c"}`),
 				DependsOn: []string{stepAID},
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/c-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/c-rollback"}`),
 				},
 			},
 			{
-				ID:        stepDID,
-				Name:      "Step D (Ship)",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/d"}`),
+				ID:    stepDID,
+				Name:  "Step D (Ship)",
+				Queue: "orders", Activity: "http.call",
+				Input:     json.RawMessage(`{"queue":"orders","url":"https://api.test/d"}`),
 				DependsOn: []string{stepBID, stepCID},
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/d-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/d-rollback"}`),
 				},
 			},
 		},
@@ -947,7 +941,7 @@ func TestIntegration_DAG_Mirror_Rollback_ParallelBranches(t *testing.T) {
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second)
 	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -1063,7 +1057,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	// Step A -> (Step B & Step C in parallel)
@@ -1077,35 +1071,35 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     stepAID,
-				Name:   "Step A",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/a"}`),
+				ID:    stepAID,
+				Name:  "Step A",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/a"}`),
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/a-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/a-rollback"}`),
 				},
 			},
 			{
-				ID:        stepBID,
-				Name:      "Step B (Slow payment)",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/b"}`),
+				ID:    stepBID,
+				Name:  "Step B (Slow payment)",
+				Queue: "orders", Activity: "http.call",
+				Input:     json.RawMessage(`{"queue":"orders","url":"https://api.test/b"}`),
 				DependsOn: []string{stepAID},
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/b-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/b-rollback"}`),
 				},
 			},
 			{
-				ID:        stepCID,
-				Name:      "Step C (Fast fail)",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"queue":"orders","url":"https://api.test/c"}`),
+				ID:    stepCID,
+				Name:  "Step C (Fast fail)",
+				Queue: "orders", Activity: "http.call",
+				Input:     json.RawMessage(`{"queue":"orders","url":"https://api.test/c"}`),
 				DependsOn: []string{stepAID},
 				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders","url":"https://api.test/c-rollback"}`),
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/c-rollback"}`),
 				},
 			},
 		},
@@ -1114,7 +1108,7 @@ func TestIntegration_DAG_Rollback_ParallelRunningStepNotCancelled(t *testing.T) 
 		t.Fatalf("failed to create workflow: %v", err)
 	}
 
-	execLogic := execution.NewExecutionLogic(execRepo, wfRepo)
+	execLogic := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second)
 	wfExec, _, err := execLogic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -1208,7 +1202,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	wfID := uuid.NewString()
@@ -1221,17 +1215,17 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     step1ID,
-				Name:   "Authenticate User",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","method":"POST","url":"https://auth.internal/login"}`),
+				ID:    step1ID,
+				Name:  "Authenticate User",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","method":"POST","url":"https://auth.internal/login"}`),
 			},
 			{
-				ID:        step2ID,
-				Name:      "Fetch Profile",
-				Type:      step.StepTypeHTTP,
+				ID:    step2ID,
+				Name:  "Fetch Profile",
+				Queue: "orders", Activity: "http.call",
 				DependsOn: []string{step1ID},
-				Config: json.RawMessage(`{"queue":"orders",
+				Input: json.RawMessage(`{"queue":"orders",
 					"method": "GET",
 					"url": "https://api.internal/users/{{steps.step-auth.output.user_id}}",
 					"headers": {
@@ -1256,7 +1250,7 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow execution
-	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -1295,8 +1289,8 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 	}
 
 	// Verify resolved config in memory and database
-	configStr := string(s2.Config)
-	t.Logf("Resolved Step 2 Config: %s", configStr)
+	configStr := string(s2.Input)
+	t.Logf("Resolved Step 2 Input: %s", configStr)
 
 	// Check URL:
 	expectedURL := "https://api.internal/users/usr_7781"
@@ -1329,21 +1323,21 @@ func TestIntegration_PayloadPassing_StepOutputChaining(t *testing.T) {
 			FullMeta json.RawMessage `json:"full_meta"`
 		} `json:"body"`
 	}
-	if err := json.Unmarshal(se2.Config, &resolvedConfig); err != nil {
+	if err := json.Unmarshal(s2.Input, &resolvedConfig); err != nil {
 		t.Fatal(err)
 	}
 	if !util.AreJSONEqual(resolvedConfig.Body.FullMeta, json.RawMessage(expectedMeta)) {
 		t.Errorf("expected meta object %s in config, got %s", expectedMeta, configStr)
 	}
 
-	// Also verify step_executions.config in MySQL was updated with resolved config
+	// The persisted input remains the original template after claim.
 	var dbConfigStr string
-	err = db.QueryRowContext(ctx, "SELECT config FROM step_executions WHERE id = ?", se2.ID).Scan(&dbConfigStr)
+	err = db.QueryRowContext(ctx, "SELECT input FROM step_executions WHERE id = ?", se2.ID).Scan(&dbConfigStr)
 	if err != nil {
 		t.Fatalf("failed to read step 2 config from DB: %v", err)
 	}
-	if !strings.Contains(dbConfigStr, expectedURL) {
-		t.Errorf("expected DB config to be updated with resolved URL, got %s", dbConfigStr)
+	if !strings.Contains(dbConfigStr, "{{steps.step-auth.output.user_id}}") {
+		t.Errorf("expected DB input to retain the original template, got %s", dbConfigStr)
 	}
 
 	// Complete step 2
@@ -1370,7 +1364,7 @@ func TestIntegration_PayloadPassing_CompensationThisOutput(t *testing.T) {
 	stepValidator := validator.NewValidator()
 	wfRepo := workflow.NewWorkflowRepository(db, stepRepo)
 	wfLogic := workflow.NewWorkflowLogic(wfRepo, stepValidator, 3)
-	execRepo := execution.NewExecutionRepository(db, nil)
+	execRepo := execution.NewExecutionRepository(db)
 	workerLogic := newProtocolFixture(execRepo)
 
 	wfID := uuid.NewString()
@@ -1383,13 +1377,13 @@ func TestIntegration_PayloadPassing_CompensationThisOutput(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     step1ID,
-				Name:   "Charge Card",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"queue":"orders","method":"POST","url":"https://payment.internal/charge"}`),
+				ID:    step1ID,
+				Name:  "Charge Card",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","method":"POST","url":"https://payment.internal/charge"}`),
 				Compensation: &step.Compensation{
-					Type: step.StepTypeHTTP,
-					Config: json.RawMessage(`{"queue":"orders",
+					Queue: "orders", Activity: "http.call",
+					Input: json.RawMessage(`{"queue":"orders",
 						"method": "POST",
 						"url": "https://payment.internal/refund/{{this.output.charge_id}}",
 						"body": {
@@ -1401,11 +1395,11 @@ func TestIntegration_PayloadPassing_CompensationThisOutput(t *testing.T) {
 				},
 			},
 			{
-				ID:        step2ID,
-				Name:      "Deliver Goods",
-				Type:      step.StepTypeHTTP,
+				ID:    step2ID,
+				Name:  "Deliver Goods",
+				Queue: "orders", Activity: "http.call",
 				DependsOn: []string{step1ID},
-				Config:    json.RawMessage(`{"queue":"orders","method":"POST","url":"https://delivery.internal/ship"}`),
+				Input:     json.RawMessage(`{"queue":"orders","method":"POST","url":"https://delivery.internal/ship"}`),
 			},
 		},
 	}
@@ -1419,7 +1413,7 @@ func TestIntegration_PayloadPassing_CompensationThisOutput(t *testing.T) {
 	}()
 
 	// 2. Trigger workflow
-	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
+	wfExec, _, err := execution.NewExecutionLogic(execRepo, wfRepo, 15*time.Second).ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
 	if err != nil {
@@ -1459,8 +1453,8 @@ func TestIntegration_PayloadPassing_CompensationThisOutput(t *testing.T) {
 		t.Fatalf("expected to claim compensation step, got %v, err=%v", compExec, err)
 	}
 
-	compConfigStr := string(compStep.Config)
-	t.Logf("Resolved Compensation Config: %s", compConfigStr)
+	compConfigStr := string(compStep.Input)
+	t.Logf("Resolved Compensation Input: %s", compConfigStr)
 
 	expectedRefundURL := "https://payment.internal/refund/ch_990182"
 	if !strings.Contains(compConfigStr, expectedRefundURL) {
@@ -1505,14 +1499,12 @@ type protocolFixture struct {
 func newProtocolFixture(repo execution.Repository) *protocolFixture {
 	return &protocolFixture{repo: repo, logic: worker.NewWorkerLogic(repo, &config.Config{
 		DefaultLeaseDuration: 30 * time.Second, DefaultTimeout: 60 * time.Second,
-	}, worker.NewQueueNotifier())}
+	})}
 }
 
 func (f *protocolFixture) claim(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error) {
 	zero := 0
-	task, err := f.logic.ClaimTask(ctx, "integration-tests", worker.ClaimRequest{
-		WorkerID: workerID, Queue: "orders", ExecutorTypes: []string{"http", "message"}, WaitTimeoutMS: &zero,
-	})
+	task, err := f.logic.ClaimTask(ctx, "integration-tests", worker.ClaimRequest{WorkerID: workerID, Queue: "orders", WaitTimeoutMS: &zero})
 	if err != nil || task == nil {
 		return nil, nil, err
 	}
@@ -1523,7 +1515,7 @@ func (f *protocolFixture) claim(ctx context.Context, workerID string) (*step.Ste
 	}
 	for _, s := range workflow.Steps {
 		if s.ID == task.TaskID {
-			return &step.Step{ID: task.StepID, Type: step.StepType(task.Type), Config: task.Payload}, &s, nil
+			return &step.Step{ID: task.StepID, Queue: task.Queue, Activity: task.Activity, Input: task.Input}, &s, nil
 		}
 	}
 	panic("claimed task missing from execution")

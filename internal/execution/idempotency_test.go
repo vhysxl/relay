@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
@@ -77,11 +78,6 @@ func (m *memoryIdempotencyRepo) GetExecutionRequest(ctx context.Context, workflo
 	return nil, errdefs.ErrExecutionRequestNotFound
 }
 
-func (m *memoryIdempotencyRepo) CreateExecution(ctx context.Context, exec *execution.WorkflowExecution) (*execution.WorkflowExecution, error) {
-	m.executions[exec.ID] = exec
-	return exec, nil
-}
-
 func (m *memoryIdempotencyRepo) ListExecutions(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 	res := make([]execution.WorkflowExecution, 0, len(m.executions))
 	for _, e := range m.executions {
@@ -141,10 +137,10 @@ func TestIdempotency_HeaderAndKeyValidation(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "wf-id-1", Name: "wf-test", Version: 1, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	tests := []struct {
@@ -189,11 +185,11 @@ func TestIdempotency_ContextNormalization(t *testing.T) {
 				Name:    "checkout",
 				Version: 1,
 				Context: json.RawMessage(`{"currency":"USD"}`),
-				Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
+				Steps:   []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}},
 			},
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. First execution with wrapped context
@@ -305,19 +301,19 @@ func TestIdempotency_ReceiptImmutabilityAcrossVersionsAndStatusChanges(t *testin
 		Name:    "order-flow",
 		Version: 1,
 		Context: json.RawMessage(`{"region":"US"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
+		Steps:   []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}},
 	}
 	wfV2 := &workflow.Workflow{
 		ID:      "wf-v2",
 		Name:    "order-flow",
 		Version: 2,
 		Context: json.RawMessage(`{"region":"EU","v2":true}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}, {ID: "s2", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}},
+		Steps:   []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}, {ID: "s2", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}},
 	}
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{wfV1},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Initial execution created on v1
@@ -396,10 +392,10 @@ func TestIdempotency_AtomicRollbackOnStepFailure(t *testing.T) {
 
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "wf-1", Name: "wf", Version: 1, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 
 	// Attempt creation with failing step insert
 	_, _, err := logic.ExecuteWorkflow(context.Background(), "wf", &execution.ExecuteWorkflowRequest{
@@ -439,11 +435,11 @@ func TestIdempotency_SameKeyDifferentWorkflows(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
-			{ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "id-alpha", Name: "wf-alpha", Version: 1, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
+			{ID: "id-beta", Name: "wf-beta", Version: 1, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 
 	// Same key on workflow alpha
 	respA, replayedA, err := logic.ExecuteWorkflow(context.Background(), "wf-alpha", &execution.ExecuteWorkflowRequest{
@@ -472,11 +468,11 @@ func TestIdempotency_ExplicitWorkflowVersion(t *testing.T) {
 	repo := newMemoryIdempotencyRepo()
 	reader := &multiVersionWorkflowReader{
 		workflows: []*workflow.Workflow{
-			{ID: "wf-id-v1", Name: "order-flow", Version: 1, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
-			{ID: "wf-id-v2", Name: "order-flow", Version: 2, Steps: []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage("{\"queue\":\"orders\"}")}}},
+			{ID: "wf-id-v1", Name: "order-flow", Version: 1, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
+			{ID: "wf-id-v2", Name: "order-flow", Version: 2, Steps: []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}},
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, reader)
+	logic := execution.NewExecutionLogic(repo, reader, 15*time.Second)
 
 	// Execute with explicit version 1
 	resp1, replayed1, err := logic.ExecuteWorkflow(context.Background(), "order-flow", &execution.ExecuteWorkflowRequest{

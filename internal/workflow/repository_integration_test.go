@@ -28,9 +28,9 @@ func TestWorkflowRepository_ListWorkflows_MySQL(t *testing.T) {
 		{ID: uuid.NewString(), Name: name, Version: 2, Context: largeContext, CreatedAt: base.Add(time.Second), UpdatedAt: base},
 		{ID: uuid.NewString(), Name: name + "-empty", Version: 1, CreatedAt: base.Add(2 * time.Second), UpdatedAt: base},
 	}
-	definitions[0].Steps = []step.Step{{ID: "old-step", Type: step.StepTypeHTTP, Config: largeConfig}}
+	definitions[0].Steps = []step.Step{{ID: "old-step", Queue: "orders", Input: largeConfig, Activity: "http.call"}}
 	for i := range 3 {
-		definitions[1].Steps = append(definitions[1].Steps, step.Step{ID: fmt.Sprintf("step-%d", i), Type: step.StepTypeHTTP, Config: largeConfig})
+		definitions[1].Steps = append(definitions[1].Steps, step.Step{ID: fmt.Sprintf("step-%d", i), Queue: "orders", Input: largeConfig, Activity: "http.call"})
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -82,7 +82,7 @@ func TestWorkflowRepository_ListWorkflows_MySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.ID != definitions[1].ID || len(detail.Steps) != 3 || len(detail.Context) < 1024*1024 || len(detail.Steps[0].Config) < 512*1024 {
+	if detail.ID != definitions[1].ID || len(detail.Steps) != 3 || len(detail.Context) < 1024*1024 || len(detail.Steps[0].Input) < 512*1024 {
 		t.Fatal("detail must retain the full latest workflow context and step configs")
 	}
 	response, err := json.Marshal(items)

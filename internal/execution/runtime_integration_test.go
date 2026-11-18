@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -38,8 +37,8 @@ func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
-	logic := execution.NewExecutionLogic(repo, wfRepo)
+	repo := execution.NewExecutionRepository(db)
+	logic := execution.NewExecutionLogic(repo, wfRepo, 15*time.Second)
 	resp, _, err := logic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -54,7 +53,7 @@ func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
 }
 
 func basicStep(id string) step.Step {
-	return step.Step{ID: id, Type: step.StepTypeHTTP, Config: json.RawMessage(`{"queue":"orders"}`)}
+	return step.Step{ID: id, Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
 }
 func (f runtimeFixture) claim(t *testing.T, worker string) *execution.StepExecution {
 	t.Helper()
@@ -77,10 +76,10 @@ func TestRuntimeCreationRollback(t *testing.T) {
 	f := runtimeDB(t, []step.Step{basicStep("a")})
 	now := time.Now().UTC()
 	id := uuid.NewString()
-	_, err := f.repo.CreateExecution(f.ctx, &execution.WorkflowExecution{ID: id, WorkflowID: f.exec.WorkflowID, Status: execution.StatusRunning, Context: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now, Steps: []execution.StepExecution{
-		{ID: uuid.NewString(), StepID: "valid", Type: "http", TaskQueue: "orders", Config: json.RawMessage(`{"queue":"orders"}`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now},
-		{ID: uuid.NewString(), StepID: "invalid", Type: "http", TaskQueue: "orders", Config: json.RawMessage(`{invalid`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now},
-	}})
+	_, _, err := f.repo.CreateExecutionWithIdempotency(f.ctx, &execution.WorkflowExecution{ID: id, WorkflowID: f.exec.WorkflowID, Status: execution.StatusRunning, Context: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now, Steps: []execution.StepExecution{
+		{ID: uuid.NewString(), StepID: "valid", Queue: "orders", Input: json.RawMessage("{}"), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now, Activity: "http.call"},
+		{ID: uuid.NewString(), StepID: "invalid", Queue: "orders", Input: json.RawMessage(`{invalid`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now, Activity: "http.call"},
+	}}, &execution.ExecutionRequestRecord{WorkflowName: f.exec.WorkflowName, IdempotencyKey: uuid.NewString(), WorkflowExecutionID: id, InputContext: json.RawMessage(`{}`), ResponseReceipt: json.RawMessage(`{}`), CreatedAt: now}, false, f.exec.WorkflowID)
 	if err == nil {
 		t.Fatal("invalid insert unexpectedly succeeded")
 	}
@@ -259,11 +258,11 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 	a, b, c := basicStep("a"), basicStep("b"), basicStep("c")
 	c.DependsOn = []string{"a", "b"}
 	for _, s := range []*step.Step{&a, &b} {
-		s.Compensation = &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{"queue":"orders","payload":"{{this.output}}"}`), Timeout: 9, Retry: &step.RetryPolicy{MaxAttempts: 1}}
+		s.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{\"payload\":\"{{this.output}}\"}"), Timeout: 9, Retry: &step.RetryPolicy{MaxAttempts: 1}, Activity: "message.send"}
 	}
 	f := runtimeDB(t, []step.Step{a, b, c})
 	// Definition changes must not overwrite the persisted execution snapshot.
-	if _, err := f.db.ExecContext(f.ctx, `UPDATE step_definitions SET timeout=99, type='http' WHERE workflow_id=?`, f.exec.WorkflowID); err != nil {
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE step_definitions SET timeout=99, activity='http.call' WHERE workflow_id=?`, f.exec.WorkflowID); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
@@ -280,7 +279,7 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 	}
 	first, second := f.claim(t, "rollback-1"), f.claim(t, "rollback-2")
 	for _, s := range []*execution.StepExecution{first, second} {
-		if !s.IsCompensation || s.Type != "message" || s.TimeoutSeconds != 9 || s.MaxAttempts != 1 {
+		if !s.IsCompensation || s.Activity != "message.send" || s.TimeoutSeconds != 9 || s.MaxAttempts != 1 {
 			t.Fatalf("definition overwrote snapshot: %+v", s)
 		}
 		var config struct {
@@ -288,8 +287,8 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 				Charged bool `json:"charged"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(s.Config, &config); err != nil || !config.Payload.Charged {
-			t.Fatalf("original output missing: %s %v", s.Config, err)
+		if err := json.Unmarshal(s.Input, &config); err != nil || !config.Payload.Charged {
+			t.Fatalf("original output missing: %s %v", s.Input, err)
 		}
 	}
 	if err := f.fail(f.ctx, first.ID, "rollback-1", "refund failed"); err != nil {
@@ -340,8 +339,7 @@ func TestRuntimeRecoveryContinuesAfterWorkflowError(t *testing.T) {
 // exercises the same service/worker/token checks as an external worker.
 func (f runtimeFixture) tryClaim(ctx context.Context, worker string) (*execution.StepExecution, error) {
 	result, err := f.repo.ClaimTask(ctx, execution.ClaimFilter{
-		ServiceID: "runtime-tests", WorkerID: worker, Queue: "orders",
-		ExecutorTypes: []string{"http", "message"}, LeaseDuration: time.Minute,
+		ServiceID: "runtime-tests", WorkerID: worker, Queue: "orders", LeaseDuration: time.Minute,
 	})
 	if err != nil || result == nil {
 		return nil, err

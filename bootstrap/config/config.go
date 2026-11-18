@@ -47,48 +47,65 @@ type Config struct {
 	WorkerLongPollTimeout    time.Duration
 }
 
+// DefaultConfig supplies runtime defaults without opening a database connection.
+func DefaultConfig() *Config {
+	return &Config{
+		Port:                     ":8000",
+		DefaultLeaseDuration:     30 * time.Second,
+		DefaultHeartBeatInterval: 10 * time.Second,
+		ReaperInterval:           5 * time.Second,
+		DefaultTimeout:           15 * time.Second,
+		MaxPayloadSize:           5,
+		ConcurrentRetryLimit:     3,
+		ConditionMaxDepth:        8,
+		ConditionMaxNodes:        64,
+		WorkerLongPollTimeout:    25 * time.Second,
+	}
+}
+
 func Init() (*Config, error) {
-	port := getEnv("PORT", "8000")
+	defaults := DefaultConfig()
+	port := getEnv("PORT", defaults.Port)
 	if !strings.HasPrefix(port, ":") {
 		port = ":" + port
 	}
 
-	lease, err := parseDuration("DEFAULT_LEASE_DURATION", 30*time.Second)
+	lease, err := parseDuration("DEFAULT_LEASE_DURATION", defaults.DefaultLeaseDuration)
 	if err != nil {
 		return nil, err
 	}
 
-	heartbeat, err := parseDuration("DEFAULT_HEARTBEAT_INTERVAL", 10*time.Second)
+	heartbeat, err := parseDuration("DEFAULT_HEARTBEAT_INTERVAL", defaults.DefaultHeartBeatInterval)
 	if err != nil {
 		return nil, err
 	}
 
-	reaperInterval, err := parseDuration("REAPER_INTERVAL", 5*time.Second)
+	reaperInterval, err := parseDuration("REAPER_INTERVAL", defaults.ReaperInterval)
 	if err != nil {
 		return nil, err
 	}
 
-	defaultTimeout, err := parseDuration("DEFAULT_TIMEOUT", 15*time.Second)
+	defaultTimeout, err := parseDuration("DEFAULT_TIMEOUT", defaults.DefaultTimeout)
 	if err != nil {
 		return nil, err
 	}
 
-	maxPayloadSize, err := getIntEnv("MAX_PAYLOAD_SIZE", 5)
+	maxPayloadSize, err := getIntEnv("MAX_PAYLOAD_SIZE", defaults.MaxPayloadSize)
 	if err != nil {
 		return nil, err
 	}
 
-	concurrentRetryLimit, err := getIntEnv("CONCURRENT_RETRY_LIMIT", 3)
+	concurrentRetryLimit, err := getIntEnv("CONCURRENT_RETRY_LIMIT", defaults.ConcurrentRetryLimit)
 	if err != nil {
 		return nil, err
 	}
 
-	conditionMaxDepth, err := getIntEnv("CONDITION_MAX_DEPTH", 8)
+	conditionMaxDepth, err := getIntEnv("CONDITION_MAX_DEPTH", defaults.ConditionMaxDepth)
 	if err != nil {
 		return nil, err
 	}
 
-	conditionMaxNodes, err := getIntEnv("CONDITION_MAX_NODES", 64)
+	conditionMaxNodes, err := getIntEnv("CONDITION_MAX_NODES", defaults.ConditionMaxNodes)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +221,7 @@ func parseWorkerConfig() (bool, []WorkerCredential, time.Duration, error) {
 		}
 	}
 
-	workerLongPollTimeout, err := parseDuration("WORKER_LONG_POLL_TIMEOUT", 25*time.Second)
+	workerLongPollTimeout, err := parseDuration("WORKER_LONG_POLL_TIMEOUT", DefaultConfig().WorkerLongPollTimeout)
 	if err != nil {
 		return false, nil, 0, err
 	}

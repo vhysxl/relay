@@ -35,24 +35,20 @@ func TestStepRepository_CreateAndGetSteps(t *testing.T) {
 		{
 			ID:         "step-1",
 			WorkflowID: wfDefID,
-			Name:       "First Step",
-			Type:       step.StepTypeHTTP,
-			Config:     json.RawMessage(`{"queue":"orders","url":"https://example.com"}`),
-			Timeout:    30,
+			Name:       "First Step", Queue: "orders",
+			Input:   json.RawMessage("{\"url\":\"https://example.com\"}"),
+			Timeout: 30,
 			Retry: &step.RetryPolicy{
 				MaxAttempts: 3,
 				Backoff:     2,
-			},
-		},
+			}, Activity: "http.call"},
 		{
 			ID:         "step-2",
 			WorkflowID: wfDefID,
-			Name:       "Second Step",
-			Type:       step.StepTypeHTTP,
-			Config:     json.RawMessage(`{"queue":"orders","url":"https://example.com/2"}`),
-			DependsOn:  []string{"step-1"},
-			Timeout:    15,
-		},
+			Name:       "Second Step", Queue: "orders",
+			Input:     json.RawMessage("{\"url\":\"https://example.com/2\"}"),
+			DependsOn: []string{"step-1"},
+			Timeout:   15, Activity: "http.call"},
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -76,16 +72,9 @@ func TestStepRepository_CreateAndGetSteps(t *testing.T) {
 		t.Fatalf("expected 2 steps, got %d", len(fetchedSteps))
 	}
 
-	// 4. GetStepByID
-	step1, err := repo.GetStepByID(ctx, wfDefID, "step-1")
-	if err != nil {
-		t.Fatalf("GetStepByID error: %v", err)
-	}
-	if step1.Name != "First Step" || step1.Timeout != 30 {
-		t.Errorf("unexpected step1 details: %+v", step1)
-	}
-	if step1.Retry == nil || step1.Retry.MaxAttempts != 3 {
-		t.Errorf("expected retry max_attempts 3, got %+v", step1.Retry)
+	step1 := fetchedSteps[0]
+	if step1.Name != "First Step" || step1.Timeout != 30 || step1.Retry == nil || step1.Retry.MaxAttempts != 3 {
+		t.Fatalf("unexpected step: %+v", step1)
 	}
 
 	// 5. GetStepsByWorkflowIDs
