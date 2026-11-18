@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/vhysxl/relay/pkg/errdefs"
@@ -13,6 +14,12 @@ import (
 )
 
 func insertWorkflowExecutionTx(ctx context.Context, tx *sql.Tx, exec *WorkflowExecution) error {
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT NOW(3)`).Scan(&now); err != nil {
+		return fmt.Errorf("get now: %w", err)
+	}
+	exec.CreatedAt = now
+	exec.UpdatedAt = now
 	_, err := tx.ExecContext(ctx, `INSERT INTO workflow_executions
 		(id, workflow_id, status, context, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		exec.ID, exec.WorkflowID, exec.Status, string(exec.Context), exec.CreatedAt, exec.UpdatedAt)

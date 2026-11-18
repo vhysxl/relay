@@ -167,13 +167,21 @@ func (r *executionRepository) ClaimTask(ctx context.Context, filter ClaimFilter)
 			if err != nil {
 				return nil, err
 			}
+			defer rows.Close()
+
 			stepOutputs := make(map[string]json.RawMessage)
 			for rows.Next() {
 				var sid string
 				var out sql.NullString
-				if err := rows.Scan(&sid, &out); err == nil && out.Valid {
+				if err := rows.Scan(&sid, &out); err != nil {
+					return nil, err
+				}
+				if out.Valid {
 					stepOutputs[sid] = json.RawMessage(out.String)
 				}
+			}
+			if err := rows.Err(); err != nil {
+				return nil, err
 			}
 			rows.Close()
 
