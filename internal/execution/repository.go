@@ -7,24 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
-type executionRepository struct {
-	db                   *sql.DB
-	defaultLeaseDuration time.Duration
-}
+type executionRepository struct{ db *sql.DB }
 
-func NewExecutionRepository(db *sql.DB, cfg *config.Config) Repository {
-	lease := 30 * time.Second
-	if cfg != nil && cfg.DefaultLeaseDuration > 0 {
-		lease = cfg.DefaultLeaseDuration
-	}
-	return &executionRepository{db: db, defaultLeaseDuration: lease}
-}
+func NewExecutionRepository(db *sql.DB) Repository { return &executionRepository{db: db} }
 
 func (r *executionRepository) ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error) {
 	if r.db == nil {

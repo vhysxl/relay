@@ -86,10 +86,8 @@ func TestWorkflowLogic_CreateWorkflow_Success(t *testing.T) {
 	logic := workflow.NewWorkflowLogic(repo, validator.NewValidator(), 3)
 
 	validStep := step.Step{
-		ID:     "step-1",
-		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-	}
+		ID: "step-1", Queue: "orders",
+		Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"}
 
 	// Test success & defaults
 	wf, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -120,16 +118,12 @@ func TestWorkflowLogic_CreateWorkflow_WithSteps(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 			{
-				ID:        "step-2",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
-				DependsOn: []string{"step-1"},
-			},
+				ID: "step-2", Queue: "orders",
+				Input:     json.RawMessage("{\"url\":\"https://api.test/payment\"}"),
+				DependsOn: []string{"step-1"}, Activity: "http.call"},
 		},
 	})
 	if err != nil {
@@ -173,10 +167,8 @@ func TestWorkflowHandler_CreateWorkflow(t *testing.T) {
 		Context: json.RawMessage(`{"max_retries":3}`),
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 		},
 	})
 
@@ -213,11 +205,10 @@ func TestWorkflowHandler_CreateWorkflow_InvalidStep(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:        "step-1",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{}`),
+				ID: "step-1", Queue: "orders",
+				Input:     json.RawMessage("{}"),
 				DependsOn: []string{"step-1"}, // Self dependency
-			},
+				Activity:  "http.call"},
 		},
 	})
 
@@ -240,15 +231,11 @@ func TestWorkflowHandler_CreateWorkflow_IrreversibleWithCompensation(t *testing.
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:           "step-1",
-				Type:         step.StepTypeHTTP,
-				Config:       json.RawMessage(`{}`),
+				ID: "step-1", Queue: "orders",
+				Input:        json.RawMessage("{}"),
 				Irreversible: true,
-				Compensation: &step.Compensation{
-					Type:   step.StepTypeHTTP,
-					Config: json.RawMessage(`{}`),
-				},
-			},
+				Compensation: &step.Compensation{Queue: "orders",
+					Input: json.RawMessage("{}"), Activity: "http.call"}, Activity: "http.call"},
 		},
 	})
 
@@ -284,8 +271,8 @@ func TestWorkflowHandler_CreateWorkflow_Validation(t *testing.T) {
 		Name:    "cyclic-flow",
 		Version: 1,
 		Steps: []step.Step{
-			{ID: "step-a", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"step-b"}},
-			{ID: "step-b", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"step-a"}},
+			{ID: "step-a", Queue: "orders", Input: json.RawMessage("{}"), DependsOn: []string{"step-b"}, Activity: "http.call"},
+			{ID: "step-b", Queue: "orders", Input: json.RawMessage("{}"), DependsOn: []string{"step-a"}, Activity: "http.call"},
 		},
 	})
 	req = httptest.NewRequest(http.MethodPost, "/workflows", bytes.NewReader(body))
@@ -305,10 +292,8 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 		Steps: []step.Step{
 			{
 				ID:         "step-1",
-				WorkflowID: "test-uuid-1234",
-				Type:       step.StepTypeHTTP,
-				Config:     json.RawMessage(`{"url":"https://example.test","body":{"amount":100}}`),
-			},
+				WorkflowID: "test-uuid-1234", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://example.test\",\"body\":{\"amount\":100}}"), Activity: "http.call"},
 		},
 	}
 
@@ -342,7 +327,7 @@ func TestWorkflowHandler_GetWorkflow(t *testing.T) {
 	if len(fetched.Steps) != 1 || fetched.Steps[0].ID != "step-1" {
 		t.Errorf("expected 1 step with id step-1, got %+v", fetched.Steps)
 	}
-	if !bytes.Equal(fetched.Context, testWf.Context) || len(fetched.Steps) != 1 || !bytes.Equal(fetched.Steps[0].Config, testWf.Steps[0].Config) {
+	if !bytes.Equal(fetched.Context, testWf.Context) || len(fetched.Steps) != 1 || !bytes.Equal(fetched.Steps[0].Input, testWf.Steps[0].Input) {
 		t.Error("detail response must preserve workflow context and step config")
 	}
 
@@ -385,16 +370,12 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 		Context: json.RawMessage(`{"currency":"IDR"}`),
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 			{
-				ID:        "step-2",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
-				DependsOn: []string{"step-1"},
-			},
+				ID: "step-2", Queue: "orders",
+				Input:     json.RawMessage("{\"url\":\"https://api.test/payment\"}"),
+				DependsOn: []string{"step-1"}, Activity: "http.call"},
 		},
 	}
 
@@ -420,16 +401,12 @@ func TestWorkflowLogic_CreateWorkflow_Idempotency(t *testing.T) {
 		Context: json.RawMessage(`{"currency":"IDR"}`),
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 			{
-				ID:        "step-2",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
-				DependsOn: []string{"step-1"},
-			},
+				ID: "step-2", Queue: "orders",
+				Input:     json.RawMessage("{\"url\":\"https://api.test/payment\"}"),
+				DependsOn: []string{"step-1"}, Activity: "http.call"},
 		},
 	})
 	if err != nil {
@@ -455,10 +432,8 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 		Context: json.RawMessage(`{"currency":"IDR"}`),
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 		},
 	}
 
@@ -484,10 +459,8 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_ContextChanged(t *tes
 		Context: json.RawMessage(`{"currency":"USD"}`),
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 		},
 	})
 	if err != nil {
@@ -512,10 +485,8 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 		},
 	}
 
@@ -540,16 +511,12 @@ func TestWorkflowLogic_CreateWorkflow_AutoIncrementVersion_StepsChanged(t *testi
 		Name: "order-saga",
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"},
 			{
-				ID:        "step-2",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/payment"}`),
-				DependsOn: []string{"step-1"},
-			},
+				ID: "step-2", Queue: "orders",
+				Input:     json.RawMessage("{\"url\":\"https://api.test/payment\"}"),
+				DependsOn: []string{"step-1"}, Activity: "http.call"},
 		},
 	})
 	if err != nil {
@@ -571,10 +538,8 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 		Version: 3,
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/v1"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/v1\"}"), Activity: "http.call"},
 		},
 	}
 
@@ -598,10 +563,8 @@ func TestWorkflowLogic_CreateWorkflow_MultiVersionIncrement(t *testing.T) {
 		Name: "order-saga",
 		Steps: []step.Step{
 			{
-				ID:     "step-1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://api.test/v2"}`),
-			},
+				ID: "step-1", Queue: "orders",
+				Input: json.RawMessage("{\"url\":\"https://api.test/v2\"}"), Activity: "http.call"},
 		},
 	})
 	if err != nil {
@@ -767,10 +730,8 @@ func TestWorkflowHandler_ListWorkflows_EmptyAndError(t *testing.T) {
 
 func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryIdempotent(t *testing.T) {
 	validStep := step.Step{
-		ID:     "step-1",
-		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
-	}
+		ID: "step-1", Queue: "orders",
+		Input: json.RawMessage("{\"url\":\"https://api.test/order\"}"), Activity: "http.call"}
 
 	concurrentlyCreatedWf := &workflow.Workflow{
 		ID:      "race-winner-uuid",
@@ -825,15 +786,15 @@ func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryIdempotent(t *testing.T
 
 func TestWorkflowLogic_CreateWorkflow_RaceCondition_RetryAutoIncrement(t *testing.T) {
 	validStep := step.Step{
-		ID:     "step-1",
-		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		ID:    "step-1",
+		Queue: "orders", Activity: "http.call",
+		Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	differentStep := step.Step{
-		ID:     "step-different",
-		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/other"}`),
+		ID:    "step-different",
+		Queue: "orders", Activity: "http.call",
+		Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/other"}`),
 	}
 
 	concurrentlyCreatedWf := &workflow.Workflow{
@@ -900,9 +861,9 @@ func TestWorkflowLogic_ConcurrentRetryLimit(t *testing.T) {
 	logic := workflow.NewWorkflowLogic(repo, v, retryLimit)
 
 	validStep := step.Step{
-		ID:     "step-1",
-		Type:   step.StepTypeHTTP,
-		Config: json.RawMessage(`{"url":"https://api.test/order"}`),
+		ID:    "step-1",
+		Queue: "orders", Activity: "http.call",
+		Input: json.RawMessage(`{"queue":"orders","url":"https://api.test/order"}`),
 	}
 
 	_, err := logic.CreateWorkflow(context.Background(), &workflow.WorkflowRequest{
@@ -934,9 +895,9 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 		Name: "small-wf",
 		Steps: []step.Step{
 			{
-				ID:     "s1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				ID:    "s1",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	}
@@ -956,9 +917,9 @@ func TestWorkflowHandler_PayloadSizeGuard(t *testing.T) {
 		Context: json.RawMessage(`{"payload":"` + strings.Repeat("x", 1024*1024+100) + `"}`),
 		Steps: []step.Step{
 			{
-				ID:     "s1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				ID:    "s1",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	}
@@ -1008,9 +969,9 @@ func TestWorkflowHandler_CreateWorkflow_InternalServerError(t *testing.T) {
 		Version: 1,
 		Steps: []step.Step{
 			{
-				ID:     "s1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"url":"https://test.local"}`),
+				ID:    "s1",
+				Queue: "orders", Activity: "http.call",
+				Input: json.RawMessage(`{"queue":"orders","url":"https://test.local"}`),
 			},
 		},
 	})
@@ -1099,7 +1060,7 @@ func (m *mockWorkflowLogic) GetWorkflowVersionChanges(ctx context.Context, name 
 }
 
 func TestWorkflowHandler_CreateWorkflow_BodyValidation(t *testing.T) {
-	validJSON := `{"name":"order-wf","steps":[{"id":"s1","type":"http","config":{"url":"https://test.local"}}]}`
+	validJSON := `{"name":"order-wf","steps":[{"id":"s1","queue":"orders","activity":"http.call","input":{"url":"https://test.local"}}]}`
 
 	t.Run("valid body and trailing whitespace accepted", func(t *testing.T) {
 		logicCalled := false
@@ -1385,14 +1346,14 @@ func TestWorkflowLogic_VersionHistoryAndChanges(t *testing.T) {
 		Name:    "order-flow",
 		Version: 1,
 		Context: json.RawMessage(`{"region":"US"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://v1"}`)}},
+		Steps:   []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{\"url\":\"https://v1\"}"), Activity: "http.call"}},
 	}
 	wfV3 := &workflow.Workflow{
 		ID:      "id-3",
 		Name:    "order-flow",
 		Version: 3, // Notice gap: v1 then v3
 		Context: json.RawMessage(`{"region":"EU"}`),
-		Steps:   []step.Step{{ID: "s1", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://v3"}`)}},
+		Steps:   []step.Step{{ID: "s1", Queue: "orders", Input: json.RawMessage("{\"url\":\"https://v3\"}"), Activity: "http.call"}},
 	}
 
 	repo := &mockRepository{

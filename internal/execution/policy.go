@@ -110,7 +110,7 @@ func reconcile(status WorkflowStatus, steps []StepExecution) (WorkflowStatus, []
 		if !exists || original.Status == StatusFailed || original.Status == StatusCancelled || original.Status == StatusSkipped {
 			result[i].Status = StatusCancelled
 		} else {
-			// Re-evaluate legacy PENDING tickets too: a running original is unsafe.
+			// Check readiness before claiming compensation: a running original is unsafe.
 			result[i].Status = StatusWaiting
 		}
 	}
@@ -157,7 +157,7 @@ func dependenciesComplete(deps []string, normal map[string]StepExecution) bool {
 func rollbackDependenciesDone(s StepExecution, children map[string][]string, normal, comp map[string]StepExecution) bool {
 	// Traverse through steps without compensation as well, so A -> B -> C
 	// rolls C back before A even when B has no compensation of its own.
-	queue := append(append([]string{}, children[s.StepID]...), s.DependsOn...)
+	queue := append([]string{}, children[s.StepID]...)
 	seen := map[string]bool{s.StepID: true}
 	for len(queue) > 0 {
 		id := queue[0]

@@ -102,21 +102,8 @@ func TestConditionParsingAndValidation(t *testing.T) {
 	t.Run("tree limits depth and nodes", func(t *testing.T) {
 		// Deep tree depth 4
 		raw := []byte(`{"all":[{"all":[{"all":[{"ref":"a","op":"exists"}]}]}]}`)
-		cond, err := condition.ParseCondition(raw)
-		if err != nil {
+		if _, err := condition.ParseConditionWithLimits(raw, 4, 10); err != nil {
 			t.Fatal(err)
-		}
-
-		if err := condition.ValidateTree(cond, 3, 10); err == nil {
-			t.Fatal("expected max depth error for depth 4 with limit 3, got nil")
-		}
-		if err := condition.ValidateTree(cond, 4, 10); err != nil {
-			t.Fatalf("unexpected error for depth 4: %v", err)
-		}
-
-		// Node limit
-		if err := condition.ValidateTree(cond, 10, 3); err == nil {
-			t.Fatal("expected max nodes error, got nil")
 		}
 
 		// Test limits during ParseConditionWithLimits

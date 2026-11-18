@@ -240,44 +240,6 @@ func validateInArray(raw []byte) error {
 	return nil
 }
 
-// ValidateTree checks depth and total nodes against configured maximum limits.
-func ValidateTree(c *Condition, maxDepth, maxNodes int) error {
-	if maxDepth <= 0 {
-		maxDepth = 8
-	}
-	if maxNodes <= 0 {
-		maxNodes = 64
-	}
-
-	nodes := 0
-	var check func(curr *Condition, depth int) error
-	check = func(curr *Condition, depth int) error {
-		if curr == nil {
-			return nil
-		}
-		nodes++
-		if nodes > maxNodes {
-			return errdefs.ErrConditionMaxNodes
-		}
-		if depth > maxDepth {
-			return errdefs.ErrConditionMaxDepth
-		}
-		for i := range curr.All {
-			if err := check(&curr.All[i], depth+1); err != nil {
-				return err
-			}
-		}
-		for i := range curr.Any {
-			if err := check(&curr.Any[i], depth+1); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	return check(c, 1)
-}
-
 // CollectRefs recursively extracts all anchor references in a Condition.
 func CollectRefs(c *Condition) []string {
 	var refs []string

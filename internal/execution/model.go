@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
@@ -55,10 +54,9 @@ type StepExecution struct {
 	WorkflowExecutionID string          `json:"workflow_execution_id" db:"workflow_execution_id"`
 	StepID              string          `json:"step_id" db:"step_id"`
 	Name                string          `json:"name,omitempty" db:"name"`
-	Type                string          `json:"type" db:"type"`
-	TaskQueue           string          `json:"task_queue" db:"task_queue"`
-	ActivityName        *string         `json:"activity_name,omitempty" db:"activity_name"`
-	Config              json.RawMessage `json:"config" db:"config"`
+	Queue               string          `json:"queue" db:"queue"`
+	Activity            string          `json:"activity" db:"activity"`
+	Input               json.RawMessage `json:"input" db:"input"`
 	DependsOn           []string        `json:"depends_on,omitempty" db:"depends_on"`
 	Status              StepStatus      `json:"status" db:"status"`
 
@@ -99,20 +97,18 @@ const (
 )
 
 type StepExecutionAttempt struct {
-	StepExecutionID   string     `json:"step_execution_id" db:"step_execution_id"`
-	Attempt           int        `json:"attempt" db:"attempt"`
-	ServiceID         string     `json:"service_id" db:"service_id"`
-	WorkerID          string     `json:"worker_id" db:"worker_id"`
-	LeaseTokenHash    string     `json:"-" db:"lease_token_hash"`
-	StartedAt         time.Time  `json:"started_at" db:"started_at"`
-	Deadline          time.Time  `json:"deadline" db:"deadline"`
-	FinishedAt        *time.Time `json:"finished_at,omitempty" db:"finished_at"`
-	Outcome           string     `json:"outcome" db:"outcome"`
-	ErrorMessage      *string    `json:"error_message,omitempty" db:"error_message"`
-	ReportType        *string    `json:"report_type,omitempty" db:"report_type"`
-	ReportPayloadHash *string    `json:"-" db:"report_payload_hash"`
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+	StepExecutionID string     `json:"step_execution_id" db:"step_execution_id"`
+	Attempt         int        `json:"attempt" db:"attempt"`
+	ServiceID       string     `json:"service_id" db:"service_id"`
+	WorkerID        string     `json:"worker_id" db:"worker_id"`
+	StartedAt       time.Time  `json:"started_at" db:"started_at"`
+	Deadline        time.Time  `json:"deadline" db:"deadline"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty" db:"finished_at"`
+	Outcome         string     `json:"outcome" db:"outcome"`
+	ErrorMessage    *string    `json:"error_message,omitempty" db:"error_message"`
+	ReportType      *string    `json:"report_type,omitempty" db:"report_type"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type ExecuteWorkflowRequest struct {
@@ -152,7 +148,6 @@ type ExecutionLogic interface {
 type ExecutionRepository interface {
 	CreateExecutionWithIdempotency(ctx context.Context, exec *WorkflowExecution, record *ExecutionRequestRecord, targetIsExplicitID bool, targetID string) (*ExecuteWorkflowResponse, bool, error)
 	GetExecutionRequest(ctx context.Context, workflowName string, idempotencyKey string) (*ExecutionRequestRecord, error)
-	CreateExecution(ctx context.Context, execution *WorkflowExecution) (*WorkflowExecution, error)
 	ListExecutions(ctx context.Context, limit, offset int) ([]WorkflowExecution, error)
 	GetExecution(ctx context.Context, executionID string) (*WorkflowExecution, error)
 }
@@ -176,17 +171,13 @@ type WorkflowReader interface {
 }
 
 type ClaimFilter struct {
-	ServiceID      string
-	WorkerID       string
-	Queue          string
-	ExecutorTypes  []string
-	Activities     []string
-	LeaseDuration  time.Duration
-	DefaultTimeout time.Duration
+	ServiceID     string
+	WorkerID      string
+	Queue         string
+	LeaseDuration time.Duration
 }
 
 type ClaimResult struct {
-	StepDefinition *step.Step
 	StepExecution  *StepExecution
 	LeaseToken     string
 	LeaseDuration  time.Duration
@@ -198,14 +189,10 @@ type ClaimResult struct {
 // smaller interfaces they need, rather than this wiring interface.
 type Repository interface {
 	ExecutionRepository
-	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *StepExecution, error)
 	ClaimTask(ctx context.Context, filter ClaimFilter) (*ClaimResult, error)
 	HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
 	CompleteTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
 	FailTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
-	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
+	GetStepQueue(ctx context.Context, stepExecID string) (string, error)
 	ReapExpiredSteps(ctx context.Context) (int64, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
 }

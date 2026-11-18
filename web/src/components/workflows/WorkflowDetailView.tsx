@@ -31,19 +31,17 @@ import { sortStepsTopologically } from '../../utils/dag'
 import { WorkflowDagCanvas } from './WorkflowDagCanvas'
 
 interface WorkflowDetailViewProps {
-  workflowName?: string
-  workflowId?: string
+  workflowName: string
   onBack: () => void
   onNavigateToExecution?: (executionId: string) => void
 }
 
 export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   workflowName,
-  workflowId,
   onBack,
   onNavigateToExecution,
 }) => {
-  const targetName = workflowName || workflowId || ''
+  const targetName = workflowName
 
   // Latest workflow definition and executions
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
@@ -129,7 +127,6 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
             ? execs.filter(
                 (e) =>
                   e.workflow_name === targetName ||
-                  e.workflow_id === targetName ||
                   (data && (e.workflow_id === data.id || e.workflow_name === data.name))
               )
             : []
@@ -553,7 +550,7 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
 
                       <div className="flex items-center space-x-2">
                         <span className="px-2 py-0.5 rounded text-xs font-mono font-medium uppercase bg-neutral-800/80 text-neutral-300 border border-neutral-700/60">
-                          {step.type}
+                          {step.activity}
                         </span>
                         {step.when && (
                           <span
@@ -587,6 +584,9 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                     {/* Expanded Step Details */}
                     {isExpanded && (
                       <div className="mt-2 pl-9 space-y-3 pt-2 border-t border-neutral-800 text-xs">
+                        <p className="text-neutral-400">
+                          Queue: <span className="font-mono text-neutral-200">{step.queue}</span>
+                        </p>
                         {step.depends_on && step.depends_on.length > 0 && (
                           <div>
                             <span className="text-neutral-400 font-medium">Depends on: </span>
@@ -608,11 +608,11 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                           </div>
                         )}
 
-                        {step.config && (
+                        {step.input !== undefined && (
                           <div className="space-y-1">
-                            <span className="text-neutral-400 font-medium">Configuration:</span>
+                            <span className="text-neutral-400 font-medium">Input Template:</span>
                             <pre className="p-3 bg-[#0c0c0c] border border-neutral-800 rounded-md font-mono text-neutral-300 text-[11px] overflow-x-auto">
-                              {formatJSON(step.config)}
+                              {formatJSON(step.input)}
                             </pre>
                           </div>
                         )}
@@ -621,11 +621,11 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
                           <div className="p-3 bg-neutral-900 border border-neutral-700/80 rounded-md space-y-1.5">
                             <div className="flex items-center gap-1.5 font-semibold text-amber-400">
                               <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                              <span>Rollback: {step.compensation.name}</span>
+                              <span>Rollback: {step.compensation.activity}</span>
                             </div>
-                            {step.compensation.config && (
+                            {step.compensation.input !== undefined && (
                               <pre className="p-2 bg-[#0c0c0c] border border-neutral-800 rounded font-mono text-neutral-300 text-[11px] overflow-x-auto">
-                                {formatJSON(step.compensation.config)}
+                                {formatJSON(step.compensation.input)}
                               </pre>
                             )}
                           </div>

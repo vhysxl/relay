@@ -15,29 +15,17 @@ import (
 
 type WorkerHandler struct {
 	logic          WorkerLogic
-	cfg            *config.Config
 	credentials    []config.WorkerCredential
 	apiEnabled     bool
 	maxPayloadSize int64
 }
 
 func NewWorkerHandler(logic WorkerLogic, cfg *config.Config) *WorkerHandler {
-	apiEnabled := true
-	var creds []config.WorkerCredential
-	var maxPayloadSize int64 = 5 * 1024 * 1024
-	if cfg != nil {
-		apiEnabled = cfg.WorkerAPIEnabled
-		creds = cfg.WorkerCredentials
-		if cfg.MaxPayloadSize > 0 {
-			maxPayloadSize = int64(cfg.MaxPayloadSize) * 1024 * 1024
-		}
-	}
 	return &WorkerHandler{
 		logic:          logic,
-		cfg:            cfg,
-		credentials:    creds,
-		apiEnabled:     apiEnabled,
-		maxPayloadSize: maxPayloadSize,
+		credentials:    cfg.WorkerCredentials,
+		apiEnabled:     cfg.WorkerAPIEnabled,
+		maxPayloadSize: int64(cfg.MaxPayloadSize) * 1024 * 1024,
 	}
 }
 
@@ -66,7 +54,9 @@ func (h *WorkerHandler) writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errdefs.ErrInvalidLeaseToken):
 		status = http.StatusUnauthorized
 		code = "INVALID_LEASE_TOKEN"
-	case errors.Is(err, errdefs.ErrEmptyWorkerID),
+	case errors.Is(err, errdefs.ErrEmptyQueueName),
+		errors.Is(err, errdefs.ErrInvalidQueueName),
+		errors.Is(err, errdefs.ErrEmptyWorkerID),
 		errors.Is(err, errdefs.ErrEmptyStepExecutionID),
 		errors.Is(err, errdefs.ErrInvalidWaitTimeout),
 		errors.Is(err, errdefs.ErrInvalidStepOutput):
@@ -103,7 +93,9 @@ func (h *WorkerHandler) decodeJSON(w http.ResponseWriter, r *http.Request, v any
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, h.maxPayloadSize)
 	}
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
 		if errors.Is(err, io.EOF) {
 			return true
 		}
@@ -113,6 +105,10 @@ func (h *WorkerHandler) decodeJSON(w http.ResponseWriter, r *http.Request, v any
 			return false
 		}
 		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json body", Code: "BAD_REQUEST"})
+		return false
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		util.WriteJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json body: trailing data", Code: "BAD_REQUEST"})
 		return false
 	}
 	return true
@@ -154,9 +150,11 @@ func (h *WorkerHandler) Claim(w http.ResponseWriter, r *http.Request) {
 	}
 
 	queue := strings.TrimSpace(req.Queue)
-	if queue == "" {
-		queue = "legacy"
+	if err := util.ValidateQueueName(queue); err != nil {
+		h.writeError(w, err)
+		return
 	}
+	req.Queue = queue
 	if !cred.HasQueueAccess(queue) {
 		h.writeError(w, errdefs.ErrForbiddenQueue)
 		return
@@ -193,7 +191,7 @@ func (h *WorkerHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskQueue, err := h.logic.GetStepTaskQueue(r.Context(), taskID)
+	taskQueue, err := h.logic.GetStepQueue(r.Context(), taskID)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -230,7 +228,7 @@ func (h *WorkerHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskQueue, err := h.logic.GetStepTaskQueue(r.Context(), taskID)
+	taskQueue, err := h.logic.GetStepQueue(r.Context(), taskID)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -245,8 +243,6 @@ func (h *WorkerHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-
-	h.logic.NotifyQueue(taskQueue)
 
 	util.WriteJSON(w, http.StatusOK, res)
 }
@@ -269,7 +265,7 @@ func (h *WorkerHandler) Fail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskQueue, err := h.logic.GetStepTaskQueue(r.Context(), taskID)
+	taskQueue, err := h.logic.GetStepQueue(r.Context(), taskID)
 	if err != nil {
 		h.writeError(w, err)
 		return
@@ -284,8 +280,6 @@ func (h *WorkerHandler) Fail(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, err)
 		return
 	}
-
-	h.logic.NotifyQueue(taskQueue)
 
 	util.WriteJSON(w, http.StatusOK, res)
 }

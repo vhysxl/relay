@@ -34,7 +34,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                 Workflow
               </th>
               <th scope="col" className="px-5 py-3">
-                Type
+                Activity
               </th>
               <th scope="col" className="px-5 py-3">
                 Started At
@@ -64,12 +64,10 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               </tr>
             ) : (
               executions.map((item) => {
-                let execType = 'http'
+                let activities = '—'
                 if (item.steps && item.steps.length > 0) {
-                  const distinct = [...new Set(item.steps.map((s) => s.type).filter(Boolean))]
-                  if (distinct.length > 0) execType = distinct.join(', ')
-                } else if (item.type && item.type !== 'execution') {
-                  execType = item.type
+                  const distinct = [...new Set(item.steps.map((s) => s.activity).filter(Boolean))]
+                  if (distinct.length > 0) activities = distinct.join(', ')
                 }
 
                 const startedAt = formatTimestamp(item.created_at)
@@ -82,7 +80,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                 ].includes(item.status)
                 const isFailed = item.status === 'FAILED' || item.status === 'COMPENSATION_FAILED'
 
-                const displayName = item.workflow_name || item.name || ''
+                const displayName = item.workflow_name || item.workflow_id
 
                 return (
                   <tr
@@ -107,7 +105,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-neutral-800/80 text-neutral-300 border border-neutral-700/60 uppercase">
-                        {execType}
+                        {activities}
                       </span>
                     </td>
                     <td className="px-5 py-3 whitespace-nowrap font-mono text-sm text-neutral-400">

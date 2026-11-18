@@ -22,9 +22,6 @@ type Application struct {
 
 	// Background services
 	Reaper reaper.Reaper
-
-	// Validator
-	Validation validator.Validator
 }
 
 func (a *Application) Close() error {
@@ -42,13 +39,12 @@ func InitApp() (*Application, error) {
 
 	validation := validator.NewValidatorWithLimits(conf.ConditionMaxDepth, conf.ConditionMaxNodes)
 	stepRepo := step.NewStepRepository(conf.DB)
-	executionRepo := execution.NewExecutionRepository(conf.DB, conf)
+	executionRepo := execution.NewExecutionRepository(conf.DB)
 	workflowRepo := workflow.NewWorkflowRepository(conf.DB, stepRepo)
 
-	queueNotifier := worker.NewQueueNotifier()
 	workflowLogic := workflow.NewWorkflowLogic(workflowRepo, validation, conf.ConcurrentRetryLimit)
-	executionLogic := execution.NewExecutionLogic(executionRepo, workflowRepo)
-	workerLogic := worker.NewWorkerLogic(executionRepo, conf.DefaultLeaseDuration, conf, queueNotifier)
+	executionLogic := execution.NewExecutionLogic(executionRepo, workflowRepo, conf.DefaultTimeout)
+	workerLogic := worker.NewWorkerLogic(executionRepo, conf)
 
 	reaperSvc := reaper.New(executionRepo, conf.ReaperInterval)
 
@@ -58,6 +54,5 @@ func InitApp() (*Application, error) {
 		ExecutionLogic: executionLogic,
 		WorkerLogic:    workerLogic,
 		Reaper:         reaperSvc,
-		Validation:     validation,
 	}, nil
 }

@@ -173,7 +173,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                         {step.name || step.step_id}
                       </span>
                       <span className="px-2 py-0.5 rounded text-xs font-mono font-semibold uppercase bg-neutral-800 text-neutral-300 border border-neutral-700/60 hidden sm:inline-block">
-                        {step.type}
+                        {step.activity}
                       </span>
                     </div>
                     <p className="font-mono text-xs sm:text-[13px] text-neutral-400 truncate mt-0.5">
@@ -208,7 +208,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     {compensation && (
                       <span
                         className={`px-2.5 py-1 rounded text-xs font-mono font-semibold uppercase hidden sm:inline-flex items-center gap-1.5 ${
-                          compensation.status === 'COMPENSATED' || compensation.status === 'REVERTED'
+                          compensation.status === 'COMPENSATED'
                             ? 'bg-amber-950/60 text-amber-400 border border-amber-800/60'
                             : compensation.status === 'COMPENSATING'
                             ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60 animate-pulse'
@@ -244,6 +244,9 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     </span>
                     <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
                       Attempt: {step.attempt ?? 0}/{step.max_attempts || 1}
+                    </span>
+                    <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
+                      Queue: {step.queue}
                     </span>
                     {step.timeout_seconds && (
                       <span className="px-2.5 py-1 rounded bg-neutral-800/80 border border-neutral-700/60 text-neutral-200">
@@ -312,7 +315,7 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                             <tbody className="divide-y divide-neutral-800/80 text-[11px]">
                               {step.condition_evaluation.checks.map((c: any, i: number) => (
                                 <tr key={i} className="hover:bg-neutral-800/20">
-                                  <td className="py-1.5 px-3 text-neutral-300 font-semibold">{c.ref || c.anchor}</td>
+                                  <td className="py-1.5 px-3 text-neutral-300 font-semibold">{c.ref}</td>
                                   <td className="py-1.5 px-3 font-bold text-neutral-200">{c.op}</td>
                                   <td className="py-1.5 px-3 text-neutral-400">{c.expected !== undefined ? JSON.stringify(c.expected) : '—'}</td>
                                   <td className="py-1.5 px-3 text-neutral-200">{JSON.stringify(c.actual)}</td>
@@ -332,19 +335,19 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                     </div>
                   )}
 
-                  {/* Side-by-Side: Configuration (Input) & Output */}
-                  <div className={`grid grid-cols-1 ${step.output && step.config ? 'lg:grid-cols-2' : ''} gap-3`}>
-                    {step.config && (
+                  {/* Side-by-Side: Input Template & Output */}
+                  <div className={`grid grid-cols-1 ${step.output !== undefined && step.input !== undefined ? 'lg:grid-cols-2' : ''} gap-3`}>
+                    {step.input !== undefined && (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-neutral-300 uppercase tracking-wide">
-                            Configuration (Input)
+                            Input Template
                           </span>
                           <button
-                            onClick={() => handleCopy(`config-${step.id}`, formatJSON(step.config))}
+                            onClick={() => handleCopy(`input-${step.id}`, formatJSON(step.input))}
                             className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-xs"
                           >
-                            {copiedKey === `config-${step.id}` ? (
+                            {copiedKey === `input-${step.id}` ? (
                               <>
                                 <Check className="w-3.5 h-3.5 text-emerald-400" />
                                 <span className="text-emerald-400 font-semibold">Copied</span>
@@ -358,12 +361,12 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                           </button>
                         </div>
                         <pre className="bg-[#0c0c0c] border border-neutral-800 text-neutral-300 p-3 rounded font-mono text-xs sm:text-[13px] leading-relaxed overflow-x-auto max-h-56">
-                          {formatJSON(step.config)}
+                          {formatJSON(step.input)}
                         </pre>
                       </div>
                     )}
 
-                    {step.output && (
+                    {step.output !== undefined && (
                       <div className="space-y-1.5">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-emerald-400 uppercase tracking-wide">
@@ -436,17 +439,17 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                       )}
 
                       {/* Compensation Config / Payload */}
-                      {compensation.config && (
+                      {compensation.input !== undefined && (
                         <div className="space-y-1">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wide">
                               Compensation Action Payload
                             </span>
                             <button
-                              onClick={() => handleCopy(`comp-config-${compensation.id}`, formatJSON(compensation.config))}
+                              onClick={() => handleCopy(`comp-input-${compensation.id}`, formatJSON(compensation.input))}
                               className="p-0.5 hover:bg-neutral-800 rounded text-neutral-400 hover:text-neutral-200 transition cursor-pointer flex items-center gap-1 text-[10px]"
                             >
-                              {copiedKey === `comp-config-${compensation.id}` ? (
+                              {copiedKey === `comp-input-${compensation.id}` ? (
                                 <span className="text-emerald-400">Copied</span>
                               ) : (
                                 <span>Copy</span>
@@ -454,13 +457,13 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
                             </button>
                           </div>
                           <pre className="p-2.5 bg-[#0c0c0c] border border-amber-900/30 rounded font-mono text-neutral-300 text-[11px] overflow-x-auto max-h-48">
-                            {formatJSON(compensation.config)}
+                            {formatJSON(compensation.input)}
                           </pre>
                         </div>
                       )}
 
                       {/* Compensation Output (if completed) */}
-                      {compensation.output && (
+                      {compensation.output !== undefined && (
                         <div className="space-y-1">
                           <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">
                             Compensation Result Output
@@ -516,11 +519,11 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
 
               {isExpanded && (
                 <div className="px-5 py-4 bg-[#111111] border-t border-neutral-800 space-y-3 text-xs">
-                  {step.config && (
+                  {step.input !== undefined && (
                     <div>
                       <span className="text-neutral-400 font-medium">Compensation Config:</span>
                       <pre className="mt-1 p-2.5 bg-[#0c0c0c] border border-neutral-800 rounded font-mono text-neutral-300 text-[11px] overflow-x-auto">
-                        {formatJSON(step.config)}
+                        {formatJSON(step.input)}
                       </pre>
                     </div>
                   )}

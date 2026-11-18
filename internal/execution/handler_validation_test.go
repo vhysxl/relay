@@ -46,10 +46,15 @@ func TestHandlerBodyValidation(t *testing.T) {
 		wantContext string
 	}{
 		{"empty", "", 201, ""}, {"whitespace", " \n ", 201, ""}, {"null", "null", 201, ""},
-		{"raw", `{"amount":100}`, 201, `{"amount":100}`}, {"wrapped", `{"context":{"amount":100}}`, 201, `{"amount":100}`},
+		{"raw", `{"amount":100}`, 400, ""}, {"wrapped", `{"context":{"amount":100}}`, 201, `{"amount":100}`},
 		{"null context", `{"context":null}`, 201, "null"}, {"malformed", `{`, 400, ""}, {"trailing", `{} {}`, 400, ""},
 		{"array", `[]`, 400, ""}, {"scalar", `4`, 400, ""}, {"context array", `{"context":[]}`, 400, ""},
-		{"raw with workflow_version", `{"workflow_version":1,"amount":6000000}`, 201, `{"workflow_version":1,"amount":6000000}`},
+		{"raw with workflow_version", `{"workflow_version":1,"amount":6000000}`, 400, ""},
+		{"version without context", `{"workflow_version":2}`, 201, ""},
+		{"zero version", `{"workflow_version":0}`, 400, ""},
+		{"null version", `{"workflow_version":null}`, 400, ""},
+		{"fraction version", `{"workflow_version":1.5}`, 400, ""},
+		{"unknown with context", `{"context":{},"amount":1}`, 400, ""},
 		{"wrapped with workflow_version", `{"context":{"amount":100},"workflow_version":2}`, 201, `{"amount":100}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -112,6 +112,9 @@ func diffSteps(fromSteps, toSteps []step.Step) []WorkflowChange {
 
 func compareStepFields(from, to step.Step, stepPath string) []WorkflowChange {
 	var changes []WorkflowChange
+	if from.Queue != to.Queue {
+		changes = append(changes, WorkflowChange{Path: stepPath + "/queue", Kind: ChangeKindModified, Before: from.Queue, After: to.Queue})
+	}
 
 	// Name
 	if from.Name != to.Name {
@@ -125,29 +128,29 @@ func compareStepFields(from, to step.Step, stepPath string) []WorkflowChange {
 		}
 	}
 
-	// Type
-	if from.Type != to.Type {
+	// Routing
+	if from.Activity != to.Activity {
 		changes = append(changes, WorkflowChange{
-			Path:   stepPath + "/type",
+			Path:   stepPath + "/activity",
 			Kind:   ChangeKindModified,
-			Before: string(from.Type),
-			After:  string(to.Type),
+			Before: from.Activity,
+			After:  to.Activity,
 		})
 	}
 
-	// Config
-	if !util.AreJSONEqual(from.Config, to.Config) {
-		fromCfgMap := parseRawToMap(from.Config)
-		toCfgMap := parseRawToMap(to.Config)
+	// Input
+	if !util.AreJSONEqual(from.Input, to.Input) {
+		fromCfgMap := parseRawToMap(from.Input)
+		toCfgMap := parseRawToMap(to.Input)
 		if fromCfgMap != nil && toCfgMap != nil {
-			cfgChanges := diffJSONMaps(fromCfgMap, toCfgMap, stepPath+"/config")
+			cfgChanges := diffJSONMaps(fromCfgMap, toCfgMap, stepPath+"/input")
 			changes = append(changes, cfgChanges...)
 		} else {
 			changes = append(changes, WorkflowChange{
-				Path:   stepPath + "/config",
+				Path:   stepPath + "/input",
 				Kind:   ChangeKindModified,
-				Before: parseRawToAny(from.Config),
-				After:  parseRawToAny(to.Config),
+				Before: parseRawToAny(from.Input),
+				After:  parseRawToAny(to.Input),
 			})
 		}
 	}
@@ -268,25 +271,28 @@ func diffCompensation(from, to *step.Compensation, path string) []WorkflowChange
 	}
 
 	var changes []WorkflowChange
-	if from.Type != to.Type {
+	if from.Queue != to.Queue {
+		changes = append(changes, WorkflowChange{Path: path + "/queue", Kind: ChangeKindModified, Before: from.Queue, After: to.Queue})
+	}
+	if from.Activity != to.Activity {
 		changes = append(changes, WorkflowChange{
-			Path:   path + "/type",
+			Path:   path + "/activity",
 			Kind:   ChangeKindModified,
-			Before: string(from.Type),
-			After:  string(to.Type),
+			Before: from.Activity,
+			After:  to.Activity,
 		})
 	}
-	if !util.AreJSONEqual(from.Config, to.Config) {
-		fromCfg := parseRawToMap(from.Config)
-		toCfg := parseRawToMap(to.Config)
+	if !util.AreJSONEqual(from.Input, to.Input) {
+		fromCfg := parseRawToMap(from.Input)
+		toCfg := parseRawToMap(to.Input)
 		if fromCfg != nil && toCfg != nil {
-			changes = append(changes, diffJSONMaps(fromCfg, toCfg, path+"/config")...)
+			changes = append(changes, diffJSONMaps(fromCfg, toCfg, path+"/input")...)
 		} else {
 			changes = append(changes, WorkflowChange{
-				Path:   path + "/config",
+				Path:   path + "/input",
 				Kind:   ChangeKindModified,
-				Before: parseRawToAny(from.Config),
-				After:  parseRawToAny(to.Config),
+				Before: parseRawToAny(from.Input),
+				After:  parseRawToAny(to.Input),
 			})
 		}
 	}
@@ -445,4 +451,3 @@ func normalizeValueForDiff(v any) any {
 		return val
 	}
 }
-

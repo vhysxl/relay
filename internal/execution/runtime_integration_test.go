@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -19,11 +18,12 @@ import (
 )
 
 type runtimeFixture struct {
-	db    *sql.DB
-	repo  execution.Repository
-	logic execution.ExecutionLogic
-	exec  *execution.WorkflowExecution
-	ctx   context.Context
+	db     *sql.DB
+	repo   execution.Repository
+	logic  execution.ExecutionLogic
+	exec   *execution.WorkflowExecution
+	ctx    context.Context
+	leases *sync.Map
 }
 
 func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
@@ -37,8 +37,8 @@ func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
-	logic := execution.NewExecutionLogic(repo, wfRepo)
+	repo := execution.NewExecutionRepository(db)
+	logic := execution.NewExecutionLogic(repo, wfRepo, 15*time.Second)
 	resp, _, err := logic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -49,15 +49,15 @@ func runtimeDB(t *testing.T, steps []step.Step) runtimeFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtimeFixture{db, repo, logic, exec, ctx}
+	return runtimeFixture{db, repo, logic, exec, ctx, &sync.Map{}}
 }
 
 func basicStep(id string) step.Step {
-	return step.Step{ID: id, Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}
+	return step.Step{ID: id, Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
 }
 func (f runtimeFixture) claim(t *testing.T, worker string) *execution.StepExecution {
 	t.Helper()
-	_, s, err := f.repo.ClaimPending(f.ctx, worker, time.Minute)
+	s, err := f.tryClaim(f.ctx, worker)
 	if err != nil || s == nil {
 		t.Fatalf("claim: %+v %v", s, err)
 	}
@@ -76,10 +76,10 @@ func TestRuntimeCreationRollback(t *testing.T) {
 	f := runtimeDB(t, []step.Step{basicStep("a")})
 	now := time.Now().UTC()
 	id := uuid.NewString()
-	_, err := f.repo.CreateExecution(f.ctx, &execution.WorkflowExecution{ID: id, WorkflowID: f.exec.WorkflowID, Status: execution.StatusRunning, Context: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now, Steps: []execution.StepExecution{
-		{ID: uuid.NewString(), StepID: "valid", Type: "http", Config: json.RawMessage(`{}`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now},
-		{ID: uuid.NewString(), StepID: "invalid", Type: "http", Config: json.RawMessage(`{invalid`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now},
-	}})
+	_, _, err := f.repo.CreateExecutionWithIdempotency(f.ctx, &execution.WorkflowExecution{ID: id, WorkflowID: f.exec.WorkflowID, Status: execution.StatusRunning, Context: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now, Steps: []execution.StepExecution{
+		{ID: uuid.NewString(), StepID: "valid", Queue: "orders", Input: json.RawMessage("{}"), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now, Activity: "http.call"},
+		{ID: uuid.NewString(), StepID: "invalid", Queue: "orders", Input: json.RawMessage(`{invalid`), Status: execution.StatusPending, MaxAttempts: 1, Multiplier: 1, CreatedAt: now, UpdatedAt: now, Activity: "http.call"},
+	}}, &execution.ExecutionRequestRecord{WorkflowName: f.exec.WorkflowName, IdempotencyKey: uuid.NewString(), WorkflowExecutionID: id, InputContext: json.RawMessage(`{}`), ResponseReceipt: json.RawMessage(`{}`), CreatedAt: now}, false, f.exec.WorkflowID)
 	if err == nil {
 		t.Fatal("invalid insert unexpectedly succeeded")
 	}
@@ -110,7 +110,7 @@ func TestRuntimeConcurrentClaimsAndOutputs(t *testing.T) {
 			var s *execution.StepExecution
 			for s == nil {
 				var err error
-				_, s, err = f.repo.ClaimPending(f.ctx, worker, time.Minute)
+				s, err = f.tryClaim(f.ctx, worker)
 				if err != nil {
 					failures <- err
 					return
@@ -124,7 +124,7 @@ func TestRuntimeConcurrentClaimsAndOutputs(t *testing.T) {
 				}
 			}
 			results <- s.ID
-			if err := f.repo.CompleteStep(f.ctx, s.ID, worker, json.RawMessage(`{"value":9007199254740993}`)); err != nil {
+			if err := f.complete(f.ctx, s.ID, worker, json.RawMessage(`{"value":9007199254740993}`)); err != nil {
 				failures <- err
 			}
 		})
@@ -178,9 +178,9 @@ func TestRuntimeExpiredLeaseAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []func() error{
-		func() error { return f.repo.Heartbeat(f.ctx, claimed.ID, "old-worker", time.Minute) },
-		func() error { return f.repo.CompleteStep(f.ctx, claimed.ID, "old-worker", nil) },
-		func() error { return f.repo.FailStep(f.ctx, claimed.ID, "old-worker", "late") },
+		func() error { return f.heartbeat(f.ctx, claimed.ID, "old-worker", time.Minute) },
+		func() error { return f.complete(f.ctx, claimed.ID, "old-worker", nil) },
+		func() error { return f.fail(f.ctx, claimed.ID, "old-worker", "late") },
 	} {
 		if err := action(); !errors.Is(err, errdefs.ErrLockLost) {
 			t.Fatalf("expired owner accepted: %v", err)
@@ -194,10 +194,10 @@ func TestRuntimeExpiredLeaseAndRetry(t *testing.T) {
 	if next.Attempt != 2 {
 		t.Fatal("attempt not incremented")
 	}
-	if err := f.repo.CompleteStep(f.ctx, claimed.ID, "old-worker", nil); !errors.Is(err, errdefs.ErrLockLost) {
+	if err := f.complete(f.ctx, claimed.ID, "old-worker", nil); !errors.Is(err, errdefs.ErrLockLost) {
 		t.Fatal("old owner acknowledged retry")
 	}
-	if err := f.repo.CompleteStep(f.ctx, next.ID, "new-worker", nil); err != nil {
+	if err := f.complete(f.ctx, next.ID, "new-worker", nil); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(t) != execution.StatusCompleted {
@@ -211,9 +211,9 @@ func TestRuntimeReaperRacesWithLiveOwner(t *testing.T) {
 	start := make(chan struct{})
 	failures := make(chan error, 3)
 	var wg sync.WaitGroup
-	wg.Go(func() { <-start; failures <- f.repo.Heartbeat(f.ctx, s.ID, "worker", time.Minute) })
+	wg.Go(func() { <-start; failures <- f.heartbeat(f.ctx, s.ID, "worker", time.Minute) })
 	wg.Go(func() { <-start; _, err := f.repo.ReapExpiredSteps(f.ctx); failures <- err })
-	wg.Go(func() { <-start; failures <- f.repo.CompleteStep(f.ctx, s.ID, "worker", nil) })
+	wg.Go(func() { <-start; failures <- f.complete(f.ctx, s.ID, "worker", nil) })
 	close(start)
 	wg.Wait()
 	close(failures)
@@ -236,8 +236,8 @@ func TestRuntimeReaperRacesWithExpiredOwner(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var wg sync.WaitGroup
-	wg.Go(func() { <-start; results <- f.repo.Heartbeat(f.ctx, s.ID, "worker", time.Minute) })
-	wg.Go(func() { <-start; results <- f.repo.CompleteStep(f.ctx, s.ID, "worker", nil) })
+	wg.Go(func() { <-start; results <- f.heartbeat(f.ctx, s.ID, "worker", time.Minute) })
+	wg.Go(func() { <-start; results <- f.complete(f.ctx, s.ID, "worker", nil) })
 	var count int64
 	var reapErr error
 	wg.Go(func() { <-start; count, reapErr = f.repo.ReapExpiredSteps(f.ctx) })
@@ -258,20 +258,20 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 	a, b, c := basicStep("a"), basicStep("b"), basicStep("c")
 	c.DependsOn = []string{"a", "b"}
 	for _, s := range []*step.Step{&a, &b} {
-		s.Compensation = &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{"payload":"{{original.output}}"}`), Timeout: 9, Retry: &step.RetryPolicy{MaxAttempts: 1}}
+		s.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{\"payload\":\"{{this.output}}\"}"), Timeout: 9, Retry: &step.RetryPolicy{MaxAttempts: 1}, Activity: "message.send"}
 	}
 	f := runtimeDB(t, []step.Step{a, b, c})
 	// Definition changes must not overwrite the persisted execution snapshot.
-	if _, err := f.db.ExecContext(f.ctx, `UPDATE step_definitions SET timeout=99, type='http' WHERE workflow_id=?`, f.exec.WorkflowID); err != nil {
+	if _, err := f.db.ExecContext(f.ctx, `UPDATE step_definitions SET timeout=99, activity='http.call' WHERE workflow_id=?`, f.exec.WorkflowID); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
 		s := f.claim(t, "worker")
 		var err error
 		if s.StepID == "c" {
-			err = f.repo.FailStep(f.ctx, s.ID, "worker", "checkout failed")
+			err = f.fail(f.ctx, s.ID, "worker", "checkout failed")
 		} else {
-			err = f.repo.CompleteStep(f.ctx, s.ID, "worker", json.RawMessage(`{"charged":true}`))
+			err = f.complete(f.ctx, s.ID, "worker", json.RawMessage(`{"charged":true}`))
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -279,7 +279,7 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 	}
 	first, second := f.claim(t, "rollback-1"), f.claim(t, "rollback-2")
 	for _, s := range []*execution.StepExecution{first, second} {
-		if !s.IsCompensation || s.Type != "message" || s.TimeoutSeconds != 9 || s.MaxAttempts != 1 {
+		if !s.IsCompensation || s.Activity != "message.send" || s.TimeoutSeconds != 9 || s.MaxAttempts != 1 {
 			t.Fatalf("definition overwrote snapshot: %+v", s)
 		}
 		var config struct {
@@ -287,14 +287,14 @@ func TestRuntimeSnapshotAndCompensationFailure(t *testing.T) {
 				Charged bool `json:"charged"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal(s.Config, &config); err != nil || !config.Payload.Charged {
-			t.Fatalf("original output missing: %s %v", s.Config, err)
+		if err := json.Unmarshal(s.Input, &config); err != nil || !config.Payload.Charged {
+			t.Fatalf("original output missing: %s %v", s.Input, err)
 		}
 	}
-	if err := f.repo.FailStep(f.ctx, first.ID, "rollback-1", "refund failed"); err != nil {
+	if err := f.fail(f.ctx, first.ID, "rollback-1", "refund failed"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.repo.CompleteStep(f.ctx, second.ID, "rollback-2", nil); err != nil {
+	if err := f.complete(f.ctx, second.ID, "rollback-2", nil); err != nil {
 		t.Fatal(err)
 	}
 	if f.status(t) != execution.StatusCompensationFailed {
@@ -333,4 +333,44 @@ func TestRuntimeRecoveryContinuesAfterWorkflowError(t *testing.T) {
 	if good.Steps[0].Status != execution.StatusPending {
 		t.Fatal("healthy workflow not recovered")
 	}
+}
+
+// Runtime fixtures retain actual lease tokens issued by ClaimTask. Every report
+// exercises the same service/worker/token checks as an external worker.
+func (f runtimeFixture) tryClaim(ctx context.Context, worker string) (*execution.StepExecution, error) {
+	result, err := f.repo.ClaimTask(ctx, execution.ClaimFilter{
+		ServiceID: "runtime-tests", WorkerID: worker, Queue: "orders", LeaseDuration: time.Minute,
+	})
+	if err != nil || result == nil {
+		return nil, err
+	}
+	f.leases.Store(result.StepExecution.ID+"\x00"+worker, result.LeaseToken)
+	return result.StepExecution, nil
+}
+
+func (f runtimeFixture) token(id, worker string) string {
+	token, ok := f.leases.Load(id + "\x00" + worker)
+	if !ok {
+		return ""
+	}
+	return token.(string)
+}
+
+func (f runtimeFixture) complete(ctx context.Context, id, worker string, output json.RawMessage) error {
+	if f.token(id, worker) == "" {
+		return errdefs.ErrLockLost
+	}
+	return f.repo.CompleteTask(ctx, "runtime-tests", id, worker, f.token(id, worker), output)
+}
+
+func (f runtimeFixture) fail(ctx context.Context, id, worker, message string) error {
+	if f.token(id, worker) == "" {
+		return errdefs.ErrLockLost
+	}
+	return f.repo.FailTask(ctx, "runtime-tests", id, worker, f.token(id, worker), message, true)
+}
+
+func (f runtimeFixture) heartbeat(ctx context.Context, id, worker string, duration time.Duration) error {
+	_, _, err := f.repo.HeartbeatTask(ctx, "runtime-tests", id, worker, f.token(id, worker), duration)
+	return err
 }

@@ -1,60 +1,22 @@
-# Pre-merge CI for Relay
-# Triggers on Merge Requests targeting main and commits to main
-
-workflow:
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == $CI_DEFAULT_BRANCH'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+default:
+  tags:
+    - docker
 
 stages:
-  - test
-  - security
-  - secret-detection
-
-variables:
-  GOPATH: "$CI_PROJECT_DIR/.go"
-  GOTOOLCHAIN: "auto"
-  SECRET_DETECTION_ENABLED: "true"
-
-default:
-  image: golang:latest
-  cache:
-    key:
-      files:
-        - go.sum
-    paths:
-      - .go/pkg/mod/
-
-test:
-  stage: test
-  before_script:
-    - export PATH="$GOPATH/bin:$PATH"
-    - go version
-  script:
-    - go vet ./...
-    - go test -v -race -timeout 5m ./...
-
-integration:
-  stage: test
-  services:
-    - name: mysql:8.4
-      alias: mysql
-  variables:
-    MYSQL_ROOT_PASSWORD: relay_test_only
-    MYSQL_ROOT_HOST: "%"
-    TEST_DB_DSN: "root:relay_test_only@tcp(mysql:3306)/?parseTime=true&clientFoundRows=true"
-  script:
-    # Each test creates its own schema and applies the existing migrations.
-    # Configured database failures are fatal, never silently skipped.
-    - go test -v -race -count=1 -timeout 5m ./internal/execution ./internal/worker ./internal/step ./internal/workflow
-
-govulncheck:
-  stage: security
-  before_script:
-    - export PATH="$GOPATH/bin:$PATH"
-    - go install golang.org/x/vuln/cmd/govulncheck@latest
-  script:
-    - govulncheck ./...
+  - set-variable
+  - build
+  - push
 
 include:
-  - template: Security/Secret-Detection.gitlab-ci.yml
+  - project: "devops/gitlab-cicd-templates"
+    ref: "master"
+    file: "/build-docker.gitlab-ci.yml"
+
+variables:
+  BASE_PROJECT_NAME: "relay"
+
+build-docker:
+  extends: .build-docker
+
+push-docker:
+  extends: .push-docker

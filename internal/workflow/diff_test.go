@@ -16,12 +16,10 @@ func TestCompareWorkflows_FirstVersionOrIdentical(t *testing.T) {
 		Context: json.RawMessage(`{"currency":"IDR","val":9007199254740992}`),
 		Steps: []step.Step{
 			{
-				ID:        "step-1",
-				Name:      "Step One",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"url":"https://api.test/1","amount":100}`),
-				DependsOn: []string{"step-a", "step-b"},
-			},
+				ID:   "step-1",
+				Name: "Step One", Queue: "orders",
+				Input:     json.RawMessage("{\"url\":\"https://api.test/1\",\"amount\":100}"),
+				DependsOn: []string{"step-a", "step-b"}, Activity: "http.call"},
 		},
 	}
 
@@ -33,12 +31,10 @@ func TestCompareWorkflows_FirstVersionOrIdentical(t *testing.T) {
 		Context: json.RawMessage(`{"val":9007199254740992,"currency":"IDR"}`),
 		Steps: []step.Step{
 			{
-				ID:        "step-1",
-				Name:      "Step One",
-				Type:      step.StepTypeHTTP,
-				Config:    json.RawMessage(`{"amount":100,"url":"https://api.test/1"}`),
-				DependsOn: []string{"step-b", "step-a"},
-			},
+				ID:   "step-1",
+				Name: "Step One", Queue: "orders",
+				Input:     json.RawMessage("{\"amount\":100,\"url\":\"https://api.test/1\"}"),
+				DependsOn: []string{"step-b", "step-a"}, Activity: "http.call"},
 		},
 	}
 
@@ -88,14 +84,14 @@ func TestCompareWorkflows_ContextChanges(t *testing.T) {
 func TestCompareWorkflows_StepAddedAndRemoved(t *testing.T) {
 	wf1 := &workflow.Workflow{
 		Steps: []step.Step{
-			{ID: "step-deleted", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "step-deleted", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"},
+			{ID: "step-common", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"},
 		},
 	}
 	wf2 := &workflow.Workflow{
 		Steps: []step.Step{
-			{ID: "step-common", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
-			{ID: "step/added~one", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)},
+			{ID: "step-common", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"},
+			{ID: "step/added~one", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"},
 		},
 	}
 
@@ -125,34 +121,30 @@ func TestCompareWorkflows_StepFieldModifications(t *testing.T) {
 	wf1 := &workflow.Workflow{
 		Steps: []step.Step{
 			{
-				ID:           "step-1",
-				Name:         "Old Name",
-				Type:         step.StepTypeHTTP,
-				Config:       json.RawMessage(`{"url":"https://old.com","num":9007199254740992}`),
+				ID:   "step-1",
+				Name: "Old Name", Queue: "orders",
+				Input:        json.RawMessage("{\"url\":\"https://old.com\",\"num\":9007199254740992}"),
 				DependsOn:    []string{"dep-a"},
 				Timeout:      10,
 				Retry:        &step.RetryPolicy{MaxAttempts: 2, Backoff: 1},
-				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://refund.old"}`)},
+				Compensation: &step.Compensation{Queue: "orders", Input: json.RawMessage("{\"url\":\"https://refund.old\"}"), Activity: "http.call"},
 				Irreversible: false,
-				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"gold"}`),
-			},
+				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"gold"}`), Activity: "http.call"},
 		},
 	}
 
 	wf2 := &workflow.Workflow{
 		Steps: []step.Step{
 			{
-				ID:           "step-1",
-				Name:         "New Name",
-				Type:         step.StepTypeMessage,
-				Config:       json.RawMessage(`{"url":"https://old.com","num":9007199254740993}`),
+				ID:   "step-1",
+				Name: "New Name", Queue: "orders",
+				Input:        json.RawMessage("{\"url\":\"https://old.com\",\"num\":9007199254740993}"),
 				DependsOn:    []string{"dep-a", "dep-b"},
 				Timeout:      30,
 				Retry:        &step.RetryPolicy{MaxAttempts: 5, Backoff: 1},
-				Compensation: &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"https://refund.new"}`)},
+				Compensation: &step.Compensation{Queue: "orders", Input: json.RawMessage("{\"url\":\"https://refund.new\"}"), Activity: "http.call"},
 				Irreversible: true,
-				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"platinum"}`),
-			},
+				When:         json.RawMessage(`{"ref":"user.tier","op":"eq","value":"platinum"}`), Activity: "message.send"},
 		},
 	}
 
@@ -164,12 +156,12 @@ func TestCompareWorkflows_StepFieldModifications(t *testing.T) {
 
 	expectedPaths := []string{
 		"/steps/step-1/name",
-		"/steps/step-1/type",
-		"/steps/step-1/config/num",
+		"/steps/step-1/activity",
+		"/steps/step-1/input/num",
 		"/steps/step-1/depends_on",
 		"/steps/step-1/timeout",
 		"/steps/step-1/retry/max_attempts",
-		"/steps/step-1/compensation/config/url",
+		"/steps/step-1/compensation/input/url",
 		"/steps/step-1/irreversible",
 		"/steps/step-1/when",
 	}
@@ -187,19 +179,15 @@ func TestCompareWorkflows_ArrayOrderSignificanceInConfig(t *testing.T) {
 	wf1 := &workflow.Workflow{
 		Steps: []step.Step{
 			{
-				ID:     "s1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"items":[1, 2, 3]}`),
-			},
+				ID: "s1", Queue: "orders",
+				Input: json.RawMessage("{\"items\":[1,2,3]}"), Activity: "http.call"},
 		},
 	}
 	wf2 := &workflow.Workflow{
 		Steps: []step.Step{
 			{
-				ID:     "s1",
-				Type:   step.StepTypeHTTP,
-				Config: json.RawMessage(`{"items":[3, 2, 1]}`),
-			},
+				ID: "s1", Queue: "orders",
+				Input: json.RawMessage("{\"items\":[3,2,1]}"), Activity: "http.call"},
 		},
 	}
 
@@ -207,7 +195,7 @@ func TestCompareWorkflows_ArrayOrderSignificanceInConfig(t *testing.T) {
 	if len(changes) != 1 {
 		t.Fatalf("expected 1 change for config array order difference, got %d: %+v", len(changes), changes)
 	}
-	if changes[0].Path != "/steps/s1/config/items" || changes[0].Kind != workflow.ChangeKindModified {
+	if changes[0].Path != "/steps/s1/input/items" || changes[0].Kind != workflow.ChangeKindModified {
 		t.Errorf("unexpected change: %+v", changes[0])
 	}
 }
@@ -277,4 +265,3 @@ func TestWorkflowChange_JSONSerialization_PreservesNullFalseZero(t *testing.T) {
 		t.Fatalf("expected 'after' to be false, got %v", val)
 	}
 }
-

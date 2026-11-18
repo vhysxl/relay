@@ -13,17 +13,16 @@ import (
 
 	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/worker"
 	"github.com/vhysxl/relay/pkg/errdefs"
 )
 
 type mockExecutionRepository struct {
-	claimTaskFunc        func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error)
-	heartbeatTaskFunc    func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
-	completeTaskFunc     func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
-	failTaskFunc         func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
-	getStepTaskQueueFunc func(ctx context.Context, stepExecID string) (string, error)
+	claimTaskFunc     func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error)
+	heartbeatTaskFunc func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
+	completeTaskFunc  func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
+	failTaskFunc      func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
+	getStepQueueFunc  func(ctx context.Context, stepExecID string) (string, error)
 }
 
 func (m *mockExecutionRepository) ClaimTask(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
@@ -54,72 +53,16 @@ func (m *mockExecutionRepository) FailTask(ctx context.Context, serviceID, stepE
 	return nil
 }
 
-func (m *mockExecutionRepository) GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error) {
-	if m.getStepTaskQueueFunc != nil {
-		return m.getStepTaskQueueFunc(ctx, stepExecID)
+func (m *mockExecutionRepository) GetStepQueue(ctx context.Context, stepExecID string) (string, error) {
+	if m.getStepQueueFunc != nil {
+		return m.getStepQueueFunc(ctx, stepExecID)
 	}
-	return "legacy", nil
-}
-
-func (m *mockExecutionRepository) ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error) {
-	return nil, nil, nil
-}
-
-func (m *mockExecutionRepository) Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error {
-	return nil
-}
-
-func (m *mockExecutionRepository) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-	return nil
-}
-
-func (m *mockExecutionRepository) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-	return nil
-}
-
-func TestQueueNotifier(t *testing.T) {
-	notifier := worker.NewQueueNotifier()
-	ch1, cancel1 := notifier.Subscribe("orders")
-	defer cancel1()
-	ch2, cancel2 := notifier.Subscribe("orders")
-	defer cancel2()
-	chOther, cancelOther := notifier.Subscribe("payments")
-	defer cancelOther()
-
-	notifier.Notify("orders")
-
-	select {
-	case <-ch1:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("expected ch1 to receive notification")
-	}
-
-	select {
-	case <-ch2:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("expected ch2 to receive notification")
-	}
-
-	select {
-	case <-chOther:
-		t.Fatalf("expected chOther NOT to receive notification")
-	default:
-	}
-
-	cancel1()
-	notifier.Notify("orders")
-
-	select {
-	case <-ch2:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("expected ch2 to receive notification after cancel1")
-	}
+	return "orders", nil
 }
 
 func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	// Empty worker ID
 	_, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{})
@@ -131,6 +74,7 @@ func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	neg := -5
 	_, err = logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
 		WorkerID:      "w-1",
+		Queue:         "orders",
 		WaitTimeoutMS: &neg,
 	})
 	if !errors.Is(err, errdefs.ErrInvalidWaitTimeout) {
@@ -141,6 +85,7 @@ func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	tooLong := 30000
 	_, err = logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
 		WorkerID:      "w-1",
+		Queue:         "orders",
 		WaitTimeoutMS: &tooLong,
 	})
 	if !errors.Is(err, errdefs.ErrInvalidWaitTimeout) {
@@ -151,6 +96,7 @@ func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	zero := 0
 	res, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
 		WorkerID:      "w-1",
+		Queue:         "orders",
 		WaitTimeoutMS: &zero,
 	})
 	if err != nil || res != nil {
@@ -161,15 +107,12 @@ func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	actName := "order.create"
 	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
 		return &execution.ClaimResult{
-			StepDefinition: &step.Step{ID: "step-1", Type: step.StepTypeActivity, Config: json.RawMessage(`{"amount":100}`)},
-			StepExecution: &execution.StepExecution{
+			StepExecution: &execution.StepExecution{Input: json.RawMessage("{\"amount\":100}"),
 				ID:                  "exec-step-1",
 				WorkflowExecutionID: "wf-exec-1",
-				StepID:              "step-1",
-				TaskQueue:           "orders",
-				ActivityName:        &actName,
-				Attempt:             1,
-			},
+				StepID:              "step-1", Queue: "orders",
+				Activity: actName,
+				Attempt:  1},
 			LeaseToken:     "test-token",
 			LeaseExpiresAt: time.Now().Add(30 * time.Second),
 			LeaseDuration:  30 * time.Second,
@@ -184,15 +127,14 @@ func TestWorkerLogic_ClaimTask_ValidationAndImmediate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected successful claim, got err=%v", err)
 	}
-	if res.TaskID != "exec-step-1" || res.ActivityName != "order.create" {
+	if res.TaskID != "exec-step-1" || res.Activity != "order.create" {
 		t.Fatalf("unexpected claim result: %+v", res)
 	}
 }
 
-func TestWorkerLogic_ClaimTask_WakeupViaNotifier(t *testing.T) {
+func TestWorkerLogic_ClaimTask_FindsTaskByPolling(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	var callCount int
 	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
@@ -201,14 +143,11 @@ func TestWorkerLogic_ClaimTask_WakeupViaNotifier(t *testing.T) {
 			return nil, nil // First attempt returns nothing
 		}
 		return &execution.ClaimResult{
-			StepDefinition: &step.Step{ID: "step-1", Type: step.StepTypeActivity, Config: json.RawMessage(`{}`)},
-			StepExecution: &execution.StepExecution{
+			StepExecution: &execution.StepExecution{Input: json.RawMessage("{\"amount\":100}"),
 				ID:                  "exec-step-1",
 				WorkflowExecutionID: "wf-exec-1",
-				StepID:              "step-1",
-				TaskQueue:           "orders",
-				Attempt:             1,
-			},
+				StepID:              "step-1", Queue: "orders",
+				Attempt: 1, Activity: "test.run"},
 			LeaseToken:     "token-abc",
 			LeaseExpiresAt: time.Now().Add(30 * time.Second),
 			LeaseDuration:  30 * time.Second,
@@ -226,28 +165,22 @@ func TestWorkerLogic_ClaimTask_WakeupViaNotifier(t *testing.T) {
 		done <- res
 	}()
 
-	// Give goroutine time to start waiting
-	time.Sleep(50 * time.Millisecond)
-	// Trigger wake-up notification
-	notifier.Notify("orders")
-
 	select {
 	case res := <-done:
 		if res == nil || res.TaskID != "exec-step-1" {
-			t.Fatalf("expected claim result on notification wakeup, got %+v", res)
+			t.Fatalf("expected claim result on polling, got %+v", res)
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("timed out waiting for task claim after notifier wake-up")
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatalf("timed out waiting for task claim during polling")
 	}
 }
 
 func TestWorkerLogic_ClaimTask_OmittedWaitTimeout_CappedByConfig(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
 	cfg := &config.Config{
 		WorkerLongPollTimeout: 50 * time.Millisecond,
 	}
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, cfg, notifier)
+	logic := worker.NewWorkerLogic(repo, cfg)
 
 	start := time.Now()
 	res, err := logic.ClaimTask(context.Background(), "srv-1", worker.ClaimRequest{
@@ -271,8 +204,7 @@ func TestWorkerLogic_ClaimTask_OmittedWaitTimeout_CappedByConfig(t *testing.T) {
 
 func TestWorkerHandler_HTTPProtocol(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	cfg := &config.Config{
 		WorkerAPIEnabled: true,
@@ -299,14 +231,14 @@ func TestWorkerHandler_HTTPProtocol(t *testing.T) {
 
 	// 1. Unauthorized request
 	clientUnauth := worker.NewTestWorkerClient(server.URL, "wrong-token", "w1", "payments")
-	_, err := clientUnauth.Claim(context.Background(), nil, nil, 0)
+	_, err := clientUnauth.Claim(context.Background(), 0)
 	if err == nil {
 		t.Fatalf("expected unauthorized error with wrong token")
 	}
 
 	// 2. Forbidden queue
 	clientForbidden := worker.NewTestWorkerClient(server.URL, "token-secret-123", "w1", "other-queue")
-	_, err = clientForbidden.Claim(context.Background(), nil, nil, 0)
+	_, err = clientForbidden.Claim(context.Background(), 0)
 	if err == nil {
 		t.Fatalf("expected forbidden queue error")
 	}
@@ -316,24 +248,21 @@ func TestWorkerHandler_HTTPProtocol(t *testing.T) {
 
 	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
 		return &execution.ClaimResult{
-			StepDefinition: &step.Step{ID: "pay-step", Type: step.StepTypeActivity, Config: json.RawMessage(`{"charge":50}`)},
-			StepExecution: &execution.StepExecution{
+			StepExecution: &execution.StepExecution{Input: json.RawMessage("{\"amount\":100}"),
 				ID:                  "step-exec-99",
 				WorkflowExecutionID: "wf-exec-99",
-				StepID:              "pay-step",
-				TaskQueue:           "payments",
-				Attempt:             1,
-			},
+				StepID:              "pay-step", Queue: "orders",
+				Attempt: 1, Activity: "test.run"},
 			LeaseToken:     "tok-99",
 			LeaseExpiresAt: time.Now().Add(30 * time.Second),
 			LeaseDuration:  30 * time.Second,
 		}, nil
 	}
-	repo.getStepTaskQueueFunc = func(ctx context.Context, stepExecID string) (string, error) {
+	repo.getStepQueueFunc = func(ctx context.Context, stepExecID string) (string, error) {
 		return "payments", nil
 	}
 
-	task, err := client.Claim(context.Background(), []string{"activity"}, nil, 0)
+	task, err := client.Claim(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("claim failed: %v", err)
 	}
@@ -375,8 +304,7 @@ func TestWorkerHandler_HTTPProtocol(t *testing.T) {
 
 func TestWorkerLogic_FailTask_RetryableDefault(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	var recordedRetryable bool
 	repo.failTaskFunc = func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error {
@@ -420,30 +348,23 @@ func TestWorkerLogic_FailTask_RetryableDefault(t *testing.T) {
 
 func TestWorkerLogic_ClaimTask_ContractFields(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
 	cfg := &config.Config{
 		DefaultTimeout:           45 * time.Second,
 		DefaultHeartBeatInterval: 10 * time.Second,
 		WorkerLongPollTimeout:    25 * time.Second,
 	}
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier, cfg)
+	logic := worker.NewWorkerLogic(repo, cfg)
 
 	deadline := time.Now().Add(60 * time.Second)
 	repo.claimTaskFunc = func(ctx context.Context, filter execution.ClaimFilter) (*execution.ClaimResult, error) {
-		if filter.DefaultTimeout != 45*time.Second {
-			t.Fatalf("expected filter.DefaultTimeout to be 45s, got %v", filter.DefaultTimeout)
-		}
 		return &execution.ClaimResult{
-			StepDefinition: &step.Step{ID: "step-comp", Type: step.StepTypeActivity, Config: json.RawMessage(`{}`)},
-			StepExecution: &execution.StepExecution{
+			StepExecution: &execution.StepExecution{Input: json.RawMessage("{\"amount\":100}"),
 				ID:                  "exec-step-comp-1",
 				WorkflowExecutionID: "wf-exec-1",
-				StepID:              "step-comp",
-				TaskQueue:           "orders",
-				IsCompensation:      true,
-				TimeoutSeconds:      60,
-				Attempt:             2,
-			},
+				StepID:              "step-comp", Queue: "orders",
+				IsCompensation: true,
+				TimeoutSeconds: 60,
+				Attempt:        2, Activity: "test.run"},
 			LeaseToken:     "test-token-comp",
 			LeaseExpiresAt: time.Now().Add(30 * time.Second),
 			LeaseDuration:  30 * time.Second,
@@ -460,8 +381,8 @@ func TestWorkerLogic_ClaimTask_ContractFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected claim error: %v", err)
 	}
-	if res.StepExecutionID != "exec-step-comp-1" || res.TaskID != "exec-step-comp-1" {
-		t.Fatalf("expected StepExecutionID and TaskID to be exec-step-comp-1, got %s, %s", res.StepExecutionID, res.TaskID)
+	if res.TaskID != "exec-step-comp-1" {
+		t.Fatalf("expected TaskID exec-step-comp-1, got %s", res.TaskID)
 	}
 	if !res.IsCompensation {
 		t.Fatalf("expected IsCompensation to be true")
@@ -479,8 +400,7 @@ func TestWorkerLogic_ClaimTask_ContractFields(t *testing.T) {
 
 func TestWorkerHandler_PayloadLimit(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	cfg := &config.Config{
 		WorkerAPIEnabled: true,
@@ -519,8 +439,7 @@ func TestWorkerHandler_PayloadLimit(t *testing.T) {
 
 func TestWorkerHandler_DisabledAPI(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
-	logic := worker.NewWorkerLogic(repo, 30*time.Second, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, config.DefaultConfig())
 
 	cfg := &config.Config{
 		WorkerAPIEnabled: false,
@@ -548,9 +467,8 @@ func TestWorkerHandler_DisabledAPI(t *testing.T) {
 
 func TestWorkerLogic_HeartbeatDurationCap(t *testing.T) {
 	repo := &mockExecutionRepository{}
-	notifier := worker.NewQueueNotifier()
 	backendLease := 30 * time.Second
-	logic := worker.NewWorkerLogic(repo, backendLease, 25*time.Second, notifier)
+	logic := worker.NewWorkerLogic(repo, &config.Config{DefaultLeaseDuration: backendLease})
 
 	var receivedDuration time.Duration
 	repo.heartbeatTaskFunc = func(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error) {
@@ -603,4 +521,3 @@ func TestWorkerLogic_HeartbeatDurationCap(t *testing.T) {
 		t.Fatalf("expected repo to receive backendLease (30s), got %v", receivedDuration)
 	}
 }
-

@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
@@ -33,8 +33,8 @@ func conditionalRuntimeDB(t *testing.T, steps []step.Step, contextJSON json.RawM
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo := execution.NewExecutionRepository(db, &config.Config{DefaultLeaseDuration: time.Minute})
-	logic := execution.NewExecutionLogic(repo, wfRepo)
+	repo := execution.NewExecutionRepository(db)
+	logic := execution.NewExecutionLogic(repo, wfRepo, 15*time.Second)
 	resp, _, err := logic.ExecuteWorkflow(ctx, wf.Name, &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: uuid.NewString(),
 	})
@@ -45,7 +45,7 @@ func conditionalRuntimeDB(t *testing.T, steps []step.Step, contextJSON json.RawM
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtimeFixture{db, repo, logic, exec, ctx}
+	return runtimeFixture{db, repo, logic, exec, ctx, &sync.Map{}}
 }
 
 func TestRuntimeConditional_ContextTrue(t *testing.T) {
@@ -78,8 +78,8 @@ func TestRuntimeConditional_ContextFalse_SkipsAndUnlocksDependent(t *testing.T) 
 
 	f := conditionalRuntimeDB(t, []step.Step{stepA, stepB}, json.RawMessage(`{"user":{"tier":"silver"}}`))
 
-	// Step A condition is false -> ClaimPending skips it and returns nil task
-	_, claimed, err := f.repo.ClaimPending(f.ctx, "worker-1", time.Minute)
+	// Step A condition is false -> ClaimTask skips it and returns nil task
+	claimed, err := f.tryClaim(f.ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("unexpected claim error: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestRuntimeConditional_StepOutputAnchor(t *testing.T) {
 
 	// Claim and complete Step A with output
 	claimedA := f.claim(t, "worker-a")
-	err := f.repo.CompleteStep(f.ctx, claimedA.ID, "worker-a", json.RawMessage(`{"result":{"vip":true}}`))
+	err := f.complete(f.ctx, claimedA.ID, "worker-a", json.RawMessage(`{"result":{"vip":true}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,13 +139,13 @@ func TestRuntimeConditional_ChainedSkipsCompleteWorkflow(t *testing.T) {
 	f := conditionalRuntimeDB(t, []step.Step{stepA, stepB}, json.RawMessage(`{"enable_a":false,"enable_b":false}`))
 
 	// Claim step-a (evaluates false -> skips)
-	_, claimed, err := f.repo.ClaimPending(f.ctx, "worker-1", time.Minute)
+	claimed, err := f.tryClaim(f.ctx, "worker-1")
 	if err != nil || claimed != nil {
 		t.Fatalf("expected skip a, got %+v %v", claimed, err)
 	}
 
 	// Claim step-b (evaluates false -> skips)
-	_, claimed, err = f.repo.ClaimPending(f.ctx, "worker-1", time.Minute)
+	claimed, err = f.tryClaim(f.ctx, "worker-1")
 	if err != nil || claimed != nil {
 		t.Fatalf("expected skip b, got %+v %v", claimed, err)
 	}
@@ -164,7 +164,7 @@ func TestRuntimeConditional_MissingAnchorFailsWithoutExecutionAttempt(t *testing
 	f := conditionalRuntimeDB(t, []step.Step{stepA}, nil)
 
 	// Claim: condition evaluation fails -> step marked FAILED, attempt = 0, workflow fails
-	_, claimed, err := f.repo.ClaimPending(f.ctx, "worker-1", time.Minute)
+	claimed, err := f.tryClaim(f.ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("claim failed: %v", err)
 	}
@@ -189,8 +189,8 @@ func TestRuntimeConditional_MissingAnchorFailsWithoutExecutionAttempt(t *testing
 
 func TestRuntimeConditional_SkippedStepCompensationCancelledAndRollbackSucceeds(t *testing.T) {
 	a, b, c := basicStep("a"), basicStep("b"), basicStep("c")
-	a.Compensation = &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}
-	b.Compensation = &step.Compensation{Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`)}
+	a.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
+	b.Compensation = &step.Compensation{Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}
 	b.When = json.RawMessage(`{"ref":"run_b","op":"eq","value":true}`)
 	b.DependsOn = []string{"a"}
 	c.DependsOn = []string{"b"}
@@ -199,19 +199,19 @@ func TestRuntimeConditional_SkippedStepCompensationCancelledAndRollbackSucceeds(
 
 	// 1. Claim and complete step A
 	clA := f.claim(t, "worker-a")
-	if err := f.repo.CompleteStep(f.ctx, clA.ID, "worker-a", nil); err != nil {
+	if err := f.complete(f.ctx, clA.ID, "worker-a", nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Claim step B: skips because run_b is false
-	_, clB, err := f.repo.ClaimPending(f.ctx, "worker-b", time.Minute)
+	clB, err := f.tryClaim(f.ctx, "worker-b")
 	if err != nil || clB != nil {
 		t.Fatalf("expected skip b, got %+v %v", clB, err)
 	}
 
 	// 3. Claim step C: fail step C
 	clC := f.claim(t, "worker-c")
-	if err := f.repo.FailStep(f.ctx, clC.ID, "worker-c", "fatal error"); err != nil {
+	if err := f.fail(f.ctx, clC.ID, "worker-c", "fatal error"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -237,7 +237,7 @@ func TestRuntimeConditional_SkippedStepCompensationCancelledAndRollbackSucceeds(
 	}
 
 	// Complete rollback for step A
-	if err := f.repo.CompleteStep(f.ctx, rollbackA.ID, "worker-rollback", nil); err != nil {
+	if err := f.complete(f.ctx, rollbackA.ID, "worker-rollback", nil); err != nil {
 		t.Fatal(err)
 	}
 

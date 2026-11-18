@@ -43,19 +43,19 @@ func areCompensationsEqual(c1, c2 *step.Compensation) bool {
 	if c1 == nil || c2 == nil {
 		return false
 	}
-	return c1.Type == c2.Type &&
-		util.AreJSONEqual(c1.Config, c2.Config) &&
+	return c1.Queue == c2.Queue && c1.Activity == c2.Activity &&
+		util.AreJSONEqual(util.NormalizeInput(c1.Input), util.NormalizeInput(c2.Input)) &&
 		c1.Timeout == c2.Timeout &&
 		areRetriesEqual(c1.Retry, c2.Retry)
 }
 
 func isStepEqual(s1, s2 step.Step) bool {
 	return s1.ID == s2.ID &&
-		s1.Type == s2.Type &&
+		s1.Queue == s2.Queue && s1.Activity == s2.Activity &&
 		s1.Name == s2.Name &&
 		s1.Timeout == s2.Timeout &&
 		s1.Irreversible == s2.Irreversible &&
-		util.AreJSONEqual(s1.Config, s2.Config) &&
+		util.AreJSONEqual(util.NormalizeInput(s1.Input), util.NormalizeInput(s2.Input)) &&
 		util.AreJSONEqual(s1.When, s2.When) &&
 		util.AreStringSlicesEqualUnordered(s1.DependsOn, s2.DependsOn) &&
 		areRetriesEqual(s1.Retry, s2.Retry) &&

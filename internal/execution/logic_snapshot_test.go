@@ -5,19 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/internal/workflow"
 	"github.com/vhysxl/relay/pkg/errdefs"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 type snapshotRepository struct {
 	ExecutionRepository
 	create func(*WorkflowExecution) error
-}
-
-func (r snapshotRepository) CreateExecution(_ context.Context, s *WorkflowExecution) (*WorkflowExecution, error) {
-	return s, r.create(s)
 }
 
 func (r snapshotRepository) CreateExecutionWithIdempotency(_ context.Context, s *WorkflowExecution, record *ExecutionRequestRecord, _ bool, _ string) (*ExecuteWorkflowResponse, bool, error) {
@@ -49,8 +47,8 @@ func (r snapshotReader) GetWorkflowVersion(_ context.Context, name string, _ int
 
 func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 	wf := &workflow.Workflow{ID: "wf-id", Context: json.RawMessage(`{"tier":"diamond","nested":{"base":true}}`), Steps: []step.Step{
-		{ID: "user", Type: step.StepTypeHTTP, Config: json.RawMessage(`{"url":"/{{tier}}"}`), Compensation: &step.Compensation{Type: step.StepTypeMessage, Config: json.RawMessage(`{}`), Timeout: 7, Retry: &step.RetryPolicy{MaxAttempts: 4, Backoff: 2, Multiplier: 2}}},
-		{ID: "checkout", Type: step.StepTypeHTTP, Config: json.RawMessage(`{}`), DependsOn: []string{"user"}},
+		{ID: "user", Queue: "orders", Input: json.RawMessage("{\"url\":\"/{{tier}}\"}"), Compensation: &step.Compensation{Queue: "orders", Input: json.RawMessage("{}"), Timeout: 7, Retry: &step.RetryPolicy{MaxAttempts: 4, Backoff: 2, Multiplier: 2}, Activity: "message.send"}, Activity: "http.call"},
+		{ID: "checkout", Queue: "orders", Input: json.RawMessage("{}"), DependsOn: []string{"user"}, Activity: "http.call"},
 	}}
 	called := false
 	logic := NewExecutionLogic(snapshotRepository{create: func(exec *WorkflowExecution) error {
@@ -62,10 +60,10 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 			t.Fatalf("steps: %+v", exec.Steps)
 		}
 		normal, comp, dependent := exec.Steps[0], exec.Steps[1], exec.Steps[2]
-		if normal.Status != StatusPending || normal.MaxAttempts != 1 || normal.Multiplier != 1 || string(normal.Config) != `{"url":"/diamond"}` {
+		if normal.Status != StatusPending || normal.MaxAttempts != 1 || normal.Multiplier != 1 || string(normal.Input) != `{"url":"/{{tier}}"}` {
 			t.Fatalf("normal: %+v", normal)
 		}
-		if !comp.IsCompensation || comp.Status != StatusWaiting || comp.Type != "message" || comp.TimeoutSeconds != 7 || comp.MaxAttempts != 4 || len(comp.DependsOn) != 1 || comp.DependsOn[0] != "checkout" {
+		if !comp.IsCompensation || comp.Status != StatusWaiting || comp.Activity != "message.send" || comp.TimeoutSeconds != 7 || comp.MaxAttempts != 4 || len(comp.DependsOn) != 0 {
 			t.Fatalf("comp: %+v", comp)
 		}
 		if dependent.Status != StatusWaiting {
@@ -86,7 +84,7 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 			t.Fatalf("name %q", name)
 		}
 		return wf, nil
-	}})
+	}}, 15*time.Second)
 	_, _, err := logic.ExecuteWorkflow(context.Background(), " checkout ", &ExecuteWorkflowRequest{
 		IdempotencyKey: "key-snapshot-1",
 		Context:        json.RawMessage(`{"nested":{"override":true}}`),
@@ -94,7 +92,7 @@ func TestLogicBuildsIndependentSnapshot(t *testing.T) {
 	if err != nil || !called {
 		t.Fatalf("execute: %v", err)
 	}
-	if wf.Steps[1].DependsOn[0] != "user" || string(wf.Steps[0].Config) != `{"url":"/{{tier}}"}` {
+	if wf.Steps[1].DependsOn[0] != "user" || string(wf.Steps[0].Input) != `{"url":"/{{tier}}"}` {
 		t.Fatal("mutated workflow definition")
 	}
 }
@@ -109,7 +107,7 @@ func TestLogicExecutionFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			created := false
-			logic := NewExecutionLogic(snapshotRepository{create: func(*WorkflowExecution) error { created = true; return tc.writeErr }}, snapshotReader{read: func(string) (*workflow.Workflow, error) { return &workflow.Workflow{ID: "wf"}, tc.readErr }})
+			logic := NewExecutionLogic(snapshotRepository{create: func(*WorkflowExecution) error { created = true; return tc.writeErr }}, snapshotReader{read: func(string) (*workflow.Workflow, error) { return &workflow.Workflow{ID: "wf"}, tc.readErr }}, 15*time.Second)
 			_, _, err := logic.ExecuteWorkflow(context.Background(), "wf", &ExecuteWorkflowRequest{IdempotencyKey: "key-failure-1"})
 			want := tc.readErr
 			if want == nil {
@@ -119,5 +117,24 @@ func TestLogicExecutionFailures(t *testing.T) {
 				t.Fatalf("error %v created %v", err, created)
 			}
 		})
+	}
+}
+
+func TestSnapshotUsesEffectiveTimeoutAndIndependentTemplate(t *testing.T) {
+	definition := step.Step{ID: "work", Queue: "orders", Activity: "worker.run", Input: json.RawMessage(`{"id":"{{context.id}}"}`),
+		Compensation: &step.Compensation{Queue: "rollback", Activity: "worker.undo", Timeout: 9}}
+	result, err := snapshotSteps("execution", []step.Step{definition}, int(util.DurationSeconds(2500*time.Millisecond)), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result[0].TimeoutSeconds != 3 || result[1].TimeoutSeconds != 9 || len(result[1].DependsOn) != 0 {
+		t.Fatalf("snapshot policy: %+v", result)
+	}
+	if string(result[0].Input) != string(definition.Input) || string(result[1].Input) != "{}" {
+		t.Fatalf("templates: %+v", result)
+	}
+	result[0].Input[0] = '['
+	if definition.Input[0] != '{' {
+		t.Fatal("snapshot aliases definition input")
 	}
 }

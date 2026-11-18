@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"math/rand"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/vhysxl/relay/bootstrap/config"
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
 	"github.com/vhysxl/relay/pkg/errdefs"
+	"github.com/vhysxl/relay/pkg/util"
 )
 
 type workerLogic struct {
@@ -20,76 +19,22 @@ type workerLogic struct {
 	leaseDuration      time.Duration
 	defaultWaitTimeout time.Duration
 	maxLongPollTimeout time.Duration
-	defaultTimeout     time.Duration
 	heartbeatInterval  time.Duration
-	notifier           QueueNotifier
 }
 
 // NewWorkerLogic creates a new WorkerLogic for external worker operations.
-func NewWorkerLogic(
-	execRepo Repository,
-	leaseDuration time.Duration,
-	extra ...any,
-) WorkerLogic {
-	if leaseDuration <= 0 {
-		leaseDuration = 30 * time.Second
-	}
-	maxLongPollTimeout := 25 * time.Second
-	defaultTimeout := 15 * time.Second
-	heartbeatInterval := 10 * time.Second
-	var notifier QueueNotifier
-
-	for _, a := range extra {
-		switch v := a.(type) {
-		case *config.Config:
-			if v != nil {
-				if v.DefaultLeaseDuration > 0 {
-					leaseDuration = v.DefaultLeaseDuration
-				}
-				if v.WorkerLongPollTimeout > 0 {
-					maxLongPollTimeout = v.WorkerLongPollTimeout
-				}
-				if v.DefaultTimeout > 0 {
-					defaultTimeout = v.DefaultTimeout
-				}
-				if v.DefaultHeartBeatInterval > 0 {
-					heartbeatInterval = v.DefaultHeartBeatInterval
-				}
-			}
-		case time.Duration:
-			if v > 0 {
-				maxLongPollTimeout = v
-			}
-		case QueueNotifier:
-			notifier = v
-		}
-	}
-	if notifier == nil {
-		notifier = NewQueueNotifier()
-	}
-	defaultWaitTimeout := 25 * time.Second
-	if defaultWaitTimeout > maxLongPollTimeout {
-		defaultWaitTimeout = maxLongPollTimeout
-	}
+func NewWorkerLogic(execRepo Repository, cfg *config.Config) WorkerLogic {
 	return &workerLogic{
 		execRepo:           execRepo,
-		leaseDuration:      leaseDuration,
-		defaultWaitTimeout: defaultWaitTimeout,
-		maxLongPollTimeout: maxLongPollTimeout,
-		defaultTimeout:     defaultTimeout,
-		heartbeatInterval:  heartbeatInterval,
-		notifier:           notifier,
+		leaseDuration:      cfg.DefaultLeaseDuration,
+		defaultWaitTimeout: min(config.DefaultConfig().WorkerLongPollTimeout, cfg.WorkerLongPollTimeout),
+		maxLongPollTimeout: cfg.WorkerLongPollTimeout,
+		heartbeatInterval:  cfg.DefaultHeartBeatInterval,
 	}
 }
 
-func (l *workerLogic) NotifyQueue(queue string) {
-	if l.notifier != nil {
-		l.notifier.Notify(queue)
-	}
-}
-
-func (l *workerLogic) GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error) {
-	return l.execRepo.GetStepTaskQueue(ctx, stepExecID)
+func (l *workerLogic) GetStepQueue(ctx context.Context, stepExecID string) (string, error) {
+	return l.execRepo.GetStepQueue(ctx, stepExecID)
 }
 
 func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req ClaimRequest) (*ClaimTaskResponse, error) {
@@ -99,15 +44,15 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 	}
 
 	queue := strings.TrimSpace(req.Queue)
-	if queue == "" {
-		queue = "legacy"
+	if err := util.ValidateQueueName(queue); err != nil {
+		return nil, err
 	}
 
 	// Validate wait_timeout_ms
 	waitTimeout := l.defaultWaitTimeout
 	if req.WaitTimeoutMS != nil {
 		ms := *req.WaitTimeoutMS
-		if ms < 0 || time.Duration(ms)*time.Millisecond > l.maxLongPollTimeout {
+		if ms < 0 || ms > int(l.maxLongPollTimeout/time.Millisecond) {
 			return nil, errdefs.ErrInvalidWaitTimeout
 		}
 		waitTimeout = time.Duration(ms) * time.Millisecond
@@ -116,18 +61,11 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 	}
 
 	claimFilter := execution.ClaimFilter{
-		ServiceID:      serviceID,
-		WorkerID:       workerID,
-		Queue:          queue,
-		ExecutorTypes:  req.ExecutorTypes,
-		Activities:     req.Activities,
-		LeaseDuration:  l.leaseDuration,
-		DefaultTimeout: l.defaultTimeout,
+		ServiceID:     serviceID,
+		WorkerID:      workerID,
+		Queue:         queue,
+		LeaseDuration: l.leaseDuration,
 	}
-
-	// Subscribe for in-memory queue wakeups
-	notifyCh, cancelSub := l.notifier.Subscribe(queue)
-	defer cancelSub()
 
 	deadline := time.Now().Add(waitTimeout)
 
@@ -138,40 +76,21 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 			return nil, err
 		}
 		if res != nil {
-			var actName string
-			if res.StepExecution.ActivityName != nil {
-				actName = *res.StepExecution.ActivityName
-			}
-			stepType := string(res.StepExecution.Type)
-			payload := res.StepExecution.Config
-			if res.StepDefinition != nil {
-				stepType = string(res.StepDefinition.Type)
-				payload = res.StepDefinition.Config
-			}
-			timeoutSec := res.StepExecution.TimeoutSeconds
-			if timeoutSec <= 0 && l.defaultTimeout > 0 {
-				timeoutSec = int((l.defaultTimeout - 1) / time.Second) + 1
-			}
-			if timeoutSec <= 0 {
-				timeoutSec = 15
-			}
 			return &ClaimTaskResponse{
-				StepExecutionID:     res.StepExecution.ID,
 				TaskID:              res.StepExecution.ID,
 				WorkflowExecutionID: res.StepExecution.WorkflowExecutionID,
 				StepID:              res.StepExecution.StepID,
-				Type:                stepType,
-				TaskQueue:           res.StepExecution.TaskQueue,
-				ActivityName:        actName,
+				Queue:               res.StepExecution.Queue,
+				Activity:            res.StepExecution.Activity,
 				Attempt:             res.StepExecution.Attempt,
 				IsCompensation:      res.StepExecution.IsCompensation,
-				TimeoutSeconds:      timeoutSec,
+				TimeoutSeconds:      res.StepExecution.TimeoutSeconds,
 				Deadline:            res.Deadline.UTC().Format(time.RFC3339Nano),
 				HeartbeatIntervalMS: l.heartbeatInterval.Milliseconds(),
 				LeaseToken:          res.LeaseToken,
 				LeaseExpiresAt:      res.LeaseExpiresAt.UTC().Format(time.RFC3339Nano),
 				LeaseDurationMS:     res.LeaseDuration.Milliseconds(),
-				Payload:             payload,
+				Input:               res.StepExecution.Input,
 			}, nil
 		}
 
@@ -195,9 +114,6 @@ func (l *workerLogic) ClaimTask(ctx context.Context, serviceID string, req Claim
 		case <-ctx.Done():
 			timer.Stop()
 			return nil, ctx.Err()
-		case <-notifyCh:
-			timer.Stop()
-			// Immediate wakeup on queue activity! Loop around and claim.
 		case <-timer.C:
 			// Interval elapsed, loop and try claiming.
 		}
@@ -295,90 +211,4 @@ func (l *workerLogic) FailTask(ctx context.Context, serviceID, taskID string, re
 	}
 
 	return &FailResponse{Accepted: true}, nil
-}
-
-func (l *workerLogic) ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error) {
-	trimmedWorkerID := strings.TrimSpace(workerID)
-	if trimmedWorkerID == "" {
-		return nil, nil, errdefs.ErrEmptyWorkerID
-	}
-	return l.execRepo.ClaimPending(ctx, trimmedWorkerID, l.leaseDuration)
-}
-
-func (l *workerLogic) Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error {
-	trimmedExecID := strings.TrimSpace(stepExecutionID)
-	if trimmedExecID == "" {
-		return errdefs.ErrEmptyStepExecutionID
-	}
-	trimmedWorkerID := strings.TrimSpace(workerID)
-	if trimmedWorkerID == "" {
-		return errdefs.ErrEmptyWorkerID
-	}
-	return l.execRepo.Heartbeat(ctx, trimmedExecID, trimmedWorkerID, l.leaseDuration)
-}
-
-func (l *workerLogic) StartHeartbeat(ctx context.Context, stepExecutionID string, workerID string, interval time.Duration) (func(), <-chan error) {
-	stopChan := make(chan struct{})
-	errChan := make(chan error, 1)
-	var once sync.Once
-
-	stop := func() {
-		once.Do(func() {
-			close(stopChan)
-		})
-	}
-
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-stopChan:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := l.Heartbeat(ctx, stepExecutionID, workerID); err != nil {
-					select {
-					case errChan <- err:
-					default:
-					}
-					return
-				}
-			}
-		}
-	}()
-
-	return stop, errChan
-}
-
-func (l *workerLogic) CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error {
-	trimmedExecID := strings.TrimSpace(stepExecutionID)
-	if trimmedExecID == "" {
-		return errdefs.ErrEmptyStepExecutionID
-	}
-	trimmedWorkerID := strings.TrimSpace(workerID)
-	if trimmedWorkerID == "" {
-		return errdefs.ErrEmptyWorkerID
-	}
-	if len(output) > 0 {
-		trimmedOutput := bytes.TrimSpace(output)
-		if len(trimmedOutput) > 0 && !bytes.Equal(trimmedOutput, []byte("null")) && !json.Valid(output) {
-			return errdefs.ErrInvalidStepOutput
-		}
-	}
-	return l.execRepo.CompleteStep(ctx, trimmedExecID, trimmedWorkerID, output)
-}
-
-func (l *workerLogic) FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error {
-	trimmedExecID := strings.TrimSpace(stepExecutionID)
-	if trimmedExecID == "" {
-		return errdefs.ErrEmptyStepExecutionID
-	}
-	trimmedWorkerID := strings.TrimSpace(workerID)
-	if trimmedWorkerID == "" {
-		return errdefs.ErrEmptyWorkerID
-	}
-	return l.execRepo.FailStep(ctx, trimmedExecID, trimmedWorkerID, errMsg)
 }

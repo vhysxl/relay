@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/vhysxl/relay/internal/execution"
-	"github.com/vhysxl/relay/internal/step"
 )
 
 type Repository interface {
@@ -14,30 +13,21 @@ type Repository interface {
 	HeartbeatTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, duration time.Duration) (time.Time, time.Duration, error)
 	CompleteTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, output json.RawMessage) error
 	FailTask(ctx context.Context, serviceID, stepExecID, workerID, leaseToken string, errMsg string, retryable bool) error
-	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
-
-	ClaimPending(ctx context.Context, workerID string, leaseDuration time.Duration) (*step.Step, *execution.StepExecution, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string, leaseDuration time.Duration) error
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
+	GetStepQueue(ctx context.Context, stepExecID string) (string, error)
 }
 
 type ClaimRequest struct {
-	WorkerID      string   `json:"worker_id"`
-	Queue         string   `json:"queue"`
-	ExecutorTypes []string `json:"executor_types"`
-	Activities    []string `json:"activities"`
-	WaitTimeoutMS *int     `json:"wait_timeout_ms"`
+	WorkerID      string `json:"worker_id"`
+	Queue         string `json:"queue"`
+	WaitTimeoutMS *int   `json:"wait_timeout_ms"`
 }
 
 type ClaimTaskResponse struct {
-	StepExecutionID     string          `json:"step_execution_id"`
 	TaskID              string          `json:"task_id"`
 	WorkflowExecutionID string          `json:"workflow_execution_id"`
 	StepID              string          `json:"step_id"`
-	Type                string          `json:"type"`
-	TaskQueue           string          `json:"task_queue"`
-	ActivityName        string          `json:"activity_name,omitempty"`
+	Queue               string          `json:"queue"`
+	Activity            string          `json:"activity"`
 	Attempt             int             `json:"attempt"`
 	IsCompensation      bool            `json:"is_compensation"`
 	TimeoutSeconds      int             `json:"timeout_seconds"`
@@ -46,7 +36,7 @@ type ClaimTaskResponse struct {
 	LeaseToken          string          `json:"lease_token"`
 	LeaseExpiresAt      string          `json:"lease_expires_at"`
 	LeaseDurationMS     int64           `json:"lease_duration_ms"`
-	Payload             json.RawMessage `json:"payload"`
+	Input               json.RawMessage `json:"input"`
 }
 
 type HeartbeatRequest struct {
@@ -90,12 +80,5 @@ type WorkerLogic interface {
 	HeartbeatTask(ctx context.Context, serviceID, taskID string, req HeartbeatRequest) (*HeartbeatResponse, error)
 	CompleteTask(ctx context.Context, serviceID, taskID string, req CompleteRequest) (*CompleteResponse, error)
 	FailTask(ctx context.Context, serviceID, taskID string, req FailRequest) (*FailResponse, error)
-	GetStepTaskQueue(ctx context.Context, stepExecID string) (string, error)
-	NotifyQueue(queue string)
-
-	ClaimNext(ctx context.Context, workerID string) (*step.Step, *execution.StepExecution, error)
-	Heartbeat(ctx context.Context, stepExecutionID string, workerID string) error
-	StartHeartbeat(ctx context.Context, stepExecutionID string, workerID string, interval time.Duration) (stop func(), errChan <-chan error)
-	CompleteStep(ctx context.Context, stepExecutionID string, workerID string, output json.RawMessage) error
-	FailStep(ctx context.Context, stepExecutionID string, workerID string, errMsg string) error
+	GetStepQueue(ctx context.Context, stepExecID string) (string, error)
 }

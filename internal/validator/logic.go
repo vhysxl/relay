@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -15,55 +14,15 @@ import (
 	"github.com/vhysxl/relay/pkg/util"
 )
 
-var routingIdentifierRegex = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-func validateRoutingIdentifier(val string) bool {
-	if len(val) < 1 || len(val) > 128 {
-		return false
+func validateTask(queue, activity string, input json.RawMessage) error {
+	if err := util.ValidateQueueName(queue); err != nil {
+		return err
 	}
-	return routingIdentifierRegex.MatchString(val)
-}
-
-func validateStepConfig(stepType step.StepType, config json.RawMessage) error {
-	var cfgMap map[string]json.RawMessage
-	if err := json.Unmarshal(config, &cfgMap); err != nil {
-		return errdefs.ErrInvalidStepConfig
+	if err := util.ValidateActivity(activity); err != nil {
+		return err
 	}
-
-	if qRaw, ok := cfgMap["queue"]; ok {
-		var q string
-		if err := json.Unmarshal(qRaw, &q); err != nil {
-			return errdefs.ErrInvalidQueueName
-		}
-		if q != "" && !validateRoutingIdentifier(q) {
-			return errdefs.ErrInvalidQueueName
-		}
-	}
-
-	if stepType == step.StepTypeActivity {
-		qRaw, ok := cfgMap["queue"]
-		if !ok {
-			return errdefs.ErrEmptyQueueName
-		}
-		var q string
-		if err := json.Unmarshal(qRaw, &q); err != nil || strings.TrimSpace(q) == "" {
-			return errdefs.ErrEmptyQueueName
-		}
-		if !validateRoutingIdentifier(q) {
-			return errdefs.ErrInvalidQueueName
-		}
-
-		actRaw, ok := cfgMap["activity"]
-		if !ok {
-			return errdefs.ErrEmptyActivityName
-		}
-		var act string
-		if err := json.Unmarshal(actRaw, &act); err != nil || strings.TrimSpace(act) == "" {
-			return errdefs.ErrEmptyActivityName
-		}
-		if !validateRoutingIdentifier(act) {
-			return errdefs.ErrInvalidActivityName
-		}
+	if len(input) > 0 && !json.Valid(input) {
+		return errdefs.ErrInvalidStepInput
 	}
 	return nil
 }
@@ -124,6 +83,10 @@ func (v *validator) ValidateAndNormalizeWorkflow(workflowReq *workflow.WorkflowR
 		if s.ID == "" {
 			return errdefs.ErrEmptyID
 		}
+		s.Input = util.NormalizeInput(s.Input)
+		if s.Compensation != nil {
+			s.Compensation.Input = util.NormalizeInput(s.Compensation.Input)
+		}
 		for j := range s.DependsOn {
 			s.DependsOn[j] = strings.TrimSpace(s.DependsOn[j])
 		}
@@ -159,21 +122,7 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 		}
 		idMap[stepID] = true
 
-		if s.Type == "" {
-			return errdefs.ErrEmptyStepType
-		}
-		if s.Type != step.StepTypeHTTP && s.Type != step.StepTypeMessage && s.Type != step.StepTypeActivity {
-			return errdefs.ErrInvalidStepType
-		}
-
-		if len(s.Config) == 0 {
-			return errdefs.ErrInvalidStepConfig
-		}
-		trimmedConfig := strings.TrimSpace(string(s.Config))
-		if trimmedConfig == "" || trimmedConfig == "null" || !json.Valid(s.Config) {
-			return errdefs.ErrInvalidStepConfig
-		}
-		if err := validateStepConfig(s.Type, s.Config); err != nil {
+		if err := validateTask(s.Queue, s.Activity, s.Input); err != nil {
 			return err
 		}
 
@@ -197,19 +146,10 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 			if s.Compensation.Timeout < 0 {
 				return errdefs.ErrCompensationTimeoutNegative
 			}
-			if s.Compensation.Type != step.StepTypeHTTP && s.Compensation.Type != step.StepTypeMessage && s.Compensation.Type != step.StepTypeActivity {
-				return errdefs.ErrInvalidCompensation
+			if err := validateTask(s.Compensation.Queue, s.Compensation.Activity, s.Compensation.Input); err != nil {
+				return fmt.Errorf("%w: %v", errdefs.ErrInvalidCompensation, err)
 			}
-			if len(s.Compensation.Config) == 0 {
-				return errdefs.ErrInvalidCompensation
-			}
-			trimmedComp := strings.TrimSpace(string(s.Compensation.Config))
-			if trimmedComp == "" || trimmedComp == "null" || !json.Valid(s.Compensation.Config) {
-				return errdefs.ErrInvalidCompensation
-			}
-			if err := validateStepConfig(s.Compensation.Type, s.Compensation.Config); err != nil {
-				return errdefs.ErrInvalidCompensation
-			}
+
 			if s.Compensation.Retry != nil {
 				if s.Compensation.Retry.MaxAttempts < 1 || s.Compensation.Retry.Backoff < 0 || s.Compensation.Retry.Multiplier < 0 || s.Compensation.Retry.MaxBackoff < 0 {
 					return errdefs.ErrInvalidRetryPolicy
@@ -302,10 +242,6 @@ func (v *validator) ValidateSteps(steps []step.Step) error {
 
 		cond, err := condition.ParseConditionWithLimits(s.When, v.maxDepth, v.maxNodes)
 		if err != nil {
-			return err
-		}
-
-		if err := condition.ValidateTree(cond, v.maxDepth, v.maxNodes); err != nil {
 			return err
 		}
 

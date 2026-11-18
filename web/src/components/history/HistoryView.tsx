@@ -40,7 +40,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         (i) =>
           (i.workflow_id && i.workflow_id.toLowerCase().includes(q)) ||
           (i.workflow_name && i.workflow_name.toLowerCase().includes(q)) ||
-          (i.name && i.name.toLowerCase().includes(q)) ||
           (i.id && i.id.toLowerCase().includes(q))
       )
     }

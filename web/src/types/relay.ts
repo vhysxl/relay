@@ -1,5 +1,3 @@
-export type StepType = 'http' | 'message' | string
-
 export type ExecutionStatus =
   | 'PENDING'
   | 'RUNNING'
@@ -13,14 +11,13 @@ export type ExecutionStatus =
 
 export interface RetryPolicy {
   max_attempts?: number
-  initial_interval?: number
-  max_interval?: number
-  backoff_coefficient?: number
+  backoff?: number
+  max_backoff?: number
+  multiplier?: number
 }
 
 export interface ConditionCheckDetail {
   ref: string
-  anchor?: string
   op: string
   expected?: any
   actual?: any
@@ -36,16 +33,20 @@ export interface ConditionEvaluationAudit {
   checks?: ConditionCheckDetail[]
 }
 
-export interface Step {
-  id: string
-  name: string
-  type: StepType
-  depends_on?: string[]
-  config?: any
-  when?: any
-  compensation?: Step
+export interface TaskDefinition {
+  queue: string
+  activity: string
+  input?: any
   retry?: RetryPolicy
   timeout?: number
+}
+
+export interface Step extends TaskDefinition {
+  id: string
+  name?: string
+  depends_on?: string[]
+  when?: any
+  compensation?: TaskDefinition
 }
 
 interface WorkflowMetadata {
@@ -96,18 +97,17 @@ export interface StepExecution {
   id?: string
   step_id: string
   name?: string
-  type: StepType
+  queue: string
+  activity: string
   status: ExecutionStatus
-  task_queue?: string
-  activity_name?: string
   attempt?: number
   max_attempts?: number
   attempts?: StepExecutionAttempt[]
   timeout_seconds?: number
   depends_on?: string[]
-  config?: any
+  input?: any
   when?: any
-  condition_evaluation?: ConditionEvaluationAudit | any
+  condition_evaluation?: ConditionEvaluationAudit
   output?: any
   error_message?: string
   is_compensation?: boolean
@@ -120,8 +120,6 @@ export interface Execution {
   id: string
   workflow_id: string
   workflow_name?: string
-  name?: string
-  type?: string
   status: ExecutionStatus
   context?: any
   error_message?: string

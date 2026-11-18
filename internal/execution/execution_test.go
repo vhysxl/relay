@@ -55,18 +55,6 @@ func (m *mockRepository) GetExecutionRequest(ctx context.Context, workflowName s
 	return nil, errdefs.ErrExecutionRequestNotFound
 }
 
-func (m *mockRepository) CreateExecution(ctx context.Context, exec *execution.WorkflowExecution) (*execution.WorkflowExecution, error) {
-	if m.executeFn != nil {
-		return m.executeFn(ctx, exec.WorkflowID, exec.Context)
-	}
-	return &execution.WorkflowExecution{
-		ID:         "exec-123",
-		WorkflowID: exec.WorkflowID,
-		Status:     execution.StatusRunning,
-		Context:    exec.Context,
-	}, nil
-}
-
 func (m *mockRepository) ListExecutions(ctx context.Context, limit, offset int) ([]execution.WorkflowExecution, error) {
 	if m.listExecutionsFn != nil {
 		return m.listExecutionsFn(ctx, limit, offset)
@@ -87,19 +75,19 @@ func (workflowReader) GetWorkflow(ctx context.Context, name string) (*workflow.W
 	if name == "unknown-wf" {
 		return nil, errdefs.ErrWorkflowNotFound
 	}
-	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+	return &workflow.Workflow{ID: name, Name: name, Steps: []step.Step{{ID: "step-1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}}, nil
 }
 
 func (workflowReader) GetWorkflowVersion(ctx context.Context, name string, version int) (*workflow.Workflow, error) {
 	if name == "unknown-wf" {
 		return nil, errdefs.ErrWorkflowNotFound
 	}
-	return &workflow.Workflow{ID: fmt.Sprintf("%s-v%d", name, version), Name: name, Version: version, Steps: []step.Step{{ID: "step-1", Type: step.StepTypeHTTP, Config: json.RawMessage("{}")}}}, nil
+	return &workflow.Workflow{ID: fmt.Sprintf("%s-v%d", name, version), Name: name, Version: version, Steps: []step.Step{{ID: "step-1", Queue: "orders", Input: json.RawMessage("{}"), Activity: "http.call"}}}, nil
 }
 
 func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 	repo := &mockRepository{}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 
 	// Missing / empty IdempotencyKey
 	_, _, err := logic.ExecuteWorkflow(context.Background(), "wf-1", nil)
@@ -143,7 +131,7 @@ func TestExecutionLogic_ExecuteWorkflow_Validation(t *testing.T) {
 
 func TestExecutionLogic_ExecuteWorkflow_Success(t *testing.T) {
 	repo := &mockRepository{}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 
 	resp, replayed, err := logic.ExecuteWorkflow(context.Background(), "wf-123", &execution.ExecuteWorkflowRequest{
 		IdempotencyKey: "key-success-1",
@@ -173,7 +161,7 @@ func TestExecutionLogic_ListExecutions(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 
 	// Test pagination normalization
 	execs, err := logic.ListExecutions(context.Background(), 20, 10)
@@ -209,7 +197,7 @@ func TestExecutionLogic_GetExecution(t *testing.T) {
 			return nil, errdefs.ErrExecutionNotFound
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 
 	// Empty ID
 	_, err := logic.GetExecution(context.Background(), "")
@@ -251,7 +239,7 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Trigger with {"context": {"amount": 50000}}
@@ -288,8 +276,8 @@ func TestExecutionHandler_ExecuteWorkflow(t *testing.T) {
 	recRaw := httptest.NewRecorder()
 
 	handler.ExecuteWorkflow(recRaw, reqRaw)
-	if recRaw.Code != http.StatusCreated {
-		t.Fatalf("expected status 201 for raw body, got %d", recRaw.Code)
+	if recRaw.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400 for raw body, got %d", recRaw.Code)
 	}
 
 	// 3. Trigger with empty body
@@ -336,7 +324,7 @@ func TestExecutionHandler_ListExecutions(t *testing.T) {
 			}, nil
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// With query parameters ?limit=25&offset=50
@@ -369,7 +357,7 @@ func TestExecutionHandler_GetExecution(t *testing.T) {
 			return nil, errdefs.ErrExecutionNotFound
 		},
 	}
-	logic := execution.NewExecutionLogic(repo, workflowReader{})
+	logic := execution.NewExecutionLogic(repo, workflowReader{}, 15*time.Second)
 	handler := execution.NewExecutionHandler(logic, &config.Config{})
 
 	// 1. Found -> 200 OK
