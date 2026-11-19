@@ -81,6 +81,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return { avgDurationText: avg, p95DurationText: p95 }
   }, [executions])
 
+  // 4. Recent Issues & Active Executions (exclude COMPLETED workflows)
+  const recentProblematicExecutions = useMemo(() => {
+    return executions.filter((e) => e.status !== 'COMPLETED').slice(0, 5)
+  }, [executions])
+
   return (
     <div className="space-y-4">
       {/* Page Header Block */}
@@ -276,12 +281,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Two Column Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Recent Executions */}
+        {/* Left: Recent Executions (Excluded COMPLETED) */}
         <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
           <div className="px-5 py-3 bg-[#181818] border-b border-neutral-800 flex items-center justify-between">
-            <h2 className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
-              Recent Executions
-            </h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+                Recent Executions
+              </h2>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-neutral-800 text-neutral-400 border border-neutral-700/60">
+                Issues & Active
+              </span>
+            </div>
             <button
               onClick={() => onNavigate('history')}
               className="px-2.5 py-1 text-xs font-medium text-neutral-300 hover:text-neutral-100 bg-[#141414] hover:bg-neutral-800 border border-neutral-700/80 rounded-md shadow-2xs inline-flex items-center gap-1 transition cursor-pointer outline-none focus:outline-none focus:ring-0"
@@ -292,12 +302,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="divide-y divide-neutral-800/80">
-            {executions.length === 0 ? (
+            {recentProblematicExecutions.length === 0 ? (
               <div className="px-5 py-10 text-center text-neutral-500 text-xs">
-                No executions recorded yet.
+                {executions.length > 0 ? (
+                  <div className="space-y-1">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
+                    <p className="font-semibold text-neutral-200">All recent workflows succeeded</p>
+                    <p className="text-[11px] text-neutral-500">
+                      No failed, compensated, or running executions to display.
+                    </p>
+                  </div>
+                ) : (
+                  <span>No executions recorded yet.</span>
+                )}
               </div>
             ) : (
-              executions.slice(0, 5).map((exec) => (
+              recentProblematicExecutions.map((exec) => (
                 <div
                   key={exec.id}
                   onClick={() => onNavigate('execution-detail', exec.id)}
