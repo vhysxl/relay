@@ -17,6 +17,9 @@ import {
   Minus,
   Edit3,
   Code2,
+  Eye,
+  EyeOff,
+  CheckCircle2,
 } from 'lucide-react'
 import type {
   Workflow,
@@ -46,10 +49,22 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
   // Latest workflow definition and executions
   const [workflow, setWorkflow] = useState<Workflow | null>(null)
   const [recentExecutions, setRecentExecutions] = useState<Execution[]>([])
+  const [hideSuccessfulExecutions, setHideSuccessfulExecutions] = useState<boolean>(true)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'canvas' | 'list' | 'raw' | 'history'>('canvas')
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
+
+  const completedExecutionsCount = useMemo(() => {
+    return recentExecutions.filter((e) => e.status === 'COMPLETED').length
+  }, [recentExecutions])
+
+  const displayedExecutions = useMemo(() => {
+    if (hideSuccessfulExecutions) {
+      return recentExecutions.filter((e) => e.status !== 'COMPLETED')
+    }
+    return recentExecutions
+  }, [recentExecutions, hideSuccessfulExecutions])
 
   // Version History state
   const [versions, setVersions] = useState<WorkflowSummary[]>([])
@@ -969,18 +984,70 @@ export const WorkflowDetailView: React.FC<WorkflowDetailViewProps> = ({
       {/* Recent Executions Table for this Workflow */}
       <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden">
         <div className="px-5 py-3 bg-[#181818] border-b border-neutral-800 flex items-center justify-between">
-          <h2 className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
-            Recent Executions
-          </h2>
+          <div className="flex items-center space-x-2">
+            <h2 className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
+              Recent Executions
+            </h2>
+            <span className="text-neutral-500 font-mono text-[11px]">
+              ({displayedExecutions.length} of {recentExecutions.length})
+            </span>
+          </div>
+
+          {recentExecutions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHideSuccessfulExecutions(!hideSuccessfulExecutions)}
+              className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer outline-none ${
+                hideSuccessfulExecutions
+                  ? 'bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/50'
+                  : 'bg-neutral-800 border-neutral-700/80 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
+              }`}
+              title={
+                hideSuccessfulExecutions
+                  ? 'Click to show all executions'
+                  : 'Click to hide successful executions'
+              }
+            >
+              {hideSuccessfulExecutions ? (
+                <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Eye className="w-3.5 h-3.5 text-neutral-400" />
+              )}
+              <span>{hideSuccessfulExecutions ? 'Hide Successful' : 'Show All'}</span>
+              {completedExecutionsCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-900/60 text-amber-200">
+                  {completedExecutionsCount} hidden
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         <div className="divide-y divide-neutral-800/80">
-          {recentExecutions.length === 0 ? (
-            <div className="px-5 py-8 text-center text-neutral-500 text-xs">
-              No executions recorded for this workflow yet.
+          {displayedExecutions.length === 0 ? (
+            <div className="px-5 py-8 text-center text-neutral-400 text-xs">
+              {recentExecutions.length > 0 ? (
+                <div className="space-y-1">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
+                  <p className="font-semibold text-neutral-200">All recent executions succeeded</p>
+                  <p className="text-[11px] text-neutral-500">
+                    {completedExecutionsCount} successful execution
+                    {completedExecutionsCount > 1 ? 's are' : ' is'} hidden.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setHideSuccessfulExecutions(false)}
+                    className="mt-2 px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 text-xs transition cursor-pointer"
+                  >
+                    Show All Executions
+                  </button>
+                </div>
+              ) : (
+                <span>No executions recorded for this workflow yet.</span>
+              )}
             </div>
           ) : (
-            recentExecutions.map((exec) => (
+            displayedExecutions.map((exec) => (
               <div
                 key={exec.id}
                 onClick={() => onNavigateToExecution && onNavigateToExecution(exec.id)}

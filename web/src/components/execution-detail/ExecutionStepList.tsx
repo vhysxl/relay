@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -7,6 +7,9 @@ import {
   GitBranch,
   RotateCcw,
   AlertCircle,
+  Eye,
+  EyeOff,
+  CheckCircle2,
 } from 'lucide-react'
 import type { Execution, StepExecution } from '../../types/relay'
 import { StatusBadge } from '../common/StatusBadge'
@@ -52,6 +55,62 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
     }
   }, [steps])
 
+  // Check if workflow execution experienced failure, compensation, or rollback
+  const hasIssues = useMemo(() => {
+    return (
+      execution.status === 'FAILED' ||
+      execution.status === 'COMPENSATED' ||
+      execution.status === 'COMPENSATION_FAILED' ||
+      execution.status === 'COMPENSATING' ||
+      steps.some(
+        (s) =>
+          s.status === 'FAILED' ||
+          s.status === 'COMPENSATION_FAILED' ||
+          s.status === 'COMPENSATED' ||
+          s.is_compensation ||
+          Boolean(s.error_message)
+      )
+    )
+  }, [execution.status, steps])
+
+  // By default, if the workflow experienced issues/rollbacks, hide clean successful steps so the user focuses on failures and compensations
+  const [hideSuccessfulSteps, setHideSuccessfulSteps] = useState<boolean>(() => hasIssues)
+
+  useEffect(() => {
+    setHideSuccessfulSteps(hasIssues)
+  }, [hasIssues, execution.id])
+
+  // Filter steps: hide forward steps that are COMPLETED and were NOT rolled back/compensated
+  const { visibleForwardSteps, hiddenSuccessfulCount } = useMemo(() => {
+    if (!hideSuccessfulSteps) {
+      return { visibleForwardSteps: forwardSteps, hiddenSuccessfulCount: 0 }
+    }
+
+    const visible: StepExecution[] = []
+    let hiddenCount = 0
+
+    forwardSteps.forEach((step) => {
+      const compensation = compensationMap.get(step.step_id)
+      const hasRollback =
+        Boolean(compensation) &&
+        (compensation!.status === 'COMPENSATED' ||
+          compensation!.status === 'COMPENSATING' ||
+          compensation!.status === 'FAILED' ||
+          compensation!.status === 'COMPENSATION_FAILED')
+
+      // Clean success means the step succeeded and was never rolled back / compensated
+      const isCleanSuccess = step.status === 'COMPLETED' && !hasRollback
+
+      if (isCleanSuccess) {
+        hiddenCount++
+      } else {
+        visible.push(step)
+      }
+    })
+
+    return { visibleForwardSteps: visible, hiddenSuccessfulCount: hiddenCount }
+  }, [forwardSteps, compensationMap, hideSuccessfulSteps])
+
   // Expanded row state (auto-expand first failed step or first step)
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
@@ -68,6 +127,25 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
     }
     return initial
   })
+
+  // Auto-expand first visible step if the currently expanded step was hidden
+  useEffect(() => {
+    if (visibleForwardSteps.length > 0) {
+      const anyExpanded = visibleForwardSteps.some((s) => expandedRows[s.step_id])
+      if (!anyExpanded) {
+        const failed = visibleForwardSteps.find(
+          (s) =>
+            s.status === 'FAILED' ||
+            s.status === 'COMPENSATION_FAILED' ||
+            Boolean(s.error_message)
+        )
+        const target = failed || visibleForwardSteps[0]
+        if (target) {
+          setExpandedRows((prev) => ({ ...prev, [target.step_id]: true }))
+        }
+      }
+    }
+  }, [visibleForwardSteps])
 
   // Copy state per step
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
@@ -124,6 +202,60 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
 
   return (
     <div className="bg-[#141414] rounded-lg border-[1.5px] border-neutral-800 shadow-xs overflow-hidden select-none">
+      {/* Step List Controls Toolbar */}
+      <div className="px-5 py-2.5 bg-[#161616] border-b border-neutral-800 flex items-center justify-between text-xs">
+        <div className="flex items-center space-x-2">
+          <span className="font-semibold text-neutral-300">Execution Steps</span>
+          <span className="text-neutral-500 font-mono text-[11px]">
+            ({visibleForwardSteps.length} of {forwardSteps.length} shown)
+          </span>
+        </div>
+
+        {forwardSteps.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setHideSuccessfulSteps(!hideSuccessfulSteps)}
+            className={`px-2.5 py-1 rounded-md border text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer outline-none ${
+              hideSuccessfulSteps
+                ? 'bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/50'
+                : 'bg-neutral-800 border-neutral-700/80 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
+            }`}
+            title={hideSuccessfulSteps ? 'Click to show all steps' : 'Click to hide successful steps'}
+          >
+            {hideSuccessfulSteps ? (
+              <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <Eye className="w-3.5 h-3.5 text-neutral-400" />
+            )}
+            <span>{hideSuccessfulSteps ? 'Hide Successful' : 'Show All Steps'}</span>
+            {hiddenSuccessfulCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-900/60 text-amber-200">
+                {hiddenSuccessfulCount} hidden
+              </span>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Hidden steps notification banner */}
+      {hiddenSuccessfulCount > 0 && hideSuccessfulSteps && (
+        <div className="px-5 py-2 bg-neutral-900/80 border-b border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">
+          <span className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+            <span>
+              {hiddenSuccessfulCount} successful step{hiddenSuccessfulCount > 1 ? 's' : ''} hidden — focusing on failures and rollbacks.
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setHideSuccessfulSteps(false)}
+            className="text-neutral-300 hover:text-white underline text-[11px] cursor-pointer"
+          >
+            Show all steps
+          </button>
+        </div>
+      )}
+
       {/* Table Header: Columns */}
       <div className="grid grid-cols-12 gap-3 items-center px-5 py-3.5 bg-[#181818] border-b border-neutral-800 text-xs sm:text-sm font-bold text-neutral-400 uppercase tracking-wider">
         <div className="col-span-5 sm:col-span-4">Step Name</div>
@@ -137,17 +269,33 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
 
       {/* Step Rows */}
       <div className="divide-y divide-neutral-800/80">
-        {forwardSteps.map((step, idx) => {
-          const isExpanded = Boolean(expandedRows[step.step_id])
-          const timing = getStepTiming(step)
-          const compensation = compensationMap.get(step.step_id)
-          const compTiming = compensation ? getStepTiming(compensation) : null
-          const stepNumber = String(idx + 1).padStart(2, '0')
-          const stepError =
-            step.error_message ||
-            (step.status === 'FAILED' || step.status === 'COMPENSATION_FAILED'
-              ? execution.error_message
-              : null)
+        {visibleForwardSteps.length === 0 && forwardSteps.length > 0 ? (
+          <div className="p-8 text-center space-y-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 mx-auto" />
+            <p className="text-xs font-semibold text-neutral-200">
+              All {forwardSteps.length} steps completed successfully.
+            </p>
+            <button
+              type="button"
+              onClick={() => setHideSuccessfulSteps(false)}
+              className="mt-1 px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 text-xs transition cursor-pointer"
+            >
+              Show All Steps
+            </button>
+          </div>
+        ) : (
+          visibleForwardSteps.map((step, idx) => {
+            const isExpanded = Boolean(expandedRows[step.step_id])
+            const timing = getStepTiming(step)
+            const compensation = compensationMap.get(step.step_id)
+            const compTiming = compensation ? getStepTiming(compensation) : null
+            const originalIndex = forwardSteps.findIndex((f) => f.step_id === step.step_id)
+            const stepNumber = String((originalIndex >= 0 ? originalIndex : idx) + 1).padStart(2, '0')
+            const stepError =
+              step.error_message ||
+              (step.status === 'FAILED' || step.status === 'COMPENSATION_FAILED'
+                ? execution.error_message
+                : null)
 
           return (
             <div key={step.id || step.step_id || idx} className="transition">
@@ -479,7 +627,8 @@ export const ExecutionStepList: React.FC<ExecutionStepListProps> = ({ execution 
               )}
             </div>
           )
-        })}
+        })
+      )}
 
         {/* Orphan Compensations (if any standalone compensation step exists without a parent forward step) */}
         {orphanCompensations.map((step, idx) => {

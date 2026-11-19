@@ -9,6 +9,8 @@ interface HistoryTableProps {
   totalCount?: number
   isLoading?: boolean
   searchTerm?: string
+  hiddenCompletedCount?: number
+  onShowCompleted?: () => void
   onSelectExecution: (id: string) => void
 }
 
@@ -17,6 +19,8 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
   totalCount,
   isLoading = false,
   searchTerm = '',
+  hiddenCompletedCount = 0,
+  onShowCompleted,
   onSelectExecution,
 }) => {
   const total = totalCount ?? executions.length
@@ -57,9 +61,29 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
             ) : executions.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-5 py-12 text-center text-neutral-500">
-                  {searchTerm
-                    ? `No execution history matches "${searchTerm}".`
-                    : 'No execution history found.'}
+                  {searchTerm ? (
+                    `No execution history matches "${searchTerm}".`
+                  ) : hiddenCompletedCount > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-neutral-300">
+                        No failed or compensated executions found.
+                      </p>
+                      <p className="text-[11px] text-neutral-500">
+                        {hiddenCompletedCount} successful execution{hiddenCompletedCount > 1 ? 's are' : ' is'} hidden.
+                      </p>
+                      {onShowCompleted && (
+                        <button
+                          type="button"
+                          onClick={onShowCompleted}
+                          className="mt-1 px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded border border-neutral-700 text-xs transition cursor-pointer"
+                        >
+                          Show All Executions
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    'No execution history found.'
+                  )}
                 </td>
               </tr>
             ) : (
